@@ -1,0 +1,12 @@
+# Scoped ruff config for the trace_harness package. Shares the python/ uv project
+# + venv; mirrors perf_harness / eval_harness lint profile.
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[lint.per-file-ignores]
+# 内嵌 JS/CSS 字符串是数据不是 Python 代码：noqa 写进字符串会变成页面内容，
+# 按 Python 行宽 reflow 又会破坏前端代码可读性，故对该文件豁免行宽
+"view/interactive.py" = ["E501"]

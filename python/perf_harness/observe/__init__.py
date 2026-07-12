@@ -1,0 +1,27 @@
+"""Probe families — the observation extension point.
+
+``base`` holds the ABC + the source-agnostic probes (client, http /metrics
+scrape); ``k8s`` holds the K8s-family probes. Adding a new Source family = a new
+module here. Import probes from the package root (``from perf_harness.observe
+import KubectlTopProbe``) — these are the stable names.
+"""
+
+from __future__ import annotations
+
+from perf_harness.observe.base import ClientProbe as ClientProbe
+from perf_harness.observe.base import ClientStats as ClientStats
+from perf_harness.observe.base import DeriveSpec as DeriveSpec
+from perf_harness.observe.base import FamilySpec as FamilySpec
+from perf_harness.observe.base import MetricsScrapeProbe as MetricsScrapeProbe
+from perf_harness.observe.base import Probe as Probe
+from perf_harness.observe.base import ProbeContext as ProbeContext
+from perf_harness.observe.base import ProbeStore as ProbeStore
+from perf_harness.observe.base import ScrapeSpec as ScrapeSpec
+from perf_harness.observe.base import observe_loop as observe_loop
+from perf_harness.observe.base import prom_sum as prom_sum
+from perf_harness.observe.base import prom_sum_by as prom_sum_by
+from perf_harness.observe.base import prom_sum_where as prom_sum_where
+from perf_harness.observe.k8s import KubectlTopProbe as KubectlTopProbe
+from perf_harness.observe.k8s import PerWorkerRSSProbe as PerWorkerRSSProbe
+from perf_harness.observe.k8s import ResourceLimitsProbe as ResourceLimitsProbe
+from perf_harness.observe.k8s import RestartProbe as RestartProbe

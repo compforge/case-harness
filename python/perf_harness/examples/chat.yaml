@@ -1,0 +1,84 @@
+# chat-server sizing sweep against an already-deployed dev pod, observed via k8s
+# + /metrics. Run from your consumer project (the one that does
+# register_workload("chat", ...)). Semantics live in the docs — this file is a
+# template to copy, not a manual:
+#   load shape / breaker / graceful stop → docs/load-model-redesign.md
+#   SLO refs / labels / skip semantics   → docs/result-semantics.md + metric-model.md
+name: chat-sizing                 # experiment name → runs/<name>/<run_id>/ (runs accumulate)
+
+subject:                          # 压谁 + 怎么到达；不写 provisioner = 直连已部署服务
+  name: chat-server
+  base_url: http://chat-server.vke-system.svc:8001   # chat httpPort = 8001 (also serves /metrics)
+  headers: {}
+  k8s:                            # enables top/rss/restart/limits probes + metrics prefix
+    kubeconfig: ~/.kube/a-dev
+    namespace: vke-system
+    app_label: app.kubernetes.io/name=chat-server
+    metrics_prefix: chat          # starlette_exporter prefix → chat_requests_total
+    metrics_port: 8001
+  # --- 让 harness 自己扫资源档时才配（resources 条目会被真实施加）---
+  # provisioner:
+  #   type: helm
+  #   release: chat-server
+  #   chart_path: ~/path/to/chat-server/manifests/chat-server
+  #   base_values: ~/path/to/chat-server/manifests/chat-server/values.yaml
+
+resources:                        # 资源档（网格第一轴）；无 provisioner 时仅标注 trial
+  - { workers: 2, memory: 2Gi }
+  - { workers: 4, memory: 2Gi }
+
+workload:                         # 协议适配 — register_workload("chat", ...) in your project
+  name: chat
+  path: /api/v1/chats/            # chat-server SSE entry (POST, text/event-stream)
+  headers_file: ./headers.json    # X-Proxy-Tenant-ID / X-Proxy-User-ID
+  timeout: 180                    # one agent answer can take tens of seconds
+
+# 混合流量：简单/复杂问题资源成本差很多，报告按 facet 拆开看；weight 是本实验的用法
+facets:
+  difficulty: { values: [simple, complex], ordered: true }
+cases:
+  - { id: hello,  weight: 70, facets: {difficulty: simple},  input_file: ./q_hello.json }
+  - { id: caocao, weight: 30, facets: {difficulty: complex}, input_file: ./q_caocao.json }
+
+load:                             # 负载档（网格第二轴）
+  model: closed                   # closed = N 并发用户; open = 到达率 rps（配 max_inflight）
+  levels: [5, 10, 20, 40]         # 容量扫描：每档一个 ramp→hold arm
+  ramp_s: 20
+  steady_s: 120
+  # pacing: { kind: constant_pacing, secs: 1 }   # closed 的 think-time（省略=背靠背）
+  # abort_on_error_rate: 0.10     # within-trial 熔断：这一档压崩了就停它（safety net）
+  # graceful_stop_s: 30           # 停时 drain 在途的窗口（0 = 硬停）
+  # --- 或显式 shape（单 arm，可阶梯/尖刺）---
+  # model: open
+  # max_inflight: 200
+  # stages:
+  #   - { ramp_to: 10, over_s: 30 }
+  #   - { hold: 10, for_s: 120 }
+
+observe:                          # 资源观测：self + 下游同一形状；省 k8s 的条目 = subject
+  - name: chat
+    probes: [metrics, top, rss, restart, limits]
+    # scrape:                     # 拉任意 Prometheus 族进同一张 metric 表
+    #   - { from: gen_ai_server_time_to_first_token_seconds_sum,   as: sse_ttft_sum, unit: s }
+    #   - { from: gen_ai_server_time_to_first_token_seconds_count, as: sse_ttft_n }
+  - { name: planit,   k8s: { kubeconfig: ~/.kube/a-dev, namespace: vke-system, app_label: app.kubernetes.io/name=planit-server }, probes: [top, limits] }
+  - { name: executor, k8s: { kubeconfig: ~/.kube/a-dev, namespace: vke-system, app_label: app.kubernetes.io/name=agent-executor }, probes: [top, limits] }
+  # 下游服务的 /metrics 同样可抓：probes 加 metrics + 给 metrics_url
+  # - { name: planit, k8s: {...}, probes: [metrics, top],
+  #     metrics_url: "http://planit-server.vke-system.svc:8000/metrics" }
+
+# derived:                        # 两个 counter 族的比值，reduce 期按 label 自动 join
+#   - { as: sse_ttft_mean_s, ratio: [metrics.sse_ttft_sum, metrics.sse_ttft_n], unit: s,
+#       description: "server-side mean TTFT" }
+
+observe_interval_s: 5
+runs_dir: ./runs                  # each run → runs/chat-sizing/<run_id>/
+
+# slo:                            # run 级门（三态，skip≠pass）→ CI 退出码 + SLO-aware 容量
+#   - { metric: error_rate,        lt: 0.01 }
+#   - { metric: drop_rate,         lt: 0.01 }
+#   - { metric: p99_ms,            lt: 5000, level: 40 }
+#   - { metric: ttft_ms.p95,       lt: 2000 }
+#   - { metric: 'p99_ms{difficulty="complex"}',     lt: 30000 }
+#   - { metric: 'top.cpu_m{service="planit"}.peak', lt: 1500 }
+# abort_on_fail: false            # between-trial SLO 门：一档压完不达标即停 sweep

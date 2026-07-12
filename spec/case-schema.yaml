@@ -1,0 +1,147 @@
+# canonical case 文件 schema（语言无关，可分享的交换格式）
+#
+# 一个 case 文件 = 一个 case 集：素材（sources）+ facet 词表 + cases。它是**可积累、可分享**的资产：
+# 把它给别人、或拿别人的来驱动你自己的 e2e/eval/perf——所以格式带版本（`schema_version`）。
+# case 是"如何给系统发请求"的纯数据描述，与判定解耦、与环境解耦：
+#   - 公共段（id / desc / input / facets / requires）三面共用；
+#   - 判定段（judge.<面>）按面分区、全部可选，字段各面自治；缺某面 = 该面只观测不判定。
+# 之所以能分享，全靠这些解耦：case 无环境 / 无实验参数 / 只声明素材不 provision——见 conventions.md「Case 规范」。
+#
+# 唯一类型：本 schema 的中立模型落在 `python/common/case.py`（CaseSet/Case/Source + load/validate/
+# case_hash），是**唯一的 case 类型**——三面（含 e2e）的行为各自直接读它（runner/solver/workload +
+# 读自己那面 judge），不存在 per-harness Case 类。`@case` 注解是 canonical case 的一种 **co-located
+# 编写前端**（贴 handler、便于发现 + 漂移检测），产出/链接 canonical case；e2e 也可直接吃 case.yaml。
+#
+# 与输出契约对称：判定面 `judge.<面>` 的 key = `common.Face`（e2e/eval/perf），与 `common/verdict.py`
+# 的 `harness` 字段共用；`case.id` == `verdict.case_id`，是输入→输出、跨 run、跨面的对齐主键。
+# 一份 case 一次执行，每个声明了 `judge.<面>` 的面各产一行 verdict（缺的面只观测）。
+
+type: object
+required: [caseset, cases]
+properties:
+
+  schema_version:
+    type: integer
+    default: 1
+    description: 本文件依据的 case schema 版本，供分享时跨版本容错；缺省 = 1
+
+  caseset:
+    type: string
+    description: case 集标识（kebab-case）；素材 provision 的复用 key 由素材内容 hash 派生，不由名字派生
+
+  focus:
+    type: string
+    description: 一句话描述这个 case 集覆盖什么
+
+  # --- facet 词表（分类轴的 schema，防自由字符串腐烂）---
+  facets:
+    type: object
+    description: facet 名 → 取值约束；case.facets 里出现的每个 key 必须在此声明
+    additionalProperties:
+      type: object
+      properties:
+        values:
+          type: array
+          items: { type: string }
+          description: 约束词表；与 open 二选一必填
+        ordered:
+          type: boolean
+          default: false
+          description: values 顺序有序（报告按 easy < medium < hard 排，而不是字典序）
+        open:
+          type: boolean
+          default: false
+          description: 接受任意取值（长尾标签的逃生舱）
+
+  # --- 素材（case 依赖的前置资源定义，与 case 一起积累、进 git）---
+  sources:
+    type: array
+    description: 素材本体；provision（上传/建库/复用/GC）是 experiment 运行时的事，不写在这里
+    items:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: 素材标识；case.requires 与 judge 段按此名引用
+        uri:
+          type: string
+          description: 内容指针（相对 case 文件的路径，或 URL）；与 content 二选一
+        content:
+          type: string
+          description: 内联文本内容；与 uri 二选一
+        meta:
+          type: object
+          description: SUT 特定提示（resource_type 等），框架透传
+
+  # --- cases ---
+  cases:
+    type: array
+    items:
+      type: object
+      required: [id, input]
+      properties:
+
+        # 身份：跨 run / 跨 harness 对齐结果的主键
+        id:
+          type: string
+          description: 稳定标识，集内唯一，一旦设定不可变；语义变了换新 id，不复用旧 id
+        desc:
+          type: string
+          description: 一句话描述场景（给人读的）
+
+        # 输入：唯一的公共核心，"如何发请求"
+        input:
+          type: object
+          description: >-
+            协议无关的请求描述（query / body / headers / ...），由各 harness 的
+            协议适配器（runner / solver / workload）解释。不含环境（base_url/auth/模型名
+            归 experiment config）、不含实验参数（weight/并发/重复次数归 experiment）。
+
+        # 分类：报告 pivot 的公共语言
+        facets:
+          type: object
+          description: key=value 分类维度；key 必须在顶层 facets 声明
+          additionalProperties: { type: string }
+
+        # 依赖声明：本 case 需要哪些素材存在（按名引用，声明式）
+        requires:
+          type: array
+          items: { type: string }
+          description: 引用 sources[].name；空 = 依赖整个 case 集的已选素材。只声明、不执行准备。
+
+        # 判定：按面分区，全部可选；字段由各 harness 自治，下面仅列当前已知形状
+        judge:
+          type: object
+          properties:
+            e2e:
+              type: object
+              description: 对错（确定性断言）
+              properties:
+                assert:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      path: { type: string }
+                      op:
+                        type: string
+                        enum: [eq, not_empty, contains, matches, in, gt, gte, within]
+                      value: {}
+            eval:
+              type: object
+              description: 效果（非确定性评分的契约字段）
+              properties:
+                expected_behavior:
+                  type: string
+                  enum: [answer, refuse]
+                ground_truth:
+                  type: string
+                  description: ground-truth 答案；refuse case 不设
+                evidence_sources:
+                  type: array
+                  items: { type: string }
+                  description: 期望引用的素材名（gold ⊆ requires ⊆ 集内素材）
+            perf:
+              type: object
+              description: 表现面通常无 per-case 判定（靠 run 级 SLO）；保留分区占位

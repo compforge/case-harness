@@ -1,0 +1,27 @@
+# A structured e2e case set — 判定即数据.
+#
+# The judgment lives in `judge.e2e.assert` AS DATA ({path, op, value}), not in a hand-written
+# pytest body. `common.load_caseset` parses this into `common.Case`s; `e2e_harness.engine`
+# fires each `input` through a runner (protocol adapter) and runs the asserts → a Verdict.
+# No scaffold, no per-case class — the case file is the whole contract.
+caseset: note
+
+cases:
+  - id: create_happy
+    desc: 合法创建 → 201 + 返回非空 id + 回显 name
+    input: { method: POST, path: /note, body: { name: demo } }
+    judge:
+      e2e:
+        assert:
+          - { path: status, op: eq, value: 201 }
+          - { path: body.id, op: not_empty }
+          - { path: body.name, op: eq, value: demo }
+
+  - id: create_missing_name
+    desc: 缺 name → 400 + 预期错误码（负路径，e2e 的主场）
+    input: { method: POST, path: /note, body: {} }
+    judge:
+      e2e:
+        assert:
+          - { path: status, op: eq, value: 400 }
+          - { path: body.code, op: eq, value: InvalidArgument }

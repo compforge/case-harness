@@ -1,0 +1,158 @@
+# verdict.json 文件 schema（语言无关，跨 harness 统一出口）
+#
+# 四类 harness（e2e / eval / perf / trace）每跑一次 run，都在自己的 run 目录里产出一份
+# 形状一致的 verdict.json —— 这是 devloop 等消费方"读 verdict 自纠偏"的唯一契约。
+# 富产物（results.csv / run.json / junit.xml / report）不进 verdict，由 artifact_paths
+# 指过去；verdict 只承载"判定结论 + 对齐用的最小结构"。
+#
+# 落盘位置（见 conventions.md「Run 产物与 verdict 出口」）：
+#   runs/<scope>/<run-id>/verdict.json
+#   - scope ：harness 中立的运行单元名。eval/perf = experiment 名；e2e = 套件/服务名。
+#   - run-id：scope 内一次 run 的唯一标识；派生方式各 harness 自治
+#             （eval 默认 experiment_hash、perf 用 run.json 的 run_id …）。
+#
+# 设计原则：
+#   1. 字段是"今天各家已能算出的交集 + 指针"，不要求任何 harness 新建判定能力。
+#      e2e 填 per-case pass/fail/error（pytest 三态）；eval 填 weighted_overall + per-cell；
+#      perf 的判定单元是 SLO check（对聚合 / facet 切片的断言），不是 case → 填 checks[]、cases 空；
+#      trace 同型：判定单元是 experiment 显式声明的 gate（对遥测分析产物的断言）→ 填 checks[]、cases 空，
+#      没声明 gates → status=skipped（Finding 是发现不是判定，永不直接变 verdict）。
+#   2. 两类判定单元各自成列；wire 只存这两份事实，不存派生计数：
+#      - cases[]：per-case 判定，key=case_id（跨 run / 跨 harness 对齐主键）。
+#      - checks[]：run 级断言门（perf SLO 是首个实例），与 case 正交的另一种单元。
+#      "多少 pass/fail"由消费方读时自己 fold cases[]/checks[]——不进 wire：固化的计数会与列表漂移，
+#      一个计数跨两种单元也会被含糊地相加（正是这两点让早期的 summary 字段不可靠）。
+#   3. 判定与观测解耦：缺某面的 per-case 判定 = 该面只观测不判定（沿用 case-schema 的「观测面 ⟂ 判定面」）。
+
+type: object
+required: [schema_version, harness, scope, run_id, status]
+properties:
+
+  schema_version:
+    type: integer
+    description: verdict schema 版本；不兼容变更才 +1（消费方据此容错）
+
+  harness:
+    type: string
+    enum: [e2e, eval, perf, trace]
+    description: 产出这份 verdict 的 harness
+
+  scope:
+    type: string
+    description: >-
+      harness 中立的运行单元名 = run 目录的第一段。eval/perf 为 experiment 名，
+      e2e 为套件/服务名。与 run_id 一起定位一次 run。
+
+  run_id:
+    type: string
+    description: scope 内一次 run 的唯一标识；派生方式各 harness 自治
+
+  # --- run 级结论（rollup）---
+  status:
+    type: string
+    enum: [pass, fail, error, skipped]
+    description: >-
+      整个 run 的滚合结论。pass=判定面全部达标；fail=有判定未达标；
+      error=执行/环境异常导致判不了；skipped=该 run 整体被跳过。
+      e2e：全 case pass 才 pass；eval：达阈/对照结论；perf：SLO 全过才 pass；
+      trace：声明的 gates 全过才 pass，没声明 gates → skipped（分析产物照常落盘）。
+
+  score:
+    type: number
+    description: 可选，0~1 的 run 级总分（eval 的 weighted_overall）；无总分的 harness 省略
+
+  reason:
+    type: string
+    description: 可选，一句话说明结论（尤其 fail/error 时）；供注入 prompt 直接展示
+
+  # 注：没有 summary 字段。按状态计数是 cases[] / checks[] 的派生量，消费方读时自己 fold——
+  # 不进 wire（固化计数会漂移、且一个计数跨两种单元会被含糊相加）。
+
+  metrics:
+    type: object
+    description: >-
+      可选，run 级聚合指标。key=指标名，value={value, unit?}。
+      perf 放 SLO 关注的容量/延迟数（p95_ms 等）；eval 放各 metric 均值；e2e 可放 pass_rate / p95 延迟。
+    additionalProperties:
+      type: object
+      required: [value]
+      properties:
+        value: {}
+        unit:  { type: string }
+
+  # --- per-case 行（对齐与 pivot 的粒度；run 级判定可空）---
+  cases:
+    type: array
+    description: >-
+      可选。每个被判定的 case 一行，key=case_id（跨 harness 对齐主键）。
+      perf 这类 run 级 SLO 判定通常没有 per-case 行 → 整段省略。
+    items:
+      type: object
+      required: [case_id, status]
+      properties:
+        case_id:
+          type: string
+          description: 对齐 canonical case 的 id（与 case-schema.yaml 同义）
+        status:
+          type: string
+          enum: [pass, fail, error, skipped]
+        score:
+          type: number
+          description: 可选，0~1（eval 的该 case 加权分）
+        reason:
+          type: string
+          description: 可选，该 case 的判定理由（assert 失败点 / judge judgement 摘要）
+        facets:
+          type: object
+          description: 可选，携带 case 的 facets，供报告按面 pivot（沿用 case-schema facets）
+          additionalProperties: { type: string }
+        metrics:
+          type: object
+          description: 可选，该 case 的 per-metric 明细
+          additionalProperties:
+            type: object
+            required: [value]
+            properties:
+              value: {}
+              unit:  { type: string }
+
+  # --- run 级断言门（与 cases 正交的另一种判定单元；perf SLO 是首个实例）---
+  checks:
+    type: array
+    description: >-
+      可选。每条 run 级断言（对聚合 / facet 切片的门）一行。与 cases 正交：case 是"发了什么刺激"，
+      check 是"对观测行为的断言"。perf 把每条 SLO check 放这里；run 级 status 由这些 check rollup。
+      规模看本列条数，不要并进 summary。
+    items:
+      type: object
+      required: [name, status]
+      properties:
+        name:
+          type: string
+          description: 该断言的稳定标识，如 "p99_ms lte 800" / "duration_ms{difficulty=hard}.p99 lte 800"
+        status:
+          type: string
+          enum: [pass, fail, error, skipped]
+          description: 三态同 case；skipped=该切片无值（声明了却没观测到）→ 不算 pass
+        metric:
+          type: string
+          description: 可选，被断言的指标名
+        observed:
+          type: number
+          description: 可选，实测值（与门限对照，供消费方展示差距）
+        reason:
+          type: string
+          description: 可选，该 check 的说明
+
+  # --- 指向富产物（不复制内容，只给指针）---
+  artifact_paths:
+    type: object
+    description: >-
+      可选，相对 run 目录的富产物路径，按名引用。消费方需要细节时按需打开。
+      e2e: {junit: junit.xml, raw: raw/}；eval: {worksheet: worksheet.jsonl,
+      results: results.csv, report: report/}；perf: {run: run.json, report: report/}。
+    additionalProperties: { type: string }
+
+  created_at:
+    type: string
+    description: 可选，ISO-8601 时间戳，由 harness 在写盘时打（schema 本身不规定时钟来源）

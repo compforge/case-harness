@@ -1,0 +1,11 @@
+# Scoped ruff config for the eval_harness package (does not affect e2e_harness,
+# which uses ruff defaults). Shares the python/ uv project + venv otherwise.
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[lint.per-file-ignores]
+# 测试夹具常含整行 yaml / Prometheus exposition 字面量，不强拆
+"tests/*" = ["E501"]

@@ -1,0 +1,19 @@
+service:
+  name: sandbox-server
+  base_url: ${EXAMPLE_BASE_URL:-http://localhost:8090}
+
+auth:
+  tenant_id: ${EXAMPLE_TENANT_ID}
+  user_id: ${EXAMPLE_USER_ID}
+
+runtime:
+  http_timeout_s: 120
+  poll_interval_ms: 500
+  poll_timeout_s: 60
+
+profile: ${EXAMPLE_ENV_PROFILE:-full}
+
+custom:
+  ttl_seconds: ${EXAMPLE_TTL_SEC:-60}
+  pvc_ttl_seconds: ${EXAMPLE_PVCTTL_SEC:-120}
+  conv_prefix: ${EXAMPLE_CONV_PREFIX:-e2e-}

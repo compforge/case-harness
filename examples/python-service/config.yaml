@@ -1,0 +1,15 @@
+service:
+  name: control-server
+  base_url: ${CONTROL_BASE_URL:-http://localhost:8080}
+
+auth:
+  tenant_id: ${CONTROL_TENANT_ID}
+  user_id: ${CONTROL_USER_ID}
+
+runtime:
+  http_timeout_s: 30
+
+profile: ${E2E_PROFILE:-full}
+
+custom:
+  bot_prefix: ${E2E_BOT_PREFIX:-e2e-bot-}

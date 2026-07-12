@@ -1,0 +1,17 @@
+# A structured e2e case set for an SSE / streaming endpoint — 判定即数据 over the event stream.
+#
+# Same engine, same case shape — only the runner differs (SSERunner). The judgment addresses the
+# parsed event stream as data: `events[].event` (the frame names), `events[].data.<…>` (a field
+# projected over frames), and `event_count`. Run: `e2e run chat_cases.yaml --base-url … --protocol sse`.
+caseset: chat
+
+cases:
+  - id: stream_completes
+    desc: 流式聊天 → 200 + 收到终止帧 done + 至少一个中间帧
+    input: { method: POST, path: /chat, body: { q: "hi" } }
+    judge:
+      e2e:
+        assert:
+          - { path: status, op: eq, value: 200 }
+          - { path: "events[].event", op: contains, value: done }  # the stream terminated cleanly（含 [] 的 path 在 flow 风格需引号）
+          - { path: event_count, op: gt, value: 1 }               # got real content, not just done

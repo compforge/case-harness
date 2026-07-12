@@ -1,0 +1,18 @@
+# Single entry config for an experiment. `envs` present → multi-arm comparison;
+# omit `envs` for a single run (a 1-Env experiment).
+name: smoke
+evalset:
+  corpus: demo            # corpus name (manifest resolution is an adapter concern)
+  cases: smoke.yaml       # → materials/cases/smoke.yaml (reusable, by reference)
+facets:                   # FacetSchema (merged over the framework base)
+  difficulty: {values: [easy, medium, hard], ordered: true}
+  type: {values: [factual, numeric, reasoning, refuse, summary]}
+target:                   # base system-under-test config (SUT-agnostic: open `config` bag)
+  name: chat
+  config: {tenant_id: t1, host: {base_url: "http://localhost:8416"}}
+heavy_fields: [config.tenant_id]   # changing tenant re-provisions; everything else is light
+envs:                     # comparison arms (here: a heavy split via tenant)
+  - {name: model-alpha}
+  - {name: model-beta, overrides: {config.tenant_id: t2}}
+metrics: [exact_match, keyword_refusal, latency]
+weights: {exact_match: 1.0, keyword_refusal: 1.0}   # quality only; measure excluded

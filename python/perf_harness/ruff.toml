@@ -1,0 +1,11 @@
+# Scoped ruff config for the perf_harness package. Shares the python/ uv project
+# + venv; mirrors eval_harness's lint profile.
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[lint.per-file-ignores]
+# 测试夹具常含整行 yaml / Prometheus exposition 字面量，不强拆
+"tests/*" = ["E501"]

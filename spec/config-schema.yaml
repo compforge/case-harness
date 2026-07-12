@@ -1,0 +1,71 @@
+# e2e-harness config.yaml schema
+# 每个服务的 tests/e2e/config.yaml 遵循此结构
+
+type: object
+required: [service, auth]
+properties:
+
+  service:
+    type: object
+    required: [base_url]
+    properties:
+      name:
+        type: string
+        description: 服务标识
+      base_url:
+        type: string
+        description: 被测服务根 URL，支持 ${VAR:-default} 插值
+
+  auth:
+    type: object
+    properties:
+      tenant_id:
+        type: string
+      user_id:
+        type: string
+    additionalProperties:
+      type: string
+      description: 额外认证 header（框架自动注入到请求）
+
+  runtime:
+    type: object
+    properties:
+      http_timeout_s:
+        type: integer
+        default: 120
+      poll_interval_ms:
+        type: integer
+        default: 500
+      poll_timeout_s:
+        type: integer
+        default: 60
+      parallel:
+        type: integer
+        default: 4
+
+  profile:
+    type: string
+    default: "full"
+    description: 环境 profile，用于条件跳过不适用的 case
+
+  capabilities_endpoint:
+    type: string
+    default: "/healthz"
+    description: 服务能力探测 endpoint
+
+  custom:
+    type: object
+    additionalProperties:
+      type: string
+    description: 服务自定义配置区，框架透传不解析
+
+  # Agent Tier 扩展（Phase 5）
+  judge:
+    type: object
+    properties:
+      llm_endpoint:
+        type: string
+      llm_model:
+        type: string
+      llm_api_key:
+        type: string

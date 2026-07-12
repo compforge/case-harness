@@ -1,0 +1,90 @@
+# eval_harness
+
+Experiment-first, **table-centric** evaluation harness for agent APIs
+(chat / fastresearch / deepresearch). Self-contained (no `e2e_harness` import).
+
+
+## Spine
+
+```
+evalset ──( solver 补 answer / scorer 补 metric )──▶ Worksheet (大表) ──pivot──▶ report
+```
+
+One evalset, run through one-or-more **Env**s (comparison arms), produces one
+in-memory **Worksheet** that a **reconciler** fills cell-by-cell, and a report
+renders by pure pivot.
+
+## Concepts
+
+| concept | what |
+|---|---|
+| **Experiment** | one eval "question": `business` (base SUT config) + `envs` + `evalset` + `metrics` + `weights`. Single run = a 1-Env experiment. |
+| **Env** | a comparison arm = `business ⊕ overrides`. Two layers: **heavy** (provisioned resource+sources, `prepare()`/`clean()`/`key`, shared across same-key Envs) + **light** (model/params, per call). `Env.key` hashes only heavy-affecting fields → light-only differences share one provisioned resource. |
+| **EvalSet / Case** | input: corpus ref + cases. A case is the canonical `common.Case` (`input.query`, `judge.eval.{ground_truth, expected_behavior, evidence_sources}`, `facets` = typed dimensions); eval reads it via `eval_view`. |
+| **FacetSchema** | per-facet value domain (constrained / `open` / `ordered`); validated at load (so a free-string field can't rot). Replaces flat tags. |
+| **Worksheet** | the big table; rows = (env × case), cells carry state (PENDING/OK/FAILED). The engine's single truth + checkpoint. |
+| **MetricResult** | dual channel: **quality** (0~1 → weighted overall) vs **measurement** (value+unit, mean/p50/p95, excluded from overall). |
+| **reconciler** | fills missing cells (缺啥补啥) under per-endpoint rate gates + cell deps; pipelined; resume = reload + fill gaps. |
+| **LLMSpec** | optional typed LLM config on `business.llm` (`model`/`base_url`/`temperature`/`max_tokens`/`api_key`/`extra`) — the common comparison dimension. Light (not in `Env.key`), so swapping `llm.model` shares the prepared resource; matrix-sweepable (`matrix: {llm.model: [...]}`); the rate-gate key derives from `(base_url, model)`. eval_harness only carries+resolves it; the consumer's Solver maps it to the SUT and the SUT decides whether to honor it. |
+
+**`${ENV}` interpolation**: string values in `experiment.yaml` support `${VAR}` /
+`${VAR:-default}` (resolved at load from the environment; unset + no default fails
+loud) — keeps secrets like `business.llm.api_key` out of yaml/git:
+
+```yaml
+business:
+  name: chat
+  llm: {base_url: "${AIGW_BASE}", api_key: "${AIGW_KEY}"}   # secret-free
+matrix:
+  llm.model: [model-alpha-32k, model-beta-v3]   # 2 Envs, auto-named, per-model rate bucket, shared prepare
+```
+
+## Run
+
+`eval_harness` shares the `python/` uv project (sibling package to `e2e_harness`;
+it does **not** import e2e_harness). Run from `python/`:
+
+```bash
+cd python && uv sync
+# end-to-end with the echo producer (no live server) — writes real reports:
+uv run python -m eval_harness.cli eval_harness/materials/experiments/smoke.yaml --mock --fresh --runs-dir /tmp/eh
+# → /tmp/eh/smoke/{worksheet.jsonl, results.csv, report/{comparison.md, <env>.md}}
+# tests + lint (shared project): uv run pytest tests/  ·  make lint
+```
+
+Output `runs/<exp>/`: `worksheet.jsonl` (checkpoint, resumable), `results.csv`
+(flat scalar projection), `report/comparison.md` (ranking + winner + per-case
+deltas) and `report/<env>.md` (single-env by-facet).
+
+## Status
+
+**Done + tested** (`cd python && uv run pytest tests/`, `make lint`):
+model · worksheet + checkpoint · metric (base + WEIGHT + builtins + registry) ·
+aggregate (weighted_overall + percentiles) · report (pivot + render) ·
+schedule (per-endpoint AIMD ratelimit + reconcile) · config · engine
+orchestrator · CLI. 32 tests, incl. resume (crash→reload→fill gaps),
+failure isolation, retry, applies-to abstain, hash-mismatch guard.
+
+**Pending (lives in the consumer project, not here):**
+the live Provisioner/Solver (provision resource → upload+poll
+sources → internal-chat SSE → answer + observations) is a consumer concern —
+the consumer repo will import `eval_harness` and provide it. Run `--mock` here.
+
+**Backlog:** LLM-as-judge metric (RAGAS-backed) · matrix sweep in yaml ·
+measurement observation keys (ttft/total/tokens) finalised against real SSE.
+
+## Layout
+
+```
+python/eval_harness/          # sibling package to python/e2e_harness/ (shared uv project)
+  model/      experiment(Experiment/Env) · evalset(EvalSet/eval_view/FacetSchema; case=common.Case) · sample(MetricResult)
+  worksheet/  worksheet(Worksheet/Row/cells) · checkpoint(jsonl + async Checkpointer)
+  metric/     base(BaseMetric+WEIGHT) · aggregate · builtins · registry
+  schedule/   ratelimit(per-endpoint AIMD) · reconcile(ReconcileEngine)
+  report/     pivot(env/facet/compare) · render(md/csv)
+  produce/    mock(echo)          # live producers live in the consumer repo
+  config.py · engine.py(run_experiment) · cli.py
+  materials/  experiments/ · cases/          # sample evalset (also bundled package data)
+  ruff.toml                                  # scoped lint (line-length 100); e2e_harness untouched
+python/tests/                 # eval_harness tests live here (test_{model,worksheet,…}.py)
+```

@@ -1,0 +1,35 @@
+# Offline smoke: no live Subject, no cluster. Exercises engine → probe → report,
+# including the Case mix + by-facet pivot.
+#   uv run python -m perf_harness.cli run perf_harness/examples/mock.yaml
+name: mock-smoke                   # experiment name → runs/<name>/<run_id>/ (runs accumulate)
+
+subject:
+  name: mock
+  base_url: http://127.0.0.1:0     # never dialled — MockWorkload sleeps instead
+                                   # (no provisioner = already-deployed; resources only label trials)
+
+resources:
+  - { workers: 2 }
+
+workload:
+  name: mock                       # the protocol adapter (here: the built-in mock)
+
+# Weighted Case mix (the *what*) + facet schema (report ordering). Omit `cases`
+# for a single anonymous request. MockWorkload sleeps `case.input.ms`; facets
+# drive the report's by-facet pivot. `weight` is how THIS experiment uses the
+# case (default 1.0) — it rides the entry, not the Case itself.
+facets:
+  difficulty: { values: [simple, complex], ordered: true }
+cases:
+  - { id: hello,  weight: 70, facets: {difficulty: simple},  input: {ms: 3} }
+  - { id: caocao, weight: 30, facets: {difficulty: complex}, input: {ms: 25} }
+
+load:                              # how hard, over time (LoadProfile)
+  model: closed                    # closed = N concurrent users / open = arrival rps
+  levels: [3, 6]                   # capacity sweep: one ramp→hold arm per level
+  ramp_s: 1
+  steady_s: 3
+
+# client (inflight/sent) is always recorded; no `probes:` / `observe:` needed offline
+observe_interval_s: 0.5
+runs_dir: ./runs                   # each run → runs/mock-smoke/<run_id>/  (+ runs/mock-smoke/run.jsonl)
