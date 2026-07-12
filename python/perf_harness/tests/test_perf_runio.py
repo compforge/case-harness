@@ -6,7 +6,7 @@ contract, so the round-trip must be lossless for everything the store can addres
 import json
 
 import pytest
-from harness_common.case import Case
+from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.drive.workload import Workload

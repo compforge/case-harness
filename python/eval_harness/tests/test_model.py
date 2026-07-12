@@ -1,6 +1,6 @@
 import pytest
-from harness_common.case import Case
 from pydantic import ValidationError
+from spec_case.model import Case
 
 from eval_harness.model.evalset import (
     BASE_FACETS,

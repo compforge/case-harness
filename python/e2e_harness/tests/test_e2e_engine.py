@@ -6,7 +6,7 @@ runner stands in for the SUT, so the whole "判定即数据" path is exercised w
 
 from __future__ import annotations
 
-from harness_common.case import Case
+from spec_case.model import Case
 from e2e_harness.engine import response_view, run_case, run_cases
 from e2e_harness.runner.base import BaseRunner, Outcome, Request
 

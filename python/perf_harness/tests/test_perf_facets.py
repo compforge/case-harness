@@ -1,5 +1,5 @@
-from harness_common.case import Case
 from harness_common.overlay import Overlay
+from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.drive.workload import MockWorkload, Workload

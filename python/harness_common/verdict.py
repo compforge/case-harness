@@ -32,9 +32,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from harness_common import (
+from spec_case.model import (
     Face,
-)  # the judgment-face enum, shared with common.case (input↔output)
+)  # the judgment-face enum, shared with the case model (input↔output)
 
 SCHEMA_VERSION = 1
 

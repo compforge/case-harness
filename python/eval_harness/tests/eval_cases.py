@@ -5,7 +5,7 @@ input side collapsed onto ``common.Case`` (no per-harness case class to instanti
 
 from __future__ import annotations
 
-from harness_common.case import Case
+from spec_case.model import Case
 
 
 def make_eval_case(

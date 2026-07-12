@@ -13,7 +13,7 @@ from pathlib import Path
 
 import httpx
 
-from harness_common.case import load_caseset, validate
+from spec_case.model import load_caseset, validate
 from e2e_harness.core.env import Env
 from e2e_harness.engine import run_case, run_cases
 from e2e_harness.runner.json_runner import JSONRunner

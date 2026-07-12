@@ -16,8 +16,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field, replace
 
 import httpx
-from harness_common.case import Case
 from harness_common.overlay import Overlay
+from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile
 from perf_harness.drive.scheduler import drive_closed, drive_open

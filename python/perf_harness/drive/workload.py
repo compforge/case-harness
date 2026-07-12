@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 
 import httpx
-from harness_common.case import Case
+from spec_case.model import Case
 
 from perf_harness.metric import FacetDescriptor, MetricFamily
 from perf_harness.model import Outcome, Target, Verdict

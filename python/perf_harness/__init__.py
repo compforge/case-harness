@@ -17,7 +17,7 @@ the names below are the stable public API; internal module layout may change.
 
 from __future__ import annotations
 
-from harness_common.case import Case as Case  # canonical case, shared across e2e / eval / perf
+from spec_case.model import Case as Case  # canonical case, shared across e2e / eval / perf
 
 from perf_harness.config import load_experiment as load_experiment
 from perf_harness.drive.load import LoadProfile as LoadProfile

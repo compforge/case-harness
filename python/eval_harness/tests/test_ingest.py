@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import yaml
-from harness_common.case import case_from_raw, case_to_raw
+from spec_case.model import case_from_raw, case_to_raw
 
 from eval_harness.ingest import dump_cases_yaml, slug
 from eval_harness.tests.eval_cases import make_eval_case

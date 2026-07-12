@@ -14,12 +14,12 @@ The names below are the stable public API — import from ``eval_harness`` direc
 internal module paths, so internal layout can change without breaking consumers.
 """
 
-from harness_common.case import (
-    Case as Case,  # the canonical input unit (was the eval-private EvalCase)
-)
 from harness_common.llm import ChatResult as ChatResult
 from harness_common.llm import LLMClient as LLMClient
 from harness_common.llm import LLMConfig as LLMConfig
+from spec_case.model import (
+    Case as Case,  # the canonical input unit (was the eval-private EvalCase)
+)
 
 from eval_harness.config import load_experiment as load_experiment
 from eval_harness.engine import resolve_weights as resolve_weights

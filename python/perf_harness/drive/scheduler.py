@@ -16,7 +16,7 @@ import contextlib
 import random
 import time
 
-from harness_common.case import Case
+from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile
 from perf_harness.drive.workload import Workload

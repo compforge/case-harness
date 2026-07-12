@@ -28,13 +28,13 @@ from dataclasses import dataclass
 from typing import Any
 
 import yaml
-from harness_common.case import Case as Case
-from harness_common.case import case_to_raw
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # FacetSpec / FacetSchema are the harness-neutral facet vocabulary, shared via common.
-from harness_common.facets import FacetSchema as FacetSchema
-from harness_common.facets import FacetSpec as FacetSpec
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from spec_case.facets import FacetSchema as FacetSchema
+from spec_case.facets import FacetSpec as FacetSpec
+from spec_case.model import Case as Case
+from spec_case.model import case_to_raw
 
 # Framework base registry: a few well-known facets every evalset inherits (passed as the
 # `base` when resolving a FacetSchema). Kept minimal; evalsets extend / re-open values.

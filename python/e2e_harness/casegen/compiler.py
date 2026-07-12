@@ -22,7 +22,7 @@ from typing import Protocol
 
 import yaml
 
-from harness_common.case import Case, load_caseset, validate
+from spec_case.model import Case, load_caseset, validate
 from e2e_harness.casegen.discover import DiscoverConfig, DiscoveredCase, discover
 
 
