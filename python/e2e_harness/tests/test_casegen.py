@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from harness_common.case import load_caseset, validate
+from spec_case.model import load_caseset, validate
 from e2e_harness.casegen.discover import DiscoverConfig
 from e2e_harness.casegen import (
     StubCompiler,
@@ -44,9 +44,7 @@ def _cfg(src: Path) -> DiscoverConfig:
 
 def test_compile_writes_caseset_and_compiled_from(tmp_path):
     out = tmp_path / "cases.yaml"
-    rep = compile_cases(
-        _cfg(_source(tmp_path)), StubCompiler(), out, caseset="note"
-    )
+    rep = compile_cases(_cfg(_source(tmp_path)), StubCompiler(), out, caseset="note")
     assert sorted(rep.compiled) == ["dup_name", "happy"] and not rep.reused
 
     cs = load_caseset(out)

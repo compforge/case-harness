@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from harness_common.case import Case, case_from_raw
+from spec_case.model import Case, case_from_raw
 
 from eval_harness.model.evalset import EvalSet, FacetSpec, SourceRecord
 from eval_harness.model.experiment import Env, Experiment, Target

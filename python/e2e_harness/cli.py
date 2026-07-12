@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from harness_common.case import load_caseset, validate
+from spec_case.model import load_caseset, validate
 from harness_common.run import run_dir_for
 from harness_common.verdict import RunVerdict, write_verdict
 from e2e_harness.core.env import Env, load_env

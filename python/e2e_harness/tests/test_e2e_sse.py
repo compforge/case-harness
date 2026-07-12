@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 
-from harness_common.case import load_caseset, validate
+from spec_case.model import load_caseset, validate
 from e2e_harness.cli import _runner as cli_runner
 from e2e_harness.core.env import Env
 from e2e_harness.engine import response_view, run_cases

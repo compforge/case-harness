@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from harness_common.case import load_caseset, validate
+from spec_case.model import load_caseset, validate
 from e2e_harness.casegen.contract import Case as NLCase
 from e2e_harness.casegen.discover import DiscoverConfig, DiscoveredCase
 from e2e_harness.casegen import DraftCompiler, compile_cases

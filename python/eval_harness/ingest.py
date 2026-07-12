@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from harness_common.case import case_to_raw
+from spec_case.model import case_to_raw
 
 from eval_harness.model.evalset import EvalSet
 from eval_harness.model.evalset import dump_cases_yaml as dump_cases_yaml  # re-export

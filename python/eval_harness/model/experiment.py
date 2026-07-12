@@ -23,8 +23,8 @@ import itertools
 import json
 from typing import Any
 
-from harness_common.case import Case
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from spec_case.model import Case
 
 from eval_harness.model.evalset import BASE_FACETS, EvalSet, FacetSchema, FacetSpec
 

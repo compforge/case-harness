@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import get_args
 
 import yaml
-from harness_common.case import Case
-from harness_common.facets import FacetSchema
 from harness_common.overlay import Overlay
+from spec_case.facets import FacetSchema
+from spec_case.model import Case
 
 from perf_harness.drive.load import LoadModel, LoadProfile, Pacing, PacingKind, Schedule, Stage
 from perf_harness.drive.workload import MockWorkload, Workload, build_workload

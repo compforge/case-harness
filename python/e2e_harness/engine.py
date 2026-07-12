@@ -19,7 +19,7 @@ the judgment (``judge.e2e.assert``); this engine executes them generically over 
 
 from __future__ import annotations
 
-from harness_common.case import Case
+from spec_case.model import Case
 from harness_common.verdict import RunVerdict, build_run_verdict
 from harness_common.verdict import CaseVerdict
 from e2e_harness.assertion import Assertion, run_asserts

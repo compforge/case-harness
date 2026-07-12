@@ -6,7 +6,7 @@ import json
 
 import httpx
 import pytest
-from harness_common.case import Case
+from spec_case.model import Case
 
 from perf_harness import Engine, Experiment, Subject
 from perf_harness.config import load_experiment
