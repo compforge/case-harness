@@ -15,15 +15,46 @@ travels with it (a CO-biased p99 can't later be read as clean):
 
 from __future__ import annotations
 
+import statistics
 from collections import Counter
 
-from perf_harness.metric import Caveat, DistributionSummary, MetricSummary
-from perf_harness.model import Outcome, RequestStats
+from perf_harness.metric import (
+    Caveat,
+    CounterSummary,
+    DistributionSummary,
+    GaugeSummary,
+    MetricSummary,
+    MetricValueKind,
+)
+from perf_harness.model import Outcome, RequestStats, Sample
 
 # Below this many observations a distribution's percentiles are too noisy to trust.
 FEW_SAMPLES = 30
 # Drop rate at/above which the generator shed real load → percentiles understate reality.
 HIGH_DROP = 0.01
+
+
+def time_series_summary(samples: list[Sample], value_kind: MetricValueKind) -> MetricSummary | None:
+    """Collapse one time-sampled gauge/counter window into its typed summary."""
+    if not samples:
+        return None
+    vals = [s.value for s in samples]
+    if value_kind == "counter":
+        increase = rate = None
+        caveats: frozenset[Caveat] = frozenset()
+        if len(samples) >= 2:
+            dt = samples[-1].t - samples[0].t
+            # Positive-delta accumulation matches Prometheus increase semantics:
+            # a restart must not turn a cooldown-window rate negative.
+            deltas = [b - a for a, b in zip(vals, vals[1:], strict=False)]
+            increase = sum(d for d in deltas if d > 0)
+            rate = increase / dt if dt > 0 else None
+            if any(d < 0 for d in deltas):
+                caveats = frozenset({"counter_reset"})
+        return CounterSummary(total=vals[-1], rate=rate, increase=increase, caveats=caveats)
+    if value_kind == "gauge":
+        return GaugeSummary(last=vals[-1], mean=statistics.fmean(vals), peak=max(vals))
+    return None
 
 
 def request_stats(outcomes: list[Outcome], steady_s: float, *, closed: bool) -> RequestStats:

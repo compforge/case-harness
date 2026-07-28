@@ -314,6 +314,12 @@ class TrialResult:
     name, e.g. ``metrics.chat``). Their summaries carry the ``probe_error`` caveat,
     absent reads resolve to ``Missing("probe_error")`` (≠ "slice没数据"), and the
     validity lens flags them — so a broken /metrics never renders as a calm line."""
+    cooldown_start_s: float | None = None
+    """Start of the cooldown window in the raw Probe timeline.
+
+    Set after ``Workload.deactivate()`` returns. ``None`` means this trial had no
+    cooldown window.
+    """
 
     def label(self) -> str:
         """Stable trial id within a run, e.g. ``w2/2Gi|closed/8c`` — keys the raw
@@ -341,6 +347,7 @@ class TrialResult:
 # ---------------------------------------------------------------------------
 
 SloOp = Literal["lt", "lte", "gt", "gte", "between"]
+SloWindow = Literal["measurement", "cooldown"]
 
 
 @dataclass(frozen=True)
@@ -353,12 +360,15 @@ class SloAssertion:
     ``p99_ms`` is overall; ``duration_ms{difficulty="simple"}.p99`` a facet slice;
     ``duration_ms{stage="hold@40"}.p99`` a stage; ``top.cpu_m{service="planit"}.peak``
     a service. ``threshold`` is a float for lt/lte/gt/gte, a ``(lo, hi)`` for between.
+    ``window="cooldown"`` re-reduces a resource gauge/counter after ``deactivate``;
+    the default ``measurement`` reads the normal load-window summary.
     """
 
     metric: str
     op: SloOp
     threshold: float | tuple[float, float]
     level: float | None = None
+    window: SloWindow = "measurement"
 
 
 SloState = Literal["pass", "fail", "skipped"]

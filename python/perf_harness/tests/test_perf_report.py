@@ -137,12 +137,12 @@ def test_response_curves_omitted_for_single_level(tmp_path):
 def test_timeseries_section_left_resource_right_pressure(tmp_path):
     paths = write_report([_svc_trial(5)], str(tmp_path))
     html = Path(paths["report_html"]).read_text()
-    # per-service chart: left = usage + limit line, right = dashed pressure (inflight)
+    # per-service chart: left = usage + limit line, right = dashed pressure
+    # (inflight + the actual send rate derived from client.sent)
     assert "chat · CPU — " in html
     assert html.count("yAxisIndex") >= 1 and "dashed" in html
     assert "client.inflight" in html
-    # counters never plot (client.sent only lives in the CSV)
-    assert '"name": "client.sent"' not in html
+    assert '"name": "client.sent"' in html
 
 
 def _biz_trial(level: float) -> TrialResult:

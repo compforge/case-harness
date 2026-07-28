@@ -21,7 +21,7 @@ from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile
 from perf_harness.drive.scheduler import drive_closed, drive_open
-from perf_harness.drive.workload import Workload
+from perf_harness.drive.workload import TrialContext, Workload
 from perf_harness.metric import (
     MetricFamily,
     MetricSummary,
@@ -85,6 +85,7 @@ class Experiment:
     strict_slo: bool = False  # treat a skipped SLO (no data) as a run failure, not a pass
     name: str = "perf"  # experiment name → runs/<name>/<run_id>/
     observe_interval_s: float = 5.0
+    cooldown_s: float = 0.0  # keep probes running after deactivation for scale-down curves
     teardown: bool = False
 
 
@@ -118,8 +119,9 @@ class Engine:
                         # the run gate is lenient on skip by default: a skipped check
                         # (slice absent) is surfaced but doesn't flip the exit code;
                         # strict_slo treats an unverifiable SLO as a failure.
-                        failed = any(c.failed for c in trial.slo) or (
-                            exp.strict_slo and any(c.skipped for c in trial.slo)
+                        failed = any(c.failed for c in trial.slo) or any(
+                            c.skipped and (exp.strict_slo or c.assertion.window == "cooldown")
+                            for c in trial.slo
                         )
                         passed = passed and not failed
                     trials.append(trial)
@@ -152,6 +154,9 @@ class Engine:
         obs_limits = httpx.Limits(max_connections=8, max_keepalive_connections=8)
         timed: list[tuple[float, Outcome]] = []
         store: ProbeStore = {}
+        probe_errors: dict[str, ProbeErrors] = {}
+        measurement_end_s = 0.0
+        cooldown_start_s: float | None = None
 
         # trust_env=False: the load generator connects DIRECTLY to the Subject's
         # base_url — never via an ambient HTTP(S)_PROXY/ALL_PROXY from the shell (a
@@ -161,25 +166,62 @@ class Engine:
             httpx.AsyncClient(limits=limits, http2=False, trust_env=False) as client,
             httpx.AsyncClient(limits=obs_limits, http2=False, trust_env=False) as obs_client,
         ):
-            ctx = ProbeContext(
+            trial_ctx = TrialContext(
                 target=target,
                 client=client,
-                t0=time.monotonic(),
-                stats=stats,
-                observer_client=obs_client,
+                run_id=self.run_id,
+                resources=profile,
+                load=load,
             )
+            observer: asyncio.Task | None = None
             stop = asyncio.Event()
-            observer = asyncio.create_task(
-                observe_loop(exp.probes, ctx, store, stop, exp.observe_interval_s)
-            )
-            drive = drive_open if load.model == "open" else drive_closed
-            trial_stop = await drive(
-                exp.workload, ctx, load, self._cases, self._weights, self.run_id, timed
-            )
-            stop.set()
-            probe_errors = await observer  # the observation-failure census
+            primary_error: BaseException | None = None
+            try:
+                await exp.workload.setup(trial_ctx)
+                ctx = ProbeContext(
+                    target=target,
+                    client=client,
+                    t0=time.monotonic(),
+                    stats=stats,
+                    observer_client=obs_client,
+                )
+                observer = asyncio.create_task(
+                    observe_loop(exp.probes, ctx, store, stop, exp.observe_interval_s)
+                )
+                drive = drive_open if load.model == "open" else drive_closed
+                trial_stop = await drive(
+                    exp.workload, ctx, load, self._cases, self._weights, self.run_id, timed
+                )
+                # Post-load samples remain in the raw series for cooldown/scale-down
+                # charts, but summaries must describe only the load measurement window.
+                measurement_end_s = time.monotonic() - ctx.t0
+                await exp.workload.deactivate(trial_ctx)
+                if exp.cooldown_s:
+                    cooldown_start_s = time.monotonic() - ctx.t0
+                    await asyncio.sleep(exp.cooldown_s)
+            except BaseException as exc:
+                primary_error = exc
+                raise
+            finally:
+                if observer is not None:
+                    stop.set()
+                    probe_errors = await observer
+                try:
+                    await exp.workload.cleanup(trial_ctx)
+                except BaseException as cleanup_error:
+                    if primary_error is None:
+                        raise
+                    primary_error.add_note(f"cleanup also failed: {cleanup_error!r}")
 
-        trial = self._aggregate(profile, load, timed, store, probe_errors)
+        trial = self._aggregate(
+            profile,
+            load,
+            timed,
+            store,
+            probe_errors,
+            measurement_end_s=measurement_end_s,
+            cooldown_start_s=cooldown_start_s,
+        )
         trial.stop = trial_stop  # how the trial ended (deadline / breaker) + enact census
         trial.outcomes = timed  # raw layer (incl. warmup/drops) — runio persists these
         return trial
@@ -191,6 +233,9 @@ class Engine:
         timed: list[tuple[float, Outcome]],
         store: ProbeStore,
         probe_errors: dict[str, ProbeErrors] | None = None,
+        *,
+        measurement_end_s: float | None = None,
+        cooldown_start_s: float | None = None,
     ) -> TrialResult:
         exp = self.experiment
         warmup = load.warmup_s
@@ -276,7 +321,11 @@ class Engine:
                     sid = series_id(f"{probe.family}.{metric}", labels)
                     if full:
                         series_out[sid] = Series(metric, spec.unit, list(full))
-                    own_steady[metric] = [s for s in full if s.t >= warmup]
+                    own_steady[metric] = [
+                        s
+                        for s in full
+                        if s.t >= warmup and (measurement_end_s is None or s.t <= measurement_end_s)
+                    ]
                 for bare, summary in probe.summarize(own_steady).items():
                     if probe.name in errors:
                         # the probe missed ticks — its series have holes; the value
@@ -291,7 +340,12 @@ class Engine:
                 up_fam = f"{probe.family}.up"
                 sid = series_id(up_fam, probe.labels)
                 series_out[sid] = Series("up", "", list(up_samples))
-                for _, summary in probe.summarize({"up": up_samples}).items():
+                measured_up = [
+                    s
+                    for s in up_samples
+                    if s.t >= warmup and (measurement_end_s is None or s.t <= measurement_end_s)
+                ]
+                for _, summary in probe.summarize({"up": measured_up}).items():
                     probe_metrics[sid] = summary
                 registry[up_fam] = MetricFamily(
                     name=up_fam,
@@ -301,6 +355,7 @@ class Engine:
                     source=probe.source,
                     description="probe health (1 ok / 0 failed) — Prometheus `up` 的对应物；"
                     "mean 即观测可用率",
+                    labels=frozenset(probe.labels),
                 )
 
         # top-level derived ratios (DeriveSpec): Δnum ÷ Δden of two counter FAMILIES over
@@ -329,6 +384,7 @@ class Engine:
                     value_kind="scalar",
                     source="http",
                     description=spec.description,
+                    labels=registry[spec.num].labels | registry[spec.den].labels,
                 )
 
         return TrialResult(
@@ -342,4 +398,5 @@ class Engine:
             by_stage=by_stage,
             metrics=registry,
             probe_errors=dict(errors),
+            cooldown_start_s=cooldown_start_s,
         )

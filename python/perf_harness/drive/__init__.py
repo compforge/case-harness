@@ -33,6 +33,9 @@ from perf_harness.drive.workload import (
     MockWorkload as MockWorkload,
 )
 from perf_harness.drive.workload import (
+    TrialContext as TrialContext,
+)
+from perf_harness.drive.workload import (
     Workload as Workload,
 )
 from perf_harness.drive.workload import (

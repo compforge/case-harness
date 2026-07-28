@@ -21,6 +21,9 @@ def _check_verdict(c: SloCheck) -> _v.CheckVerdict:
     (``observed is None``) — a skip is not a pass; otherwise the check's own state."""
     a = c.assertion
     name = f"{a.metric} {a.op} {a.threshold}"
+    window = getattr(a, "window", "measurement")
+    if window != "measurement":
+        name += f" [{window}]"
     if a.level is not None:
         name += f" @level={a.level}"
     status = "skipped" if c.observed is None else c.state
@@ -70,7 +73,9 @@ def _build(run: Run) -> _v.RunVerdict:
 def _fail_reason(failed: list[SloCheck]) -> str:
     first = failed[0]
     a = first.assertion
-    detail = f"{a.metric} {a.op} {a.threshold} (observed {first.observed})"
+    slo_window = getattr(a, "window", "measurement")
+    window = f" [{slo_window}]" if slo_window != "measurement" else ""
+    detail = f"{a.metric}{window} {a.op} {a.threshold} (observed {first.observed})"
     return f"{len(failed)} SLO failed; first — {detail}"
 
 

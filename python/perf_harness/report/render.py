@@ -431,7 +431,10 @@ def write_report(
             tid = _trial_id(r)
             for key, series in r.series.items():
                 for s in series.samples:
-                    w.writerow([tid, key, f"{s.t:.1f}", _fmt(s.value)])
+                    # This is the raw layer used for offline SLO recomputation.
+                    # Keep Python's round-trippable float spelling; presentation
+                    # formatting belongs only in report views.
+                    w.writerow([tid, key, repr(s.t), repr(s.value)])
 
     md_path = out / "report.md"
     md_path.write_text(_render_md(results, metric_keys, knee_err_rate, facet_order))
@@ -475,8 +478,17 @@ def _render_slo(lines: list[str], results: list[TrialResult]) -> None:
             a = c.assertion
             thr = f"{a.threshold[0]}..{a.threshold[1]}" if a.op == "between" else a.threshold
             obs = "—" if c.observed is None else f"{c.observed:.2f}"
-            lines.append(f"  - {a.metric} = {obs}（需 {a.op} {thr}）")
-    skipped = sorted({c.assertion.metric for r in results for c in r.slo if c.skipped})
+            window = f" [{a.window}]" if a.window != "measurement" else ""
+            lines.append(f"  - {a.metric}{window} = {obs}（需 {a.op} {thr}）")
+    skipped = sorted(
+        {
+            c.assertion.metric
+            + (f" [{c.assertion.window}]" if c.assertion.window != "measurement" else "")
+            for r in results
+            for c in r.slo
+            if c.skipped
+        }
+    )
     if skipped:
         lines.append("")
         lines.append(
@@ -517,10 +529,19 @@ def _build_doc(
                     f"{a.threshold[0]}..{a.threshold[1]}" if a.op == "between" else str(a.threshold)
                 )
                 obs = "—" if c.observed is None else f"{c.observed:.2f}"
-                fail_rows.append([_trial_id(r), a.metric, obs, a.op, thr])
+                metric = a.metric + (f" [{a.window}]" if a.window != "measurement" else "")
+                fail_rows.append([_trial_id(r), metric, obs, a.op, thr])
         if fail_rows:
             sec.blocks.append(Table(["trial", "metric", "observed", "op", "threshold"], fail_rows))
-        skipped = sorted({c.assertion.metric for r in results for c in r.slo if c.skipped})
+        skipped = sorted(
+            {
+                c.assertion.metric
+                + (f" [{c.assertion.window}]" if c.assertion.window != "measurement" else "")
+                for r in results
+                for c in r.slo
+                if c.skipped
+            }
+        )
         if skipped:
             sec.blocks.append(
                 Prose("skipped（slice 无数据 → 未判定，别误读为通过）：" + ", ".join(skipped))
@@ -832,18 +853,23 @@ def _timeseries_section(results: list[TrialResult]) -> Section:
             if _series_value_kind(sid, r.metrics) == "counter":
                 # s-unit sums etc. carry no standalone visual meaning (their ratios
                 # are the derive: scalars); only count-unit counters get rate lines
-                if (series.unit or "") == "count" and svc is not None:
+                if (series.unit or "") == "count":
                     rate_pts = _tick_rate(series)
                     if rate_pts:
                         fam = _series_family(sid)
-                        buckets.setdefault((svc, "count", "rate"), []).append(
-                            LineSeries(
-                                sid,
-                                rate_pts,
-                                color=_family_color(fam),
-                                tip=_family_tip(r.metrics, fam),
-                            )
+                        line = LineSeries(
+                            sid,
+                            rate_pts,
+                            color=_family_color(fam),
+                            tip=_family_tip(r.metrics, fam),
                         )
+                        if svc is None:
+                            # client.sent is the actual open-loop send rate. Keep it
+                            # alongside inflight as global pressure so every service
+                            # chart can align load with its resource/count curves.
+                            pressure.setdefault((i, None), []).append(line)
+                        else:
+                            buckets.setdefault((svc, "count", "rate"), []).append(line)
                 continue
             pts = [(s.t, s.value) for s in series.samples]
             if (series.unit or "") == "count":
@@ -880,7 +906,15 @@ def _timeseries_section(results: list[TrialResult]) -> Section:
             else:
                 title = f"{svc} · {_unit_name(unit)} — {_trial_id(r)}"
                 y = unit
-            sec.blocks.append(Chart(title, lines, y_label=y, right_series=right, y2_label="count"))
+            sec.blocks.append(
+                Chart(
+                    title,
+                    lines,
+                    y_label=y,
+                    right_series=right,
+                    y2_label="count / count·s⁻¹",
+                )
+            )
     if not has:
         sec.blocks.append(Prose("（无服务级 Probe 序列 — 资源观测见 observe: 配置）"))
     return sec

@@ -23,6 +23,7 @@ from perf_harness.observe import (
     DeriveSpec,
     FamilySpec,
     KubectlTopProbe,
+    PodCountProbe,
     Probe,
     ResourceLimitsProbe,
 )
@@ -177,6 +178,15 @@ def test_observe_wires_limits_probe(tmp_path):
     assert "limits.chat" in [p.name for p in exp.probes]  # service-bound limits probe wired
 
 
+def test_observe_wires_pod_count_probe(tmp_path):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(_SUBJECT + "observe:\n  - { name: chat, probes: [pods] }\n")
+    exp, _ = load_experiment(str(cfg))
+    probe = next(p for p in exp.probes if isinstance(p, PodCountProbe))
+    assert probe.name == "pods.chat"
+    assert {d.name for d in probe.describe()} == {"pods.count"}
+
+
 def test_series_id_is_prometheus_form():
     assert series_id("top.cpu_m", {}) == "top.cpu_m"
     assert series_id("top.cpu_m", {"service": "chat"}) == 'top.cpu_m{service="chat"}'
@@ -275,6 +285,47 @@ async def test_limits_probe_per_pod_and_summed_share_one_source(monkeypatch):
     # summed = sum of the same per-pod parse (the service-level total)
     summed = await ResourceLimitsProbe(k8s=ref, service="chat").sample(ctx)
     assert summed == {"cpu_limit": 3000.0}
+
+
+async def test_limits_probe_refreshes_dynamic_pod_set(monkeypatch):
+    responses = iter(
+        [
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "metadata": {"name": "chat-a"},
+                            "spec": {"containers": [{"resources": {"limits": {"cpu": "1"}}}]},
+                        }
+                    ]
+                }
+            ),
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "metadata": {"name": "chat-a"},
+                            "spec": {"containers": [{"resources": {"limits": {"cpu": "1"}}}]},
+                        },
+                        {
+                            "metadata": {"name": "chat-b"},
+                            "spec": {"containers": [{"resources": {"limits": {"cpu": "1"}}}]},
+                        },
+                    ]
+                }
+            ),
+        ]
+    )
+
+    async def fake_run(cmd):
+        return next(responses)
+
+    monkeypatch.setattr("perf_harness.observe.k8s.run_capture", fake_run)
+    ref = K8sRef(kubeconfig="/kc", namespace="ns", app_label="app=chat")
+    probe = ResourceLimitsProbe(k8s=ref, service="chat")
+    ctx = SimpleNamespace(target=SimpleNamespace(k8s=None))
+    assert await probe.sample(ctx) == {"cpu_limit": 1000.0}
+    assert await probe.sample(ctx) == {"cpu_limit": 2000.0}
 
 
 class _FanProbe(Probe):

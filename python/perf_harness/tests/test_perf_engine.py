@@ -1,10 +1,12 @@
 import asyncio
 
+import pytest
+
 from perf_harness.drive.load import LoadProfile, Pacing, Schedule
 from perf_harness.drive.workload import MockWorkload, Workload
 from perf_harness.engine import Engine, Experiment, Subject
-from perf_harness.model import Outcome, ResourceProfile, Target
-from perf_harness.observe import ClientProbe
+from perf_harness.model import Outcome, ResourceProfile, SloAssertion, Target
+from perf_harness.observe import ClientProbe, FamilySpec, Probe
 
 
 class _AlwaysFailWL(Workload):
@@ -199,3 +201,126 @@ async def test_engine_open_model_smoke():
     assert r.overall.n > 0
     assert r.overall.error_rate == 0.0
     assert r.overall.throughput_rps > 0
+
+
+async def test_trial_hooks_wrap_load_and_cooldown_only_extends_raw_series():
+    state = {"post_load": False}
+    events: list[str] = []
+
+    class LifecycleWorkload(Workload):
+        async def setup(self, ctx):
+            events.append("setup")
+
+        async def fire(self, target, client, case, run_id):
+            return Outcome(status=200, duration_ms=1.0)
+
+        async def deactivate(self, ctx):
+            events.append("deactivation")
+            state["post_load"] = True
+
+        async def cleanup(self, ctx):
+            events.append("cleanup")
+
+    class PhaseProbe(Probe):
+        name = "phase"
+        source = "test"
+        families = {"post_load": FamilySpec("count")}
+
+        async def sample(self, ctx):
+            return {"post_load": float(state["post_load"])}
+
+    exp = Experiment(
+        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        workload=LifecycleWorkload(),
+        resources=[ResourceProfile()],
+        loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.12))],
+        probes=[PhaseProbe()],
+        observe_interval_s=0.03,
+        cooldown_s=0.12,
+        slo=[
+            SloAssertion(
+                "phase.post_load.last",
+                "gte",
+                1,
+                window="cooldown",
+            )
+        ],
+    )
+    run = await Engine(exp).run()
+    trial = run.trials[0]
+    assert events == ["setup", "deactivation", "cleanup"]
+    assert trial.probe_metrics["phase.post_load"].peak == 0.0
+    assert any(s.value == 1.0 for s in trial.series["phase.post_load"].samples)
+    assert trial.cooldown_start_s is not None
+    assert run.passed and trial.slo[0].passed and trial.slo[0].observed == 1.0
+
+
+async def test_cleanup_runs_when_setup_fails():
+    events: list[str] = []
+
+    class BrokenSetup(Workload):
+        async def setup(self, ctx):
+            events.append("setup")
+            raise RuntimeError("setup failed")
+
+        async def fire(self, target, client, case, run_id):
+            return Outcome(status=200, duration_ms=1.0)
+
+        async def cleanup(self, ctx):
+            events.append("cleanup")
+
+    exp = Experiment(
+        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        workload=BrokenSetup(),
+        resources=[ResourceProfile()],
+        loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1))],
+    )
+    with pytest.raises(RuntimeError, match="setup failed"):
+        await Engine(exp).run()
+    assert events == ["setup", "cleanup"]
+
+
+async def test_cleanup_error_does_not_hide_setup_error():
+    class BrokenLifecycle(Workload):
+        async def setup(self, ctx):
+            raise RuntimeError("setup failed")
+
+        async def fire(self, target, client, case, run_id):
+            return Outcome(status=200, duration_ms=1.0)
+
+        async def cleanup(self, ctx):
+            raise RuntimeError("cleanup failed")
+
+    exp = Experiment(
+        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        workload=BrokenLifecycle(),
+        resources=[ResourceProfile()],
+        loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1))],
+    )
+    with pytest.raises(RuntimeError, match="setup failed") as caught:
+        await Engine(exp).run()
+    assert any("cleanup failed" in note for note in caught.value.__notes__)
+
+
+async def test_cooldown_slo_missing_data_fails_closed():
+    class EmptyProbe(Probe):
+        name = "empty"
+        source = "test"
+        families = {"value": FamilySpec("count")}
+
+        async def sample(self, ctx):
+            return {}
+
+    exp = Experiment(
+        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        workload=MockWorkload(base_ms=1),
+        resources=[ResourceProfile()],
+        loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.05))],
+        probes=[EmptyProbe()],
+        observe_interval_s=0.01,
+        cooldown_s=0.03,
+        slo=[SloAssertion("empty.value.last", "lte", 0, window="cooldown")],
+    )
+    run = await Engine(exp).run()
+    assert run.trials[0].slo[0].skipped
+    assert not run.passed

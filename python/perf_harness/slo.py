@@ -43,7 +43,14 @@ def evaluate_slo(trial: TrialResult, assertions: list[SloAssertion]) -> list[Slo
     for a in assertions:
         if a.level is not None and a.level != level:
             continue  # assertion gates a different load level
-        read = store.query(trial, a.metric)
+        if a.window == "cooldown":
+            read = (
+                store.query_window(trial, a.metric, start_s=trial.cooldown_start_s)
+                if trial.cooldown_start_s is not None
+                else Missing("no_data")
+            )
+        else:
+            read = store.query(trial, a.metric)
         if isinstance(read, Missing):
             checks.append(SloCheck(a, observed=None, state="skipped"))
             continue

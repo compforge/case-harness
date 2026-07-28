@@ -7,6 +7,7 @@ filled-in file.
 
 from __future__ import annotations
 
+import importlib
 import os
 from pathlib import Path
 from typing import get_args
@@ -21,17 +22,27 @@ from perf_harness.drive.workload import MockWorkload, Workload, build_workload
 from perf_harness.engine import Experiment, Subject
 from perf_harness.metric import MetricFamily, parse_ref, validate_ref
 from perf_harness.metric.store import PER_REQUEST_DESCRIPTORS, REQUEST_DESCRIPTORS, SLO_METRICS
-from perf_harness.model import K8sRef, ResourceProfile, SloAssertion, SloOp, Target
+from perf_harness.model import (
+    K8sRef,
+    ResourceProfile,
+    SloAssertion,
+    SloOp,
+    SloWindow,
+    Target,
+)
 from perf_harness.observe import (
     ClientProbe,
     DeriveSpec,
     KubectlTopProbe,
     MetricsScrapeProbe,
     PerWorkerRSSProbe,
+    PodCountProbe,
     Probe,
+    ProbeConfig,
     ResourceLimitsProbe,
     RestartProbe,
     ScrapeSpec,
+    build_probe,
 )
 from perf_harness.subject import HelmProvisioner, Provisioner
 
@@ -39,6 +50,7 @@ from perf_harness.subject import HelmProvisioner, Provisioner
 _LOAD_MODELS = get_args(LoadModel)
 _PACING_KINDS = get_args(PacingKind)
 _SLO_OPS = get_args(SloOp)
+_SLO_WINDOWS = get_args(SloWindow)
 
 _PROBES = {
     "client": ClientProbe,
@@ -47,21 +59,23 @@ _PROBES = {
     "rss": PerWorkerRSSProbe,
     "restart": RestartProbe,
     "limits": ResourceLimitsProbe,
+    "pods": PodCountProbe,
 }
 
 # probes that can observe a *downstream* service (read a pod by K8sRef, no URL) —
 # the subset allowed under `observe:`. client/metrics need the Subject's handles.
-_K8S_PROBES = {"top", "rss", "restart", "limits"}
+_K8S_PROBES = {"top", "rss", "restart", "limits", "pods"}
 
 
 def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
     """Parse a run file → (Experiment, runs_dir). One config = one named experiment.
 
-    ``mock=True`` swaps in ``MockWorkload`` *instead of* resolving the registry,
-    so a real config can be smoke-run offline even when its ``workload.name`` is
-    only registered in the consumer project (not importable here).
+    ``mock=True`` swaps in ``MockWorkload`` instead of resolving the workload
+    registry. Declared extension modules are still imported so custom probes and
+    config validation use the same path as a real run.
     """
     raw = yaml.safe_load(Path(path).expanduser().read_text())
+    _load_extensions(raw.get("extensions"))
     subj = raw["subject"]
     subj_name = subj.get("name", "subject")
     prov_cfg = subj.get("provisioner") or {}
@@ -89,8 +103,9 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
     loads = _parse_loads(raw["load"])
     if "probes" in raw:
         raise ValueError(
-            "`probes:` was removed — `client` is always recorded; put metrics/top/rss/restart "
-            "under `observe:` (the Subject is the entry that omits `k8s`)"
+            "`probes:` was removed — `client` is always recorded; put "
+            "metrics/top/rss/restart/limits/pods or registered custom probes under "
+            "`observe:` (the Subject is the entry that omits `k8s`)"
         )
     # client (load-gen's own inflight/sent) is harness-intrinsic → always on, not a
     # config knob. observe: is the one place for per-service resource observation.
@@ -99,6 +114,9 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
     cases = _parse_cases(raw)
     mix = _parse_mix(raw, cases)
     slo = _parse_slo(raw.get("slo"))
+    cooldown_s = float(raw.get("cooldown_s", 0.0))
+    if cooldown_s < 0:
+        raise ValueError("cooldown_s must be >= 0")
     _validate_producers(probes, workload)
     registry = _static_registry(probes, workload, derived)
     declared_facets = _declared_facet_pairs(raw.get("facets"), cases, workload)
@@ -122,8 +140,15 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
         if "service" in p.labels and getattr(p, "_per_pod", False)
         for d in p.describe()
     } - summed
-    _validate_slo(slo, registry, declared_facets, declared_services, loads, per_pod_only)
-
+    _validate_slo(
+        slo,
+        registry,
+        declared_facets,
+        declared_services,
+        loads,
+        per_pod_only,
+        cooldown_s=cooldown_s,
+    )
     experiment = Experiment(
         subject=Subject(name=subj_name, target=target, provisioner=provisioner),
         workload=workload,
@@ -140,6 +165,7 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
         # experiment name = config `name` (the named experiment dir), default subject slug
         name=str(raw.get("name") or _slug(subj_name)),
         observe_interval_s=float(raw.get("observe_interval_s", 5.0)),
+        cooldown_s=cooldown_s,
         teardown=bool(raw.get("teardown", False)),
     )
     # `runs_dir` is the parent holding one dir per experiment (output_dir = legacy alias)
@@ -148,6 +174,20 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
 
 def _slug(s: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "-" for c in s).strip("-") or "perf"
+
+
+def _load_extensions(value: object) -> None:
+    """Import consumer modules whose import-time registrations extend the harness."""
+    if value is None:
+        return
+    modules = [value] if isinstance(value, str) else value
+    if not isinstance(modules, list) or not all(isinstance(m, str) and m for m in modules):
+        raise ValueError("extensions must be a module name or a list of module names")
+    for module in modules:
+        try:
+            importlib.import_module(module)
+        except Exception as exc:
+            raise ValueError(f"failed to import extension module {module!r}: {exc}") from exc
 
 
 def _parse_cases(raw: dict) -> list[Case]:
@@ -226,7 +266,7 @@ def _parse_observe(items: list[dict] | None) -> list[Probe]:
     downstream in one shape. Each item: ``name`` + ``probes`` + an OPTIONAL ``k8s``
     block; omit ``k8s`` and the entry is the **Subject** (its pod via
     ``subject.provisioner.k8s``, its ``/metrics`` via the Subject base_url). Pod
-    probes (top/rss/restart) read a K8sRef; ``metrics`` scrapes the Subject's
+    probes (top/rss/restart/limits/pods) read a K8sRef; ``metrics`` scrapes the Subject's
     ``/metrics`` (downstream /metrics needs a URL — unsupported, so it's only valid
     on the k8s-less Subject entry). Metrics are service-prefixed (``top.<name>.…``),
     so the report overlays same-unit series across services."""
@@ -244,17 +284,46 @@ def _parse_observe(items: list[dict] | None) -> list[Probe]:
         # service-level sum (per-pod usage vs its OWN request/limit on one chart)
         per_pod = bool(item.get("per_pod", False))
         probes = item.get("probes") or ["top"]
+        probe_names = [
+            p if isinstance(p, str) else p.get("name") if isinstance(p, dict) else None
+            for p in probes
+        ]
         scrape = _parse_scrape(item.get("scrape"), service)
-        if scrape and "metrics" not in probes:
+        if scrape and "metrics" not in probe_names:
             raise ValueError(
                 f"observe[{service}].scrape: needs the `metrics` probe on this "
                 f"entry (it rides the /metrics scrape)"
             )
         metrics_url = item.get("metrics_url")  # convention: http://<service-ip>:<port>/metrics
-        for pname in probes:
+        for probe_item in probes:
+            if isinstance(probe_item, str):
+                pname = probe_item
+                options: dict[str, object] = {}
+            elif isinstance(probe_item, dict):
+                pname = probe_item.get("name")
+                if not isinstance(pname, str) or not pname:
+                    raise ValueError(
+                        f"observe[{service}].probes entries need a string `name`: {probe_item!r}"
+                    )
+                options = {str(k): v for k, v in probe_item.items() if k != "name"}
+            else:
+                raise ValueError(
+                    f"observe[{service}].probes entries must be names or mappings, "
+                    f"got {probe_item!r}"
+                )
             if pname in _K8S_PROBES:
+                if options:
+                    raise ValueError(
+                        f"observe[{service}].probes[{pname}]: builtin probe has no options, "
+                        f"got {sorted(options)}"
+                    )
                 out.append(_PROBES[pname](k8s=ref, service=service, per_pod=per_pod))
             elif pname == "metrics":
+                if options:
+                    raise ValueError(
+                        f"observe[{service}].probes[metrics]: configure scrape/metrics_url "
+                        "on the observe entry, not inside probes"
+                    )
                 if ref is not None and not metrics_url:
                     raise ValueError(
                         f"observe[{service}].probes: `metrics` on a downstream entry "
@@ -271,10 +340,22 @@ def _parse_observe(items: list[dict] | None) -> list[Probe]:
                         prefix=ref.metrics_prefix if ref and ref.metrics_prefix else None,
                     )
                 )
-            else:
+            elif pname == "client":
                 raise ValueError(
-                    f"observe[{service}].probes: {pname!r} not allowed — only "
-                    f"metrics/top/rss/restart observe a service"
+                    f"observe[{service}].probes: 'client' is intrinsic and cannot "
+                    "observe a service"
+                )
+            else:
+                out.append(
+                    build_probe(
+                        pname,
+                        ProbeConfig(
+                            service=service,
+                            k8s=ref,
+                            per_pod=per_pod,
+                            options=options,
+                        ),
+                    )
                 )
     return out
 
@@ -519,8 +600,8 @@ def _parse_schedule(stages: list[dict], start_level: float) -> Schedule:
 def _parse_slo(items: list[dict] | None) -> list[SloAssertion]:
     """``slo:`` list → SloAssertions. Each item: ``metric`` (carries any facet/stage/
     service label, e.g. ``duration_ms{difficulty="simple"}.p99``) + exactly one op key
-    (``lt``/``lte``/``gt``/``gte``/``between``) + optional ``level``. Syntax only here;
-    metric/label existence is checked in ``_validate_slo``."""
+    (``lt``/``lte``/``gt``/``gte``/``between``) + optional ``level`` and ``window``.
+    Syntax only here; metric/label existence is checked in ``_validate_slo``."""
     out: list[SloAssertion] = []
     for s in items or []:
         metric = s.get("metric")
@@ -538,12 +619,16 @@ def _parse_slo(items: list[dict] | None) -> list[SloAssertion]:
         op = ops[0]
         threshold = tuple(float(x) for x in s[op]) if op == "between" else float(s[op])
         level = s.get("level")
+        window = s.get("window", "measurement")
+        if window not in _SLO_WINDOWS:
+            raise ValueError(f"slo.window must be one of {list(_SLO_WINDOWS)}, got {window!r}")
         out.append(
             SloAssertion(
                 metric=metric,
                 op=op,
                 threshold=threshold,
                 level=float(level) if level is not None else None,
+                window=window,
             )
         )
     return out
@@ -608,6 +693,7 @@ def _static_registry(
             value_kind="gauge",
             source=p.source,
             description="probe health (1 ok / 0 failed) — mean 即观测可用率",
+            labels=frozenset(p.labels),
         )
     for spec in derived:  # derived ratio scalars are declared too → SLO-addressable
         reg[spec.name] = MetricFamily(
@@ -617,6 +703,7 @@ def _static_registry(
             value_kind="scalar",
             source="http",
             description=spec.description,
+            labels=reg[spec.num].labels | reg[spec.den].labels,
         )
     reg.update({d.name: d for d in workload.describe()})
     return reg
@@ -641,6 +728,8 @@ def _validate_slo(
     declared_services: set[str],
     loads: list[LoadProfile],
     per_pod_only: set[tuple[str, str]] = frozenset(),  # (family, service) with no aggregate
+    *,
+    cooldown_s: float = 0.0,
 ) -> None:
     """Fail fast on a misconfigured gate (a perf gate must not silently skip).
 
@@ -657,43 +746,55 @@ def _validate_slo(
     for a in slo:
         name, labels, stat = parse_ref(a.metric)
         fam = registry.get(name)
-        slice_labels = {k: v for k, v in labels.items() if k != "service"}  # facet / stage
-        if len(slice_labels) > 1:
-            raise ValueError(
-                f"slo.metric {a.metric!r}: at most one facet/stage slice label "
-                f"(report is a marginal pivot, not a cube); got {sorted(slice_labels)}"
-            )
+        non_service_labels = {k: v for k, v in labels.items() if k != "service"}
 
-        if "service" in labels:
-            # a `service` label selects a resource-side series — pin it down hard, or
-            # ``request.duration_ms{service="chat"}.p99`` would pass config then
-            # silently go missing on every run.
+        if a.window == "cooldown":
+            if cooldown_s <= 0:
+                raise ValueError(
+                    f"slo.metric {a.metric!r}: window='cooldown' requires cooldown_s > 0"
+                )
+            if fam is None or fam.side != "resource":
+                raise ValueError(
+                    f"slo.metric {a.metric!r}: window='cooldown' only supports "
+                    "resource-side time-sampled metrics"
+                )
+            if fam.value_kind not in ("gauge", "counter"):
+                raise ValueError(
+                    f"slo.metric {a.metric!r}: window='cooldown' needs a raw "
+                    f"gauge/counter series, got {fam.value_kind}"
+                )
+
+        if fam is not None and fam.side == "resource":
+            # Resource probes may expose their own bounded dimensions (for
+            # example task_type/state). Only request-slice labels are
+            # forbidden on this side.
+            slice_labels = {k: v for k, v in non_service_labels.items() if k == "stage"}
             if stat is None:
                 raise ValueError(
-                    f"slo.metric {a.metric!r}: a `service`-labeled metric needs an explicit "
-                    f"stat ('<name>{{service=\"…\"}}.<stat>') — a resource series, not an alias"
-                )
-            if fam is None:
-                raise ValueError(f"slo.metric {a.metric!r}: {name!r} is not a declared metric")
-            if fam.side != "resource":
-                raise ValueError(
-                    f"slo.metric {a.metric!r}: a `service` label is only valid on a "
-                    f"resource-side metric; {name!r} is request-side"
+                    f"slo.metric {a.metric!r}: a resource metric needs an explicit "
+                    "stat ('<name>{labels}.<stat>')"
                 )
             if slice_labels:
                 raise ValueError(
                     f"slo.metric {a.metric!r}: a resource metric can't also carry a facet/stage "
                     f"label {sorted(slice_labels)}"
                 )
-            validate_ref(a.metric, registry)  # stat legal for the family's value_kind
-            if labels["service"] not in declared_services:
+            unknown_labels = set(labels) - fam.labels
+            if unknown_labels:
                 raise ValueError(
-                    f"slo.metric {a.metric!r}: service {labels['service']!r} not observed "
+                    f"slo.metric {a.metric!r}: unknown labels {sorted(unknown_labels)} "
+                    f"for {name!r}; declared labels: {sorted(fam.labels) or 'none'}"
+                )
+            validate_ref(a.metric, registry)  # stat legal for the family's value_kind
+            service = labels.get("service")
+            if service is not None and service not in declared_services:
+                raise ValueError(
+                    f"slo.metric {a.metric!r}: service {service!r} not observed "
                     f"(observe: {sorted(declared_services) or 'none'})"
                 )
-            if (name, labels["service"]) in per_pod_only:
+            if service is not None and (name, service) in per_pod_only:
                 raise ValueError(
-                    f"slo.metric {a.metric!r}: service {labels['service']!r} is observed "
+                    f"slo.metric {a.metric!r}: service {service!r} is observed "
                     f"per_pod — only {{pod,service}} series exist (no service-level "
                     f"aggregate), so this gate would skip every run; drop per_pod for "
                     f"that service or remove this SLO"
@@ -701,6 +802,17 @@ def _validate_slo(
             continue
 
         # request side (no service label): a builtin alias, or a declared family + legal stat
+        if "service" in labels:
+            raise ValueError(
+                f"slo.metric {a.metric!r}: a `service` label is only valid on a "
+                f"resource-side metric; {name!r} is request-side"
+            )
+        slice_labels = non_service_labels
+        if len(slice_labels) > 1:
+            raise ValueError(
+                f"slo.metric {a.metric!r}: at most one facet/stage slice label "
+                f"(report is a marginal pivot, not a cube); got {sorted(slice_labels)}"
+            )
         if stat is None:
             if name not in SLO_METRICS:
                 raise ValueError(
