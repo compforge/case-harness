@@ -200,6 +200,7 @@ def per_case_deltas(
     """
     envs = sorted({r.env for r in ws.rows.values()})
     cases = sorted({(r.corpus, r.case_id) for r in ws.rows.values()})
+
     def cell(env: str, corpus: str, cid: str) -> float | None:
         row = ws.rows.get((env, corpus, cid))
         return row_overall(row, weights) if row is not None else None

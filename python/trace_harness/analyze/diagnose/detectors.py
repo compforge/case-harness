@@ -7,6 +7,7 @@
 都不依赖业务知识（纯 Node 字段 + 父子边），故走 register_detector 而非 per-kind rules；与 domain
 detector 同一套机制。import 本模块即注册（diagnose/__init__ 引它触发）。
 """
+
 from __future__ import annotations
 
 from trace_harness.analyze.diagnose.registry import register_detector
@@ -35,7 +36,9 @@ def detached(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
     if psid and psid not in ctx.spans:
         return [
             Finding(
-                node.node_id, "detached", "warn",
+                node.node_id,
+                "detached",
+                "warn",
                 note=f"父 span {psid[:8]}… 不在本 trace（跨服务断链 / 采样丢失）",
             )
         ]
@@ -61,7 +64,9 @@ def obs_hole(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
     if gap >= _HOLE_MIN_GAP_MS and gap >= _HOLE_MIN_FRAC * span:
         return [
             Finding(
-                node.node_id, "obs_hole", "info",
+                node.node_id,
+                "obs_hole",
+                "info",
                 note=f"{gap:.0f}ms 未被子节点覆盖（疑似未埋点的耗时）",
             )
         ]
@@ -82,7 +87,9 @@ def propagated(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
         if d.has_error and _error_sig(ctx, d) == sig:
             return [
                 Finding(
-                    node.node_id, "propagated", "info",
+                    node.node_id,
+                    "propagated",
+                    "info",
                     note=f"错误传播副本（源头在更深 node；sig={sig}）",
                 )
             ]

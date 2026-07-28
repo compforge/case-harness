@@ -2,6 +2,7 @@
 
 都是 eager（bake=True）+ 读 facts/结构（不读 raw），故 IR-portable。
 """
+
 from __future__ import annotations
 
 from trace_harness.feature.ctx import Ctx

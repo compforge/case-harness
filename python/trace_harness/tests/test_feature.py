@@ -1,4 +1,5 @@
 """feature 层回归：Feature + pull+memo 引擎（按需算、缓存、依赖自解，无 order/bottom-up）。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,8 +16,16 @@ FIXTURE = Path(__file__).parent / "fixtures" / "trace_genai_sample.jsonl"
 
 def _node(nid: str, start: float, dur: float, parent: str | None = None) -> Node:
     return Node(
-        kind="x", name=nid, primary_span_id=nid, span_ids=[nid], facts={},
-        start_ms=start, duration_ms=dur, service=None, node_id=nid, parent_node_id=parent,
+        kind="x",
+        name=nid,
+        primary_span_id=nid,
+        span_ids=[nid],
+        facts={},
+        start_ms=start,
+        duration_ms=dur,
+        service=None,
+        node_id=nid,
+        parent_node_id=parent,
     )
 
 

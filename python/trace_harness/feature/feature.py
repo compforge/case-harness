@@ -9,6 +9,7 @@
 依赖靠 `Ctx.get` 递归 pull + memo 自解（wall_ms 在 compute 里 `ctx.get(child,"wall_ms")`），
 故**无 order、无显式 bottom-up**。`matches`/`claims` 是结构装配、不是 Feature——树先定，再算特征。
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
