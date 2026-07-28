@@ -35,7 +35,9 @@ from perf_harness.metric import (
     ScalarSummary,
     parse_ref,
     resolve,
+    series_id,
 )
+from perf_harness.metric.reduce import time_series_summary
 from perf_harness.model import RequestStats, TrialResult
 
 # builtin request-side metric families (aggregated from judged Outcomes) — always
@@ -147,22 +149,14 @@ class MetricStore:
         unlabeled resource metrics). An undotted ``name`` is a builtin RequestStats
         alias (``p99_ms`` / ``error_rate`` / …)."""
         name, labels, stat = parse_ref(ref)
-        if "service" in labels:  # resource (time_sampled) metric for a specific pod/service
+        family = trial.metrics.get(name) or self._families.get(name)
+        if family is not None and family.side == "resource":
             if stat is None:
-                # a service series is always addressed with a stat; defensive — config
-                # validation rejects a stat-less service ref, this just never crashes.
                 return Missing("no_data")
             val = resolve(trial.probe_metrics, ref)
             if val is not None:
                 return val
-            # absent value: distinguish "the slice never existed" from "the probe that
-            # would have produced it FAILED" — an SLO/analysis must not read a broken
-            # /metrics as an ordinary empty slice. Probe naming convention: the unique
-            # probe id is `<family-prefix>.<service>` (e.g. metrics.chat, top.planit).
-            probe_id = f"{name.split('.', 1)[0]}.{labels['service']}"
-            if probe_id in trial.probe_errors:
-                return Missing("probe_error")
-            return Missing("no_slice")
+            return self._resource_missing(trial, name, labels)
         sl = self._request_slice(trial, labels)
         if sl is None:
             return Missing("no_slice")
@@ -174,6 +168,40 @@ class MetricStore:
             summaries = {**trial.probe_metrics, **summaries}
         v = resolve(summaries, f"{name}.{stat}")
         return v if v is not None else Missing("no_data")
+
+    def query_window(self, trial: TrialResult, ref: str, *, start_s: float) -> Read:
+        """Resolve a resource metric from raw samples at/after ``start_s``.
+
+        This is the same address and reducer used by the measurement summary, but
+        against a different time window. Request distributions and derived scalars
+        have no raw time-sampled series and are rejected at config time.
+        """
+        name, labels, stat = parse_ref(ref)
+        family = trial.metrics.get(name) or self._families.get(name)
+        if family is None or family.side != "resource" or stat is None:
+            return Missing("no_data")
+        health_labels = {"service": labels["service"]} if "service" in labels else {}
+        health_sid = series_id(f"{name.split('.', 1)[0]}.up", health_labels)
+        health = trial.series.get(health_sid)
+        health_samples = (
+            [sample for sample in health.samples if sample.t >= start_s] if health else []
+        )
+        if not health_samples or any(sample.value <= 0 for sample in health_samples):
+            return Missing("probe_error")
+        raw = trial.series.get(series_id(name, labels))
+        if raw is None:
+            return self._resource_missing(trial, name, labels)
+        samples = [sample for sample in raw.samples if sample.t >= start_s]
+        # A labeled series may disappear while its probe still succeeds. Requiring
+        # a value on the probe's final cooldown tick prevents `.last` from reading a
+        # stale pre-scale-down sample as a successful final state.
+        if not samples or samples[-1].t < health_samples[-1].t:
+            return Missing("probe_error")
+        summary = time_series_summary(samples, family.value_kind)
+        if summary is None:
+            return Missing("no_data")
+        value = resolve({series_id(name, labels): summary}, ref)
+        return value if value is not None else Missing("no_data")
 
     def summary(self, trial: TrialResult, sid: str) -> MetricSummary | None:
         """The typed summary for a concrete series id (no stat) on a trial, or None —
@@ -215,3 +243,13 @@ class MetricStore:
             return trial.by_stage.get(labels["stage"])
         ((key, val),) = labels.items()  # a single facet key=value
         return trial.by_facet.get(key, {}).get(val)
+
+    @staticmethod
+    def _resource_missing(trial: TrialResult, name: str, labels: dict[str, str]) -> Missing:
+        """Distinguish a broken producing probe from an absent resource series."""
+        service = labels.get("service")
+        if service is not None:
+            probe_id = f"{name.split('.', 1)[0]}.{service}"
+            if probe_id in trial.probe_errors:
+                return Missing("probe_error")
+        return Missing("no_slice" if labels else "no_data")

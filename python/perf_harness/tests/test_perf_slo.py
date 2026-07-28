@@ -5,9 +5,12 @@ from perf_harness.config import load_experiment
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.drive.workload import MockWorkload
 from perf_harness.engine import Engine, Experiment, Subject
+from perf_harness.metric import MetricFamily
 from perf_harness.model import (
     RequestStats,
     ResourceProfile,
+    Sample,
+    Series,
     SloAssertion,
     Target,
     TrialResult,
@@ -67,6 +70,36 @@ def test_slo_missing_label_slice_is_skipped():
     assert c.observed is None and c.skipped and not c.passed
 
 
+def test_cooldown_slo_reduces_exact_resource_series_labels():
+    t = _trial(40, p99=100)
+    sid = 'metrics.task_count{service="worker",state="running",task_type="batch"}'
+    t.metrics = {
+        "metrics.task_count": MetricFamily(
+            "metrics.task_count", "count", "resource", "gauge", "http"
+        )
+    }
+    t.series = {
+        sid: Series(
+            "task_count",
+            "count",
+            [
+                Sample(0.5, 10.0),
+                Sample(1.1, 3.0),
+                Sample(1.2, 0.0),
+            ],
+        ),
+        'metrics.up{service="worker"}': Series(
+            "up",
+            "",
+            [Sample(1.1, 1.0), Sample(1.2, 1.0)],
+        ),
+    }
+    t.cooldown_start_s = 1.0
+    ref = f"{sid}.last"
+    check = evaluate_slo(t, [SloAssertion(ref, "lte", 0, window="cooldown")])[0]
+    assert check.passed and check.observed == 0.0
+
+
 def test_slo_facet_label_reads_the_facet_slice():
     t = _trial(40, p99=100)  # overall p99 = 100
     simple = RequestStats(
@@ -123,6 +156,115 @@ def test_parse_slo_and_abort(tmp_path):
     assert len(exp.slo) == 2
     assert exp.slo[0].op == "lt" and exp.slo[0].threshold == 2000
     assert exp.slo[1].level == 40
+
+
+def test_parse_cooldown_slo(tmp_path):
+    extra = (
+        "cooldown_s: 1\n"
+        "slo:\n"
+        "  - { metric: client.inflight.last, window: cooldown, lte: 0 }\n"
+        "load: { model: open, levels: [1], steady_s: 0.1 }\n"
+    )
+    exp, _ = load_experiment(_write(tmp_path, extra))
+    assert exp.slo[0].window == "cooldown"
+
+
+def test_cooldown_slo_accepts_resource_series_labels(tmp_path):
+    extra = (
+        "cooldown_s: 1\n"
+        "observe:\n"
+        "  - name: worker\n"
+        "    probes: [metrics]\n"
+        "    scrape:\n"
+        "      - { from: task_count, as: task_count, kind: gauge, "
+        "by: [task_type, state] }\n"
+        "slo:\n"
+        '  - { metric: \'metrics.task_count{service="worker",'
+        'task_type="batch",state="running"}.last\', window: cooldown, lte: 0 }\n'
+        "load: { model: open, levels: [1], steady_s: 0.1 }\n"
+    )
+    exp, _ = load_experiment(_write(tmp_path, extra))
+    assert exp.slo[0].window == "cooldown"
+
+
+def test_cooldown_slo_rejects_unknown_resource_label(tmp_path):
+    extra = (
+        "cooldown_s: 1\n"
+        "observe:\n"
+        "  - name: worker\n"
+        "    probes: [metrics]\n"
+        "    scrape:\n"
+        "      - { from: task_count, as: task_count, kind: gauge, "
+        "by: [task_type, state] }\n"
+        "slo:\n"
+        '  - { metric: \'metrics.task_count{service="worker",'
+        'task_tipe="batch",state="running"}.last\', window: cooldown, lte: 0 }\n'
+        "load: { model: open, levels: [1], steady_s: 0.1 }\n"
+    )
+    with pytest.raises(ValueError, match="unknown labels.*task_tipe"):
+        load_experiment(_write(tmp_path, extra))
+
+
+def test_cooldown_slo_skips_stale_or_failed_probe_data():
+    t = _trial(40, p99=100)
+    sid = 'metrics.task_count{service="worker",state="running",task_type="batch"}'
+    t.metrics = {
+        "metrics.task_count": MetricFamily(
+            "metrics.task_count",
+            "count",
+            "resource",
+            "gauge",
+            "http",
+            labels=frozenset({"service", "state", "task_type"}),
+        )
+    }
+    t.cooldown_start_s = 1.0
+    t.series = {
+        sid: Series("task_count", "count", [Sample(1.1, 0.0)]),
+        'metrics.up{service="worker"}': Series("up", "", [Sample(1.1, 1.0), Sample(1.2, 1.0)]),
+    }
+    assertion = SloAssertion(f"{sid}.last", "lte", 0, window="cooldown")
+    assert evaluate_slo(t, [assertion])[0].skipped
+
+    t.series['metrics.up{service="worker"}'].samples[-1] = Sample(1.1, 0.0)
+    assert evaluate_slo(t, [assertion])[0].skipped
+
+
+def test_request_slo_unknown_facet_key_still_fails_fast(tmp_path):
+    extra = (
+        "slo: [ { metric: 'p99_ms{unknown=\"x\"}', lte: 100 } ]\n"
+        "load: { model: open, levels: [1], steady_s: 0.1 }\n"
+    )
+    with pytest.raises(ValueError, match="facet unknown=x unknown"):
+        load_experiment(_write(tmp_path, extra))
+
+
+def test_cooldown_slo_requires_cooldown(tmp_path):
+    extra = (
+        "slo: [ { metric: client.inflight.last, window: cooldown, lte: 0 } ]\n"
+        "load: { model: open, levels: [1], steady_s: 0.1 }\n"
+    )
+    with pytest.raises(ValueError, match="requires cooldown_s"):
+        load_experiment(_write(tmp_path, extra))
+
+
+def test_cooldown_slo_rejects_request_metric(tmp_path):
+    extra = (
+        "cooldown_s: 1\n"
+        "slo: [ { metric: p99_ms, window: cooldown, lte: 100 } ]\n"
+        "load: { model: open, levels: [1], steady_s: 0.1 }\n"
+    )
+    with pytest.raises(ValueError, match="resource-side time-sampled"):
+        load_experiment(_write(tmp_path, extra))
+
+
+def test_bad_slo_window_fails_fast(tmp_path):
+    extra = (
+        "slo: [ { metric: p99_ms, window: recovery, lte: 100 } ]\n"
+        "load: { model: open, levels: [1], steady_s: 0.1 }\n"
+    )
+    with pytest.raises(ValueError, match="slo.window"):
+        load_experiment(_write(tmp_path, extra))
 
 
 def test_bad_slo_metric_fails_fast(tmp_path):

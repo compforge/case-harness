@@ -21,7 +21,9 @@ OK, FAILED, PENDING = CellState.OK, CellState.FAILED, CellState.PENDING
 
 
 def _row(case_id, solve_state, score_states, dims=None, err=None):
-    r = Row(env="model-alpha", env_key="model-alpha", corpus="c", case_id=case_id, query="q")
+    r = Row(
+        env="model-alpha", env_key="model-alpha", corpus="c", case_id=case_id, query="q"
+    )
     r.solve = SolveCell(
         state=solve_state, response="a" if solve_state is OK else None, error=err
     )
@@ -73,9 +75,9 @@ def test_eval_verdict_all_pass_omits_reason():
 # ── perf ────────────────────────────────────────────────────────────────────
 
 
-def _chk(metric, op, thr, observed, state, level=None):
+def _chk(metric, op, thr, observed, state, level=None, window="measurement"):
     return NS(
-        assertion=NS(metric=metric, op=op, threshold=thr, level=level),
+        assertion=NS(metric=metric, op=op, threshold=thr, level=level, window=window),
         observed=observed,
         state=state,
     )
@@ -171,3 +173,28 @@ def test_perf_verdict_pass():
         "metric": "p99_ms",
         "observed": 80,
     }
+
+
+def test_perf_verdict_names_cooldown_window():
+    run = NS(
+        experiment="e",
+        run_id="r",
+        created_at="t",
+        passed=True,
+        trials=[
+            NS(
+                slo=[
+                    _chk(
+                        "metrics.task_count.last",
+                        "lte",
+                        0,
+                        0,
+                        "pass",
+                        window="cooldown",
+                    )
+                ]
+            )
+        ],
+    )
+    doc = PV.build_verdict_doc(run)
+    assert doc["checks"][0]["name"].endswith("[cooldown]")

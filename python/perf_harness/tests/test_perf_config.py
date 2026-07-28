@@ -197,6 +197,57 @@ def test_mock_bypasses_unregistered_workload(tmp_path):
     assert isinstance(exp.workload, MockWorkload)
 
 
+def test_extension_module_registers_workload_and_probe(tmp_path, monkeypatch):
+    module = tmp_path / "perf_consumer_ext.py"
+    module.write_text(
+        "from perf_harness import (\n"
+        "    FamilySpec, Outcome, Probe, Workload, register_probe, register_workload\n"
+        ")\n"
+        "class ExtensionWorkload(Workload):\n"
+        "    name = 'extension-workload'\n"
+        "    async def fire(self, target, client, case, run_id):\n"
+        "        return Outcome(status=200, duration_ms=1.0)\n"
+        "class ExtensionProbe(Probe):\n"
+        "    name = 'extension-probe'\n"
+        "    source = 'test'\n"
+        "    families = {'value': FamilySpec('count')}\n"
+        "    def __init__(self, cfg):\n"
+        "        self._service = cfg.service\n"
+        "        self.name = f'{self.name}.{cfg.service}'\n"
+        "        self.answer = cfg.options['answer']\n"
+        "    async def sample(self, ctx):\n"
+        "        return {'value': float(self.answer)}\n"
+        "register_workload('extension-workload', lambda cfg: ExtensionWorkload())\n"
+        "register_probe('extension-probe', ExtensionProbe)\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(
+        "extensions: [perf_consumer_ext]\n"
+        "subject: { name: s, base_url: 'http://x' }\n"
+        "resources: [ {} ]\n"
+        "workload: { name: extension-workload }\n"
+        "load: { model: closed, levels: [1], steady_s: 0.1 }\n"
+        "observe:\n"
+        "  - name: s\n"
+        "    probes: [ { name: extension-probe, answer: 42 } ]\n"
+    )
+    exp, _ = load_experiment(str(cfg))
+    assert exp.workload.name == "extension-workload"
+    probe = next(p for p in exp.probes if p.name == "extension-probe.s")
+    assert probe.answer == 42 and probe.labels == {"service": "s"}
+
+
+def test_cooldown_parses_and_rejects_negative(tmp_path):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(_SINGLE + "cooldown_s: 12\n")
+    exp, _ = load_experiment(str(cfg))
+    assert exp.cooldown_s == 12
+    cfg.write_text(_SINGLE + "cooldown_s: -1\n")
+    with pytest.raises(ValueError, match="cooldown_s"):
+        load_experiment(str(cfg))
+
+
 def test_slo_multi_facet_label_rejected(tmp_path):
     # marginal pivot, not a cube → at most one facet/stage slice label
     extra = (

@@ -6,6 +6,7 @@ from perf_harness.observe.k8s import (
     _parse_mem_mi,
     parse_kubectl_top,
     parse_kubectl_top_per_pod,
+    parse_pod_counts,
     parse_pod_resources,
     parse_ps_rss,
 )
@@ -82,6 +83,58 @@ def test_parse_pod_resources():
         }
     }
     assert parse_pod_resources("not json") == {}  # probe skips itself this tick
+
+
+def test_parse_pod_counts():
+    text = json.dumps(
+        {
+            "items": [
+                {
+                    "metadata": {"name": "ready"},
+                    "status": {
+                        "phase": "Running",
+                        "conditions": [{"type": "Ready", "status": "True"}],
+                    },
+                },
+                {
+                    "metadata": {"name": "blocked"},
+                    "status": {
+                        "phase": "Pending",
+                        "conditions": [
+                            {
+                                "type": "PodScheduled",
+                                "status": "False",
+                                "reason": "Unschedulable",
+                            }
+                        ],
+                    },
+                },
+                {
+                    "metadata": {
+                        "name": "terminating",
+                        "deletionTimestamp": "2026-01-01T00:00:00Z",
+                    },
+                    "status": {
+                        "phase": "Running",
+                        "conditions": [{"type": "Ready", "status": "True"}],
+                    },
+                },
+                {
+                    "metadata": {"name": "completed"},
+                    "status": {"phase": "Succeeded", "conditions": []},
+                },
+            ]
+        }
+    )
+    assert parse_pod_counts(text) == {
+        "total": 4,
+        "active": 3,
+        "ready": 1,
+        "running": 2,
+        "pending": 1,
+        "unschedulable": 1,
+        "terminating": 1,
+    }
 
 
 def test_parse_ps_rss():

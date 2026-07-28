@@ -25,6 +25,7 @@ from perf_harness.drive.load import Pacing as Pacing
 from perf_harness.drive.load import Schedule as Schedule
 from perf_harness.drive.load import Stage as Stage
 from perf_harness.drive.workload import MockWorkload as MockWorkload
+from perf_harness.drive.workload import TrialContext as TrialContext
 from perf_harness.drive.workload import Workload as Workload
 from perf_harness.drive.workload import build_workload as build_workload
 from perf_harness.drive.workload import register_workload as register_workload
@@ -56,13 +57,17 @@ from perf_harness.model import TrialStop as TrialStop
 from perf_harness.model import Verdict as Verdict
 from perf_harness.model import make_run_id as make_run_id
 from perf_harness.observe import ClientProbe as ClientProbe
+from perf_harness.observe import FamilySpec as FamilySpec
 from perf_harness.observe import KubectlTopProbe as KubectlTopProbe
 from perf_harness.observe import MetricsScrapeProbe as MetricsScrapeProbe
 from perf_harness.observe import PerWorkerRSSProbe as PerWorkerRSSProbe
+from perf_harness.observe import PodCountProbe as PodCountProbe
 from perf_harness.observe import Probe as Probe
+from perf_harness.observe import ProbeConfig as ProbeConfig
 from perf_harness.observe import ProbeContext as ProbeContext
 from perf_harness.observe import ResourceLimitsProbe as ResourceLimitsProbe
 from perf_harness.observe import RestartProbe as RestartProbe
+from perf_harness.observe import register_probe as register_probe
 from perf_harness.report import write_report as write_report
 from perf_harness.report import write_run as write_run
 from perf_harness.runio import load_outcomes as load_outcomes

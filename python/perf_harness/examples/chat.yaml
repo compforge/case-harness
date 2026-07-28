@@ -5,12 +5,13 @@
 #   load shape / breaker / graceful stop → docs/load-model-redesign.md
 #   SLO refs / labels / skip semantics   → docs/result-semantics.md + metric-model.md
 name: chat-sizing                 # experiment name → runs/<name>/<run_id>/ (runs accumulate)
+# extensions: [my_project.perf]   # imports register_workload/register_probe side effects
 
 subject:                          # 压谁 + 怎么到达；不写 provisioner = 直连已部署服务
   name: chat-server
   base_url: http://chat-server.vke-system.svc:8001   # chat httpPort = 8001 (also serves /metrics)
   headers: {}
-  k8s:                            # enables top/rss/restart/limits probes + metrics prefix
+  k8s:                            # enables top/rss/restart/limits/pods probes + metrics prefix
     kubeconfig: ~/.kube/a-dev
     namespace: vke-system
     app_label: app.kubernetes.io/name=chat-server
@@ -57,7 +58,7 @@ load:                             # 负载档（网格第二轴）
 
 observe:                          # 资源观测：self + 下游同一形状；省 k8s 的条目 = subject
   - name: chat
-    probes: [metrics, top, rss, restart, limits]
+    probes: [metrics, top, rss, restart, limits, pods]
     # scrape:                     # 拉任意 Prometheus 族进同一张 metric 表
     #   - { from: gen_ai_server_time_to_first_token_seconds_sum,   as: sse_ttft_sum, unit: s }
     #   - { from: gen_ai_server_time_to_first_token_seconds_count, as: sse_ttft_n }
@@ -72,6 +73,7 @@ observe:                          # 资源观测：self + 下游同一形状；�
 #       description: "server-side mean TTFT" }
 
 observe_interval_s: 5
+# cooldown_s: 300                 # deactivate 后继续采样；默认不进汇总/SLO，window: cooldown 可门禁
 runs_dir: ./runs                  # each run → runs/chat-sizing/<run_id>/
 
 # slo:                            # run 级门（三态，skip≠pass）→ CI 退出码 + SLO-aware 容量

@@ -72,9 +72,9 @@ class KubectlTopProbe(_K8sProbe):
     name = "top"
     families = {
         "cpu_m": FamilySpec(
-            "millicores", "gauge", "pod CPU as the scheduler sees it (kubectl top)"
+            "millicores", "gauge", "pod CPU as the scheduler sees it (kubectl top)", ("pod",)
         ),
-        "mem_mi": FamilySpec("MiB", "gauge", "pod working-set memory (kubectl top)"),
+        "mem_mi": FamilySpec("MiB", "gauge", "pod working-set memory (kubectl top)", ("pod",)),
     }
 
     async def sample(self, ctx: ProbeContext) -> dict[str, float]:
@@ -185,10 +185,51 @@ class RestartProbe(_K8sProbe):
         return {"restarts": float(total)}
 
 
+class PodCountProbe(_K8sProbe):
+    """Selected pod counts by lifecycle state.
+
+    Unlike resource usage, replica count is itself a capacity signal for
+    autoscaled services. One ``pods.count{state=…}`` family keeps the state
+    vocabulary as bounded labels so arbitrary services can use the same probe.
+    """
+
+    name = "pods"
+    families = {
+        "count": FamilySpec(
+            "count", "gauge", "selected Kubernetes pods by lifecycle state", ("state",)
+        ),
+    }
+
+    async def sample(self, ctx: ProbeContext) -> dict[str, float]:
+        k8s = self._ref(ctx)
+        if not k8s:
+            return {}
+        text = await run_capture(
+            [
+                "kubectl",
+                "--kubeconfig",
+                k8s.kubeconfig,
+                "-n",
+                k8s.namespace,
+                "get",
+                "pod",
+                "-l",
+                k8s.app_label,
+                "-o",
+                "json",
+            ]
+        )
+        return {
+            series_id("count", {"state": state}): float(value)
+            for state, value in parse_pod_counts(text).items()
+        }
+
+
 class ResourceLimitsProbe(_K8sProbe):
     """The container's configured resource **request/limit** (from the pod spec) — the
-    allotment, vs ``top``'s usage. A constant within a trial, so it's a metric whose
-    series never varies: read the spec ONCE, cache, emit the constant each tick.
+    allotment, vs ``top``'s usage. The probe re-reads the selected pod set each
+    tick because replicas may change during a trial; caching the initial set
+    would make autoscaling curves report stale aggregate limits.
 
     Despite the name it emits BOTH ``request`` and ``limit`` (k8s calls the block
     ``ResourceRequirements``). Same units as ``top`` (cpu millicores / mem MiB), so the
@@ -205,28 +246,32 @@ class ResourceLimitsProbe(_K8sProbe):
     # these reference lines on the same usage chart (it groups series by unit).
     families = {
         "cpu_request": FamilySpec(
-            "millicores", "gauge", "container CPU request (pod spec, summed over containers)"
+            "millicores",
+            "gauge",
+            "container CPU request (pod spec, summed over containers)",
+            ("pod",),
         ),
         "cpu_limit": FamilySpec(
-            "millicores", "gauge", "container CPU limit (pod spec, summed over containers)"
+            "millicores",
+            "gauge",
+            "container CPU limit (pod spec, summed over containers)",
+            ("pod",),
         ),
         "mem_request": FamilySpec(
-            "MiB", "gauge", "container memory request (pod spec, summed over containers)"
+            "MiB",
+            "gauge",
+            "container memory request (pod spec, summed over containers)",
+            ("pod",),
         ),
         "mem_limit": FamilySpec(
-            "MiB", "gauge", "container memory limit (pod spec, summed over containers)"
+            "MiB",
+            "gauge",
+            "container memory limit (pod spec, summed over containers)",
+            ("pod",),
         ),
     }
 
-    def __init__(
-        self, *, k8s: K8sRef | None = None, service: str | None = None, per_pod: bool = False
-    ) -> None:
-        super().__init__(k8s=k8s, service=service, per_pod=per_pod)
-        self._cached: dict[str, float] | None = None  # the spec doesn't change within a trial
-
     async def sample(self, ctx: ProbeContext) -> dict[str, float]:
-        if self._cached is not None:
-            return self._cached
         k8s = self._ref(ctx)
         if not k8s:
             return {}
@@ -257,8 +302,44 @@ class ResourceLimitsProbe(_K8sProbe):
             for vals in per_pod.values():
                 for metric, v in vals.items():
                     out[metric] = out.get(metric, 0.0) + v
-        self._cached = out
         return out
+
+
+def parse_pod_counts(text: str) -> dict[str, int]:
+    """Parse ``kubectl get pod -o json`` into bounded lifecycle counts."""
+    counts = {
+        "total": 0,
+        "active": 0,
+        "ready": 0,
+        "running": 0,
+        "pending": 0,
+        "unschedulable": 0,
+        "terminating": 0,
+    }
+    for pod in json.loads(text or "{}").get("items", []):
+        counts["total"] += 1
+        metadata = pod.get("metadata") or {}
+        status = pod.get("status") or {}
+        phase = str(status.get("phase") or "").lower()
+        if phase not in ("succeeded", "failed"):
+            counts["active"] += 1
+        if phase in ("running", "pending"):
+            counts[phase] += 1
+        if metadata.get("deletionTimestamp"):
+            counts["terminating"] += 1
+        conditions = status.get("conditions") or []
+        if not metadata.get("deletionTimestamp") and any(
+            c.get("type") == "Ready" and c.get("status") == "True" for c in conditions
+        ):
+            counts["ready"] += 1
+        if any(
+            c.get("type") == "PodScheduled"
+            and c.get("status") == "False"
+            and c.get("reason") == "Unschedulable"
+            for c in conditions
+        ):
+            counts["unschedulable"] += 1
+    return counts
 
 
 # ---------------------------------------------------------------------------

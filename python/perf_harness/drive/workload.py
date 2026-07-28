@@ -18,12 +18,28 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 from spec_case.model import Case
 
 from perf_harness.metric import FacetDescriptor, MetricFamily
-from perf_harness.model import Outcome, Target, Verdict
+from perf_harness.model import Outcome, ResourceProfile, Target, Verdict
+
+if TYPE_CHECKING:
+    from perf_harness.drive.load import LoadProfile
+
+
+@dataclass(frozen=True)
+class TrialContext:
+    """Handles and coordinates shared by a workload's trial lifecycle hooks."""
+
+    target: Target
+    client: httpx.AsyncClient
+    run_id: str
+    resources: ResourceProfile
+    load: LoadProfile
 
 
 class Workload(ABC):
@@ -31,6 +47,26 @@ class Workload(ABC):
 
     #: stable id used by the workload registry (build_workload / config ``workload.name``)
     name: str = "workload"
+
+    async def setup(self, ctx: TrialContext) -> None:
+        """Prepare external state before measurement and observation begin.
+
+        A partially completed setup is still followed by ``cleanup`` so the
+        workload can release anything it already created.
+        """
+        return None
+
+    async def deactivate(self, ctx: TrialContext) -> None:
+        """Deactivate trial-scoped workload state after measurement.
+
+        Probes keep sampling while this hook issues normal stop/release requests.
+        The configured cooldown starts after it returns.
+        """
+        return None
+
+    async def cleanup(self, ctx: TrialContext) -> None:
+        """Finally clean up trial-scoped external state after observation stops."""
+        return None
 
     @abstractmethod
     async def fire(

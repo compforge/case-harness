@@ -23,5 +23,9 @@ from perf_harness.observe.base import prom_sum_by as prom_sum_by
 from perf_harness.observe.base import prom_sum_where as prom_sum_where
 from perf_harness.observe.k8s import KubectlTopProbe as KubectlTopProbe
 from perf_harness.observe.k8s import PerWorkerRSSProbe as PerWorkerRSSProbe
+from perf_harness.observe.k8s import PodCountProbe as PodCountProbe
 from perf_harness.observe.k8s import ResourceLimitsProbe as ResourceLimitsProbe
 from perf_harness.observe.k8s import RestartProbe as RestartProbe
+from perf_harness.observe.registry import ProbeConfig as ProbeConfig
+from perf_harness.observe.registry import build_probe as build_probe
+from perf_harness.observe.registry import register_probe as register_probe
