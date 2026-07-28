@@ -49,8 +49,9 @@ perf_harness/
 
 ### 扩展点（业务接入只碰这两个）
 
-- **`Workload`**（怎么压 + 怎么判）：`fire(case)` 只记原始观测，`judge(outcome)→Verdict` 才裁决（纯函数，可离线重判）；SSE"200 但流坏了"靠 override `judge`。各服务在自己项目写、`register_workload` 注册，框架只内置 mock。
-- **`Probe`**（看什么）：`families` 单表声明元数据（FamilySpec：unit/value_kind/description，describe/summarize/Engine 共读），`sample()` 周期采样；Source 不绑 k8s（client/http/k8s 句柄），一次 run 混挂多 Source 才能做瓶颈归因。
+- **`Workload`**（怎么压 + 怎么判）：`fire(case)` 只记原始观测，`judge(outcome)→Verdict` 才裁决（纯函数，可离线重判）；SSE"200 但流坏了"靠 override `judge`。各服务在自己项目写、`register_workload` 注册；Trial 固定按 `setup → measurement → deactivation → cooldown → cleanup` 运行，其中业务 hook 只有 `setup/deactivate/cleanup`。
+- **`Probe`**（看什么）：`families` 单表声明元数据（FamilySpec：unit/value_kind/description，describe/summarize/Engine 共读），`sample()` 周期采样；Source 不绑 k8s（client/http/k8s 句柄），consumer 可通过 extension module + `register_probe` 扩展，一次 run 混挂多 Source 才能做瓶颈归因。
+- **压后观测不污染容量口径**：`cooldown_s` 延长 raw series 以观察回收/缩容；Trial 汇总与默认 SLO 只读 measurement window，只有显式 `window: cooldown` 的资源 SLO 读取 cooldown。
 
 ### 判定与可信度语义（细节见 docs/result-semantics.md + metric-model.md §3.6-3.8）
 
@@ -71,3 +72,4 @@ perf_harness/
 - metric 模型（含 otel-collector 对照）：[`docs/metric-model.md`](docs/metric-model.md)
 - 结果/SLO 语义：[`docs/result-semantics.md`](docs/result-semantics.md)
 - 加压模型细节：[`docs/load-model-redesign.md`](docs/load-model-redesign.md)
+- consumer 扩展与 trial 生命周期：[`docs/extensions.md`](docs/extensions.md)

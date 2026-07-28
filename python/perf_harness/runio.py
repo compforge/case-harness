@@ -50,7 +50,7 @@ from perf_harness.model import (
 )
 
 #: bump when run.json's shape changes incompatibly — offline readers check this first
-RUN_SCHEMA = 1
+RUN_SCHEMA = 2
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +202,7 @@ def _family_json(f: MetricFamily) -> dict:
         "value_kind": f.value_kind,
         "source": f.source,
         "description": f.description,
+        "labels": sorted(f.labels),
     }
 
 
@@ -213,6 +214,7 @@ def _family_from(name: str, d: dict) -> MetricFamily:
         value_kind=d["value_kind"],
         source=d.get("source", "client"),
         description=d.get("description", ""),
+        labels=frozenset(d.get("labels") or []),
     )
 
 
@@ -262,6 +264,7 @@ def _slo_json(c: SloCheck) -> dict:
         # a `between` threshold is a (lo, hi) tuple — JSON carries it as a list
         "threshold": list(a.threshold) if isinstance(a.threshold, tuple) else a.threshold,
         "level": a.level,
+        "window": a.window,
         "observed": c.observed,
         "state": c.state,
     }
@@ -275,6 +278,7 @@ def _slo_from(d: dict) -> SloCheck:
             op=d["op"],
             threshold=tuple(thr) if isinstance(thr, list) else thr,
             level=d.get("level"),
+            window=d.get("window", "measurement"),
         ),
         observed=d.get("observed"),
         state=d["state"],
@@ -326,6 +330,7 @@ def _trial_json(r: TrialResult) -> dict:
         "resources": _resources_json(r.resources),
         "load": _load_json(r.load),
         "stop": _stop_json(r.stop),
+        "cooldown_start_s": r.cooldown_start_s,
         "slo": [_slo_json(c) for c in r.slo],
         "registry": {name: _family_json(f) for name, f in r.metrics.items()},
         "request": {
@@ -357,6 +362,7 @@ def _trial_from(d: dict, subject: str) -> TrialResult:
         series={},  # filled from timeseries.csv by load_run
         by_stage={k: _stats_from(s) for k, s in (req.get("by_stage") or {}).items()},
         stop=_stop_from(d.get("stop") or {}),
+        cooldown_start_s=d.get("cooldown_start_s"),
         slo=[_slo_from(c) for c in d.get("slo") or []],
         probe_metrics={sid: _summary_from(s) for sid, s in (d.get("probe_metrics") or {}).items()},
         metrics={name: _family_from(name, f) for name, f in (d.get("registry") or {}).items()},

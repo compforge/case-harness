@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import statistics
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -23,13 +22,12 @@ from dataclasses import dataclass, field
 import httpx
 
 from perf_harness.metric import (
-    CounterSummary,
-    GaugeSummary,
     MetricFamily,
     MetricSummary,
     MetricValueKind,
     series_id,
 )
+from perf_harness.metric.reduce import time_series_summary
 from perf_harness.model import ProbeErrors, Sample, Target
 
 
@@ -80,6 +78,7 @@ class FamilySpec:
     unit: str
     value_kind: MetricValueKind = "gauge"
     description: str = ""
+    labels: tuple[str, ...] = ()
 
 
 class Probe(ABC):
@@ -134,6 +133,7 @@ class Probe(ABC):
                 value_kind=spec.value_kind,
                 source=self.source,
                 description=spec.description,
+                labels=frozenset((*self.labels, *spec.labels)),
             )
             for m, spec in self.families.items()
         ]
@@ -158,33 +158,10 @@ class Probe(ABC):
         """
         out: dict[str, MetricSummary] = {}
         for metric, samples in series.items():
-            if not samples:
-                continue
-            vals = [s.value for s in samples]
             spec = self.families.get(metric)
-            if spec is not None and spec.value_kind == "counter":
-                total = vals[-1]
-                increase = rate = None
-                caveats: frozenset = frozenset()
-                if len(samples) >= 2:
-                    dt = samples[-1].t - samples[0].t
-                    # positive-delta accumulation (Prometheus increase() semantics): a
-                    # scraped service counter resets when its pod restarts — last-first
-                    # would go NEGATIVE and poison rate/SLO. Sum only forward movement
-                    # and flag the reset; the flagged window is still split (the value
-                    # lost between the last pre-reset sample and the reset is unseen).
-                    deltas = [b - a for a, b in zip(vals, vals[1:], strict=False)]
-                    increase = sum(d for d in deltas if d > 0)
-                    rate = increase / dt if dt > 0 else None
-                    if any(d < 0 for d in deltas):
-                        caveats = frozenset({"counter_reset"})
-                out[metric] = CounterSummary(
-                    total=total, rate=rate, increase=increase, caveats=caveats
-                )
-            else:
-                out[metric] = GaugeSummary(
-                    last=vals[-1], mean=statistics.fmean(vals), peak=max(vals)
-                )
+            summary = time_series_summary(samples, spec.value_kind if spec is not None else "gauge")
+            if summary is not None:
+                out[metric] = summary
         return out
 
 
@@ -299,7 +276,7 @@ class MetricsScrapeProbe(Probe):
         # builtins live in, so describe()/summarize() see them like builtins
         self.families = {
             **type(self).families,
-            **{s.name: FamilySpec(s.unit, s.value_kind, s.description) for s in self.scrape},
+            **{s.name: FamilySpec(s.unit, s.value_kind, s.description, s.by) for s in self.scrape},
         }
         if service:  # unique store id (metrics.chat); family stays "metrics", service is a label
             self.name = f"{self.name}.{service}"

@@ -75,6 +75,8 @@ class MetricFamily:
     value_kind: MetricValueKind  # decides legal stat
     source: str = "client"  # client / http / k8s / server — bottleneck grouping
     description: str = ""  # human meaning; surfaced in the report header tooltip
+    labels: frozenset[str] = field(default_factory=frozenset)
+    """Label names this family may emit; concrete values remain on each series."""
 
 
 def series_id(name: str, labels: dict[str, str]) -> str:

@@ -17,6 +17,7 @@ from perf_harness.model import Outcome, ResourceProfile, SloAssertion, Target
 from perf_harness.observe import FamilySpec, Probe
 from perf_harness.report import write_run
 from perf_harness.runio import RUN_SCHEMA, load_outcomes, load_run
+from perf_harness.slo import evaluate_slo
 
 
 class _FakeTop(Probe):
@@ -60,8 +61,15 @@ async def _run(tmp_path):
         slo=[
             SloAssertion(metric="error_rate", op="lt", threshold=0.5),
             SloAssertion(metric="nonexistent_ms.p95", op="lt", threshold=1.0),  # → skipped
+            SloAssertion(
+                metric='top.cpu_m{service="chat"}.last',
+                op="lte",
+                threshold=123.0,
+                window="cooldown",
+            ),
         ],
         observe_interval_s=0.1,
+        cooldown_s=0.12,
         name="rt",
     )
     run = await Engine(exp, run_id="20260101-000000").run()
@@ -79,8 +87,13 @@ async def test_run_json_is_the_full_model(tmp_path):
     assert t["resources"]["workers"] == 2 and t["resources"]["memory"] == "2Gi"
     assert t["load"]["abort_on_error_rate"] == 0.5 and t["load"]["breaker_min_n"] == 5
     assert t["stop"]["reason"] == "deadline"
-    states = {c["metric"]: c["state"] for c in t["slo"]}
-    assert states == {"error_rate": "pass", "nonexistent_ms.p95": "skipped"}
+    states = {(c["metric"], c["window"]): c["state"] for c in t["slo"]}
+    assert states == {
+        ("error_rate", "measurement"): "pass",
+        ("nonexistent_ms.p95", "measurement"): "skipped",
+        ('top.cpu_m{service="chat"}.last', "cooldown"): "pass",
+    }
+    assert t["cooldown_start_s"] is not None
     assert t["registry"]["ttft_ms"]["unit"] == "ms"  # metric metadata persisted
     assert t["request"]["overall"]["n"] == run.trials[0].overall.n
     assert "simple" in t["request"]["by_facet"]["difficulty"]
@@ -111,9 +124,14 @@ async def test_load_run_round_trips_the_store(tmp_path):
     assert [s.value for s in offline.series[sid].samples] == [
         s.value for s in live.series[sid].samples
     ]
+    assert [s.t for s in offline.series[sid].samples] == [s.t for s in live.series[sid].samples]
+    assert offline.metrics["top.cpu_m"].labels == live.metrics["top.cpu_m"].labels
     # stop/slo verdicts survive (offline SLO re-reads agree)
     assert offline.stop == live.stop
+    assert offline.cooldown_start_s == live.cooldown_start_s
     assert [c.state for c in offline.slo] == [c.state for c in live.slo]
+    assert [c.assertion.window for c in offline.slo] == [c.assertion.window for c in live.slo]
+    assert evaluate_slo(offline, [offline.slo[-1].assertion])[0].passed
 
 
 async def test_outcomes_jsonl_is_the_request_raw_layer(tmp_path):

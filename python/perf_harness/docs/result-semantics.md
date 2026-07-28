@@ -39,6 +39,8 @@ run
 
 ### 3.1 SLO-as-config（per-run 门）
 
+SLO 是 Service Level Objective（服务级别目标），即我们希望系统达到的、可以量化验证的目标。
+
 **配置**：Experiment 顶层新增 `slo:` 块，每条断言是 **metric × condition**——切片由 metric 的 **label** 决定（service / facet / stage 都是 label，无单独 scope）：
 
 ```yaml
@@ -49,10 +51,15 @@ slo:
   - { metric: 'p99_ms{difficulty="complex"}',         lt: 5000 }   # facet 切片
   - { metric: 'request.throughput_rps{stage="hold@40"}', gte: 40 } # stage 切片
   - { metric: 'top.cpu_m{service="planit"}.peak',     lt: 1500 }   # 资源·某服务
+  - { metric: 'metrics.task_count{service="worker",task_type="batch",state="running"}.last', window: cooldown, lte: 0 }
 ```
 
 - **metric**：`<name>{labels}.<stat>`（或 undotted 别名 `p99_ms`/`error_rate`/…，可带 label）。
 - **condition**：`lt/lte/gt/gte/between`（`between: [lo, hi]`）。
+- **window**：默认 `measurement`，读取负载测量窗口的既有汇总；`cooldown` 从
+  `Workload.deactivate()` 返回后开始，在 `cooldown_s` 内对资源侧 gauge/counter 原始
+  series 重新聚合。cooldown 需要 `cooldown_s > 0`，不支持请求分布或无原始 series
+  的 derived scalar。
 - **label**：`{service="…"}`（资源·某服务；`observe:` 开 `per_pod` 时该服务的 series 为 `{pod="…",service="…"}`，按 replica 拆）/ `{facetkey="val"}`（请求 facet 切片）/ `{stage="…"}`。统一 `<name>{labels}.<stat>` 寻址，和报告 by_facet/by_service pivot 同一个 group-by-label；资源 metric 是 trial 全局，不能配 facet/stage label。per_pod 服务没有 service 级聚合 series，`{service="…"}` 的 SLO 解析期直接报错（防 CI 门静默变 skip）。
 
 **评估与产出**：每条断言对**每个 trial** 求值（trial 自带 overall/by_facet/by_stage 切片，resolver 按 label 路由）。数据结构：
@@ -77,7 +84,8 @@ class SloCheck:                     # 求值结果（三态）
 
 读经 `MetricStore.query`：返回 `Missing` ⇒ `skipped`，否则比较得 `pass`/`fail`。**skip ≠ pass**（三态的要点）：
 
-- `Run.passed`（CLI 退出码）默认**只看 fail**——skip 不翻退出码但报告显式列出（别误读为通过）；`strict_slo: true` 则 skip 也算失败。
+- `Run.passed`（CLI 退出码）默认**只看 fail**；measurement 的 skip 仅在
+  `strict_slo: true` 时失败，cooldown 的 skip 始终失败，避免观测缺失被误读为已经回收。
 - `slo_passed`（capacity 用）要求**全部 pass**——skip 的档不算确认容量（保守）。
 - typo 进不了 skip：结构非法在解析期就 `ValueError`（见 metric-model.md §3.5）。
 
