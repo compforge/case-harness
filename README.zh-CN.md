@@ -1,10 +1,10 @@
 # case-harness
 
-> **Cases in, verdicts out.** 一组跨语言测试 harness，把"系统健壮不健壮"拆成四个可分开回答的问题——接口对错（e2e）、agent 效果（eval）、压力容量（perf）、链路归因（trace）——共用同一份可积累的 **case** 资产。与 [spec-case](https://github.com/qiankunli/spec-case)（资产格式）、[case-code-review](https://github.com/qiankunli/case-code-review)（白盒消费方）互为姊妹仓。｜ English: [README.md](./README.md)
+> **Cases in, verdicts out.** 一组跨语言测试 harness，把"系统健壮不健壮"拆成若干可分开回答的问题——接口对错（e2e）、agent 效果（eval）、压力容量（perf）、链路归因（trace）与 agent 行动轨迹——共用同一份可积累的 **case** 资产。与 [spec-case](https://github.com/qiankunli/spec-case)（资产格式）、[case-code-review](https://github.com/qiankunli/case-code-review)（白盒消费方）互为姊妹仓。｜ English: [README.md](./README.md)
 
 ## 为什么有这个仓库
 
-一个 AI 项目会越来越复杂——功能多、链路长、测试面广，经常临到发版才发现问题，慌慌张张地修，修完也不敢说系统就完全没问题。本仓库的回答是：把"系统健壮不健壮"拆成几个可以分开回答的问题，各建一类 harness——前三类是**黑盒测试**（发请求看响应），第四类是**开盒分析**（消费请求留下的遥测，看链路内部哪层先反常）：
+一个 AI 项目会越来越复杂——功能多、链路长、测试面广，经常临到发版才发现问题，慌慌张张地修，修完也不敢说系统就完全没问题。本仓库的回答是：把"系统健壮不健壮"拆成几个可以分开回答的问题，各建一类 harness——前三类是**黑盒测试**（发请求看响应），trace 与 trajectory 是互补的**开盒分析**：
 
 | 问题 | 类型 | SDK |
 |------|------|-----|
@@ -12,15 +12,16 @@
 | agent 效果好不好 | 效果测试（eval，黑盒） | `python/eval_harness` |
 | 压力下表现如何 | 压力测试（perf，黑盒） | `python/perf_harness` |
 | 链路内部哪层先反常 | trace 分析（trace，开盒） | `python/trace_harness` |
+| agent 的决策和行动是否合理 | 轨迹评估（trajectory，开盒） | `python/trajectory_harness` |
 
 提供 SDK，不提供测试本身：被测服务（SUT）在自己仓库里以 SDK 形式接入，按自己的协议/认证/资源生命周期组织。
 
 ## 核心思想
 
-1. **四类测试实现思路迥异，但 case 应该是一致的**。case 只描述"如何给系统发请求"，不绑定怎么判定；同一份 case，e2e 拿去看对错，eval 拿去看效果，perf 拿去看压力下的表现。一致性落在数据格式而不是共享代码。
+1. **不同判定实现思路迥异，但 case 应该一致**。case 只描述"如何给系统发请求"，不绑定怎么判定；同一份 case，e2e 拿去看对错，eval 拿去看效果，perf 拿去看压力下的表现。一致性落在数据格式而不是共享代码。
 2. **case 是可积累的资产**。case 与判定解耦后就能持续积累；case 攒得越多，发版前全量跑一遍，就越有底气相信系统没问题。
 3. **一个 experiment 一份 config yaml，产物按 run 落盘**。结果落在 `runs/<scope>/<run-id>/`，记录与渲染分离，历次 run 累积不覆盖，可跨 run 汇总对比。
-4. **一次执行，多面观测**。同一次请求的产出，可以同时采集对错（e2e）、效果（eval）、延迟/资源（perf）、链路归因（trace）四个面的数据——四类 harness 是四种观测视角，不是四次独立发压。
+4. **一次执行，多面观测**。同一次请求可同时服务对错（e2e）、效果（eval）、延迟/资源（perf）、链路归因（trace）和行动轨迹（trajectory）——这些 harness 是不同视角，不是多次独立发压。
 
 统一的输出是 `verdict.json`（schema 见 [`spec/verdict-schema.yaml`](spec/verdict-schema.yaml)）：人读它，CI 读它，agent 开发循环也读它自纠偏。
 
@@ -33,23 +34,24 @@
 ```
 case-harness/
 ├── spec/                # 语言无关约定层：case-schema / verdict-schema / conventions
-├── python/              # Python 工程（uv），四个 sibling SDK + 共享 harness_common
+├── python/              # Python 工程（uv），五个 sibling SDK + 共享 harness_common
 │   ├── e2e_harness/     # API 测试：确定性契约测试，判定即数据，pytest 驱动
 │   ├── eval_harness/    # 效果测试：experiment/Env 对照臂 + Worksheet 大表 + reconciler
 │   ├── perf_harness/    # 压力测试：资源约束下的容量/资源画像
 │   ├── trace_harness/   # trace 分析：OTel/Jaeger span 归因，调用栈 + 判读 + corpus
+│   ├── trajectory_harness/ # agent 轨迹归一与评估
 │   └── harness_common/  # 中立共享层：verdict / llm / report_kit
 ├── go/                  # Go SDK（参考实现，形状对齐 spec/）
 ├── examples/            # 接入示例：api-test / agent-test
 └── docs/                # 跨 SDK 设计文档
 ```
 
-四个 Python SDK 共享同一 uv 工程与 `spec/` 约定，但**互不 import**；公共能力集中在 `harness_common` 这一中立共享层。
+五个 Python SDK 共享同一 uv 工程与 `spec/` 约定，但**互不 import**；公共能力集中在 `harness_common` 这一中立共享层。
 
 ## Quickstart
 
 ```bash
-# Python：四个 SDK 共用一个 uv 工程
+# Python：五个 SDK 共用一个 uv 工程
 cd python && uv sync && uv run pytest -q
 
 # eval_harness 端到端（mock，无需 live 服务）
