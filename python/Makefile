@@ -4,11 +4,11 @@ test:
 	uv run pytest -v
 
 lint:
-	uv run ruff check harness_common/ e2e_harness/ eval_harness/ perf_harness/ trace_harness/
+	uv run ruff check harness_common/ e2e_harness/ eval_harness/ perf_harness/ trace_harness/ trajectory_harness/
 
 fix:
-	uv run ruff check --fix harness_common/ e2e_harness/ eval_harness/ perf_harness/ trace_harness/
-	uv run ruff format harness_common/ e2e_harness/ eval_harness/ perf_harness/ trace_harness/
+	uv run ruff check --fix harness_common/ e2e_harness/ eval_harness/ perf_harness/ trace_harness/ trajectory_harness/
+	uv run ruff format harness_common/ e2e_harness/ eval_harness/ perf_harness/ trace_harness/ trajectory_harness/
 
 build:
 	rm -rf dist
