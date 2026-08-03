@@ -366,7 +366,7 @@ def test_render_interactive_single_file_page(ctx):
     assert "primary_span_id" in page  # span chips 下钻数据
     assert "全部展开" in page  # 折叠控制（交互页区别于静态表格的能力）
     assert "火焰图" in page and 'id="view-flame"' in page  # 菜单 + 火焰图功能区
-    assert '"start_ms"' in page  # 火焰图时间轴依赖 node 的墙钟起点
+    assert '"start_ms"' in page  # 火焰图时间轴依赖 node 的 wall-clock start
     js_body = page.split("<script>", 1)[1].rsplit("</script>", 1)[0]
     assert "</script>" not in js_body  # 嵌入 JSON 已转义 "</"，不会提前闭合标签
 

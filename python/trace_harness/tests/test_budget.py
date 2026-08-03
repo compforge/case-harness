@@ -72,7 +72,7 @@ def test_budget_on_fixture():
     assert b.wall_ms > 0
     for f in (b.llm_frac, b.tool_frac, b.gap_frac):
         assert 0.0 <= f <= 1.0 + 1e-6
-    # 占用不超过墙钟（并集口径的基本自洽）
+    # 占用不超过 wall-clock time（并集口径的基本自洽）
     assert b.llm_ms <= b.wall_ms + 1e-6
     assert b.tool_ms <= b.wall_ms + 1e-6
     d = b.to_dict()

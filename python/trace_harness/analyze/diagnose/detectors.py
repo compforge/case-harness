@@ -1,12 +1,13 @@
 """内置通用拓扑 detector —— 纯结构判读，注册进全局 detector 注册表，对每个 node 跑一遍。
 
 - detached：节点的 primary span 的父 span 不在本 trace —— 跨服务断链 / 采样丢失。
-- obs_hole：有子节点的容器节点，墙钟里未被子节点覆盖的空隙 —— 疑似未埋点的耗时。
+- obs_hole：有子节点的容器节点，wall-clock time 里未被子节点覆盖的空隙 —— 疑似未埋点的耗时。
 - propagated：错误沿父链向上重复记的副本（源头在更深 node）—— 标出副本、留源头那一跳。
 
 都不依赖业务知识（纯 Node 字段 + 父子边），故走 register_detector 而非 per-kind rules；与 domain
 detector 同一套机制。import 本模块即注册（diagnose/__init__ 引它触发）。
 """
+
 from __future__ import annotations
 
 from trace_harness.analyze.diagnose.registry import register_detector
@@ -35,7 +36,9 @@ def detached(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
     if psid and psid not in ctx.spans:
         return [
             Finding(
-                node.node_id, "detached", "warn",
+                node.node_id,
+                "detached",
+                "warn",
                 note=f"父 span {psid[:8]}… 不在本 trace（跨服务断链 / 采样丢失）",
             )
         ]
@@ -54,14 +57,16 @@ def obs_hole(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
     span = hi - lo
     if span <= 0:
         return []
-    # 子区间钳到父节点墙钟内（异步子节点可能越界），并集求覆盖，剩下即空隙
+    # 子区间钳到父节点 wall-clock interval 内（异步子节点可能越界），并集求覆盖，剩下即空隙
     clamped = [(max(lo, k.start_ms), min(hi, k.end_ms)) for k in kids]
     clamped = [(s, e) for s, e in clamped if e > s]
     gap = span - interval_union(clamped)
     if gap >= _HOLE_MIN_GAP_MS and gap >= _HOLE_MIN_FRAC * span:
         return [
             Finding(
-                node.node_id, "obs_hole", "info",
+                node.node_id,
+                "obs_hole",
+                "info",
                 note=f"{gap:.0f}ms 未被子节点覆盖（疑似未埋点的耗时）",
             )
         ]
@@ -82,7 +87,9 @@ def propagated(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
         if d.has_error and _error_sig(ctx, d) == sig:
             return [
                 Finding(
-                    node.node_id, "propagated", "info",
+                    node.node_id,
+                    "propagated",
+                    "info",
                     note=f"错误传播副本（源头在更深 node；sig={sig}）",
                 )
             ]

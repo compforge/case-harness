@@ -2,7 +2,7 @@
 
 菜单两个功能区，共享同一份 TREE payload：
 - 调用栈：左树右详情（深度缩进、节点折叠、kind chip、brief、详情下钻）
-- 火焰图：时间轴 icicle（x=墙钟时间、行=深度、色=kind、错误描红），
+- 火焰图：时间轴 icicle（x=wall-clock time、行=深度、色=kind、错误描红），
   点任意 cell 跳回调用栈并选中该 node（自动展开祖先链）
 
 HTML 只此一个交互页：非交互的 HTML 无保留价值（要静态/可粘贴版用 md），故旧的
@@ -35,7 +35,7 @@ ATTR_TRUNCATE = 4000  # 单 attr 值超过即截断；完整原文按 span_id �
 
 def _disp_payload(ctx: TraceContext, d: DisplayNode, byid: dict[str, Node]) -> dict:
     """DisplayNode（facet 折叠后的显示树）→ 交互页 payload。timing/原文/facts 用 `node_ids`
-    回查底层 Node（duration 优先 wall_ms = 含子孙的墙钟）；折叠/聚合合成行（kind 空）无底层 node，
+    回查底层 Node（duration 优先 wall_ms = 含子孙的 wall-clock duration）；折叠/聚合合成行（kind 空）无底层 node，
     时间用所聚合 node 的包络。findings 由 engine 绑在 DisplayNode 上（折叠则已上浮）。"""
     brief = "  ".join(f"{f.label}={f.value}" for f in d.brief)
     fnd = [{"severity": f.severity, "source": f.source, "note": f.note} for f in d.findings]
@@ -276,7 +276,7 @@ function showView(v){
   document.getElementById('fold').style.display=(v==='stack')?'':'none';
   if(v==='flame'&&!flameBuilt){buildFlame();flameBuilt=true;}}
 document.querySelectorAll('nav.tabs button').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.v)));
-// 火焰图（icicle）：x=墙钟时间，行=深度，色=kind；惰性构建一次
+// 火焰图（icicle）：x=wall-clock time，行=深度，色=kind；惰性构建一次
 function buildFlame(){
   const box=document.getElementById('flame'),axis=document.getElementById('faxis');
   let t0=Infinity,t1=-Infinity,maxD=0;

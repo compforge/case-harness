@@ -17,7 +17,10 @@ SERVICE_KIND = "service"
 
 
 def duration_metric() -> dict:
-    """每个 kind 的基线度量：墙钟耗时（ms）。outlier 引擎按 (kind,name,metric) 建基线。"""
+    """每个 kind 的基线度量：wall-clock duration（ms）。
+
+    outlier 引擎按 (kind,name,metric) 建基线。
+    """
     return {"duration_ms": lambda n: n.facts.get("duration_ms")}
 
 

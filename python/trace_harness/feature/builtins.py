@@ -2,6 +2,7 @@
 
 都是 eager（bake=True）+ 读 facts/结构（不读 raw），故 IR-portable。
 """
+
 from __future__ import annotations
 
 from trace_harness.feature.ctx import Ctx
@@ -12,7 +13,7 @@ from trace_harness.model.node import Node
 
 
 def _self_ms(node: Node, ctx: Ctx) -> dict:
-    """self_ms = 本节点墙钟 − 子区间并集（未被子覆盖的独占耗时）。叶子不写。"""
+    """self_ms = 本节点 wall-clock duration − 子区间并集（未被子覆盖的独占耗时）。叶子不写。"""
     children = ctx.children(node)
     if not children:
         return {}

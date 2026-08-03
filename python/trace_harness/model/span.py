@@ -27,7 +27,7 @@ class NormSpan:
     span_id: str
     parent_span_id: str | None
     name: str  # operationName
-    start_ms: float  # 墙钟起点（epoch ms）；时间统一 ms，源单位换算收口在 source
+    start_ms: float  # wall-clock start（epoch ms）；时间统一 ms，源单位换算收口在 source
     dur_ms: float
     service: str | None
     has_error: bool

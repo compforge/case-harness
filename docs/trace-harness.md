@@ -193,7 +193,7 @@ runs/<experiment>/<run-id>/
 
 **单 trace**——调用栈视图（text/md/html 已有）之外，火焰图作为 tree 的另一种投影，两种形态：
 
-- **时间线 icicle**（x=墙钟、y=深度）：看顺序与并发；fire-and-forget 子节点天然可见；
+- **时间线 icicle**（x=wall-clock time、y=深度）：看顺序与并发；fire-and-forget 子节点天然可见；
   父条上未被子节点覆盖的空隙即 obs_hole 的可视化；Finding 给条块着色（错误红/离群黄）。
 - **聚合火焰**（同路径合并）：循环型 agent trace 的主力——百轮 planner 合成一根宽条，
   回答"哪条路径吃掉总时间"。注意异步分离会破坏"父时长 ≥ 子之和"的经典不变式，聚合
