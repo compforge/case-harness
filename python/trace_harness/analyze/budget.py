@@ -1,6 +1,8 @@
-"""Trace 时间预算 —— 把一条 trace 的墙钟按 kind 拆成"占用"（interval-union，非裸 sum）。
+"""Trace 时间预算 —— 把一条 trace 的 wall-clock time 按 kind 拆成"占用"
+（interval-union，非裸 sum）。
 
-动机：分析"agent 在 LLM / 工具 / 其它上各花多少墙钟"（如 sandbox 占空比、多路复用潜力）时，
+动机：分析"agent 在 LLM / 工具 / 其它上各花多少 wall-clock time"
+（如 sandbox 占空比、多路复用潜力）时，
 裸 `sum(span.duration)` 会把嵌套/并行 span 重复计——尤其 `delegate_agent` 这类**复合工具**
 （其 span 区间包住子 agent 的 model-call/tool-call）。正确口径是**区间并集占用**：
 
@@ -8,7 +10,8 @@
     llm  = 所有 model-call 区间并集
     tool = 所有**叶子** tool-call 区间并集（叶子 = 子孙无 model-call/tool-call 的真实执行；
            复合编排如 delegate_agent 不计为 tool 占用，其时间由子调用的 llm/tool 分解承担）
-    gap  = wall − (llm ∪ tool)   —— 既不在模型也不在工具的墙钟：node 编排 / 排队 / 流式回传
+    gap  = wall − (llm ∪ tool)   —— 既不在模型也不在工具的 wall-clock time：
+           node 编排 / 排队 / 流式回传
 
 零域知识（只认 genai 通用 kind）。域层（如 trace-as 的 sandbox 归因）拿 `by_tool` 自己按
 工具名求和即可——见 `tool_frac_for`。
@@ -31,7 +34,7 @@ _ACTIVITY_KINDS = ("model-call", "tool-call")
 
 @dataclass
 class TimeBudget:
-    """一条 trace 的墙钟时间预算（毫秒），及按工具名的占用明细。"""
+    """一条 trace 的 wall-clock time budget（毫秒），及按工具名的占用明细。"""
 
     wall_ms: float
     llm_ms: float
@@ -81,8 +84,9 @@ class TimeBudget:
 def _leaf_tool_nodes(nodes: list[Node]) -> list[Node]:
     """叶子 tool-call = 子孙里没有 model-call/tool-call 的 tool-call node（真实执行）。
 
-    复合编排（如 delegate_agent，其子树含子 agent 的 model/tool 调用）被排除——其墙钟由子调用
-    的 llm/tool 占用去分解，若把它整段计为 tool 会把子 agent 的 LLM 时间也错算成工具时间。
+    复合编排（如 delegate_agent，其子树含子 agent 的 model/tool 调用）被排除——
+    其 wall-clock time 由子调用的 llm/tool 占用去分解，若把它整段计为 tool
+    会把子 agent 的 LLM 时间也错算成工具时间。
     """
     children: dict[str, list[Node]] = defaultdict(list)
     for n in nodes:

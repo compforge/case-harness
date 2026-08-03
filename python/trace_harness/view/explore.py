@@ -23,7 +23,7 @@ def _brief(n: Node) -> str:
 
 
 def _subtree_stats(view: ViewTree, n: Node) -> tuple[int, float, int]:
-    """子树 (节点数, 墙钟和, 含错误的节点数)——折叠摘要用。"""
+    """子树 (节点数, wall-clock duration 总和, 含错误的节点数)——折叠摘要用。"""
     cnt, total, errs = 1, n.duration_ms, (1 if n.has_error else 0)
     for c in view.children(n):
         cc, ct, ce = _subtree_stats(view, c)

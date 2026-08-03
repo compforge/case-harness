@@ -1,6 +1,6 @@
 """三表构建：N 个 (TraceContext, findings) → traces / facts / findings 扁平行。
 
-- traces：一行一 trace（摘要：节点数 / 错误数 / 墙钟跨度）
+- traces：一行一 trace（摘要：节点数 / 错误数 / wall-clock span）
 - facts：一行一 node（骨架列 + KindSpec.build 抽出的命名 facts 列，业务字段已隔离在列名内）
 - findings：一行一 Finding（判读输出，挂 node；trace 级结论由 traces 表/报告承载）
 
