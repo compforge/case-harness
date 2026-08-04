@@ -1,0 +1,16 @@
+export { diagnose, type Findings } from "./analyze/diagnose";
+export * from "./feature";
+export { assemble } from "./ingest/assemble";
+export { normalizeJaegerSpan, normalizeJaegerSpans } from "./ingest/jaeger";
+export { SERVICE_KIND, durationMetric, formatBytes, formatMs, serviceSpec } from "./kinds/base";
+export { genAiSpecs } from "./kinds/genai";
+export { TraceContext } from "./model/context";
+export { Node, type Emphasis, type Field, type Finding, type NodeInit, type Severity } from "./model/node";
+export { SpecSet, mergeSpecs, type KindSpec } from "./model/spec";
+export { NormSpan, spanErrorText, type ErrorEvent, type SpanAttributes, type SpanEvent } from "./model/span";
+export { ViewTree, buildView } from "./model/viewtree";
+export type { DisplayNode } from "./view/display";
+export { DefaultFacet, Facet, type ChildOp, type RenderConfig, type RenderContext } from "./view/facet";
+export { renderDisplay } from "./view/engine";
+export { renderInteractive } from "./view/interactive";
+export { DEFAULT_REGISTRY, FacetRegistry, registerFacet } from "./view/registry";

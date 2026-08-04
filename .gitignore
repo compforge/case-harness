@@ -17,6 +17,9 @@ htmlcov/
 # Go
 /go/bin/
 
+# TypeScript
+node_modules/
+
 # IDE
 .idea/
 .vscode/

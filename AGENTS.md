@@ -9,7 +9,7 @@
 | 接口对不对 | API 测试（e2e，黑盒） | `python/e2e_harness` |
 | agent 效果好不好 | 效果测试（eval，黑盒） | `python/eval_harness` |
 | 压力下表现如何 | 压力测试（perf，黑盒） | `python/perf_harness` |
-| 链路内部哪层先反常 | trace 分析（trace，开盒） | `python/trace_harness` |
+| 链路内部哪层先反常 | trace 分析（trace，开盒） | `python/trace_harness` / `typescript/trace-harness` |
 | agent 的行动过程是否合理 | 轨迹评估（trajectory，开盒） | `python/trajectory_harness` |
 
 **核心思想（后续演进的指导原则）**：
@@ -19,7 +19,7 @@
 3. **一个 experiment 一份 config yaml，产物按 run 落盘**。experiment 每 run 一次，结果落在 `runs/<experiment>/<run-id>/`，目录下有一份统一的记录文件（如 `result.csv`），report 由记录文件生成——记录与渲染分离，历次 run 累积不覆盖，未来可跨 run / 跨 experiment 汇出一份总 report。
 4. **一次执行，多面观测**。case 统一之后，跑一遍 case 不必只服务一类测试：同一次请求的产出，可以同时服务对错（e2e）、效果（eval）、延迟/资源（perf）、链路内部归因（trace）和行动轨迹（trajectory）——这些 harness 是不同视角，而不是多次独立发压。
 
-**边界**：跨语言（Go + Python）测试框架聚合仓库，`python/` 和 `go/` 各自是独立工程。框架不 import 被测服务的 internal 代码，纯黑盒（HTTP / SSE / DB-query 由服务侧自己包装）。
+**边界**：跨语言（Go + Python + TypeScript）测试框架聚合仓库，各语言目录是独立工程。框架不 import 被测服务的 internal 代码，纯黑盒（HTTP / SSE / DB-query 由服务侧自己包装）。
 
 ## 愿景
 
@@ -46,6 +46,7 @@ case-harness/
 │   ├── common/          # 中立共享层：case / verdict / llm / facets + report_kit（报告 IR + HTML 渲染），五个 SDK 共用、无业务概念
 │   └── …/tests/         # 测试在各自包内（e2e_harness/tests 等；common 同），打包时排除
 ├── go/                  # Go SDK（参考实现，形状对齐 spec）→ 见 go/AGENTS.md
+├── typescript/          # TypeScript SDK；trace-harness 对齐 Python 分析 IR 与交互 HTML
 ├── examples/            # 接入示例：api-test / agent-test
 └── docs/                # 跨 SDK 设计文档
 ```
@@ -56,6 +57,7 @@ case-harness/
 - 五个 Python SDK 共享同一个 uv 工程与 `spec/` 约定，**互不 import**；公共能力集中在 `common`（case / verdict / llm / facets + report_kit 报告 IR）这一中立共享层，而不是 SDK 之间互相复用。各 SDK 仍自带一小撮协议原语（Outcome 形状、runner、SSEParser；perf 自带 httpx 发压栈、trace 自带薄 driver）——**先复制后收敛**，确属公共再收进 `common`。trace 的 parquet 持久化走可选 extra `[trace-corpus]`，不给其它 SDK 增重。
 - 新增能力先想清楚归哪类问题（对错 / 效果 / 容量 / 归因），落到对应 SDK；跨 SDK 的"公共抽象"冲动默认抑制，先复制后收敛，确属公共再进 `common`。
 - Go SDK 短期不跟进 Python 侧新增，等形状稳定后批量同步。
+- TypeScript trace-harness 以 Python 实现作为 canonical implementation，公开 IR 字段保持同名；通用包不承载业务域知识，业务 spec、Feature 和 Facet 由消费方注册。
 
 ## 开发与测试
 
@@ -77,6 +79,9 @@ cd python && uv run trace single trace_harness/tests/fixtures/trace_genai_sample
 
 # Go（参考实现）
 cd go && go test ./...
+
+# TypeScript trace-harness
+cd typescript/trace-harness && bun install --frozen-lockfile && bun test && bun run typecheck
 ```
 
 ## References
@@ -87,6 +92,7 @@ cd go && go test ./...
 - trace_harness（trace 分析）：[`python/trace_harness/AGENTS.md`](python/trace_harness/AGENTS.md)，设计文档 [`docs/trace-harness.md`](docs/trace-harness.md)
 - trajectory_harness（agent 轨迹评估）：[`python/trajectory_harness/AGENTS.md`](python/trajectory_harness/AGENTS.md)，设计文档 [`docs/trajectory-harness.md`](docs/trajectory-harness.md)
 - Go SDK：[`go/AGENTS.md`](go/AGENTS.md)
+- TypeScript trace-harness：[`typescript/trace-harness/AGENTS.md`](typescript/trace-harness/AGENTS.md)，使用指南 [`typescript/trace-harness/README.md`](typescript/trace-harness/README.md)
 - 顶层导览：[`README.md`](README.md)
 - 跨语言约定：[`spec/conventions.md`](spec/conventions.md)
 - 统一判定出口（run 目录 + verdict.json，四家共用，devloop 消费）：[`spec/verdict-schema.yaml`](spec/verdict-schema.yaml) + conventions.md「Run 产物与 verdict 出口」
