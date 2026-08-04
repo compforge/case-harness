@@ -11,7 +11,7 @@
 | 接口对不对 | API 测试（e2e，黑盒） | `python/e2e_harness` |
 | agent 效果好不好 | 效果测试（eval，黑盒） | `python/eval_harness` |
 | 压力下表现如何 | 压力测试（perf，黑盒） | `python/perf_harness` |
-| 链路内部哪层先反常 | trace 分析（trace，开盒） | `python/trace_harness` |
+| 链路内部哪层先反常 | trace 分析（trace，开盒） | `python/trace_harness` / `typescript/trace-harness` |
 | agent 的决策和行动是否合理 | 轨迹评估（trajectory，开盒） | `python/trajectory_harness` |
 
 提供 SDK，不提供测试本身：被测服务（SUT）在自己仓库里以 SDK 形式接入，按自己的协议/认证/资源生命周期组织。
@@ -42,6 +42,7 @@ case-harness/
 │   ├── trajectory_harness/ # agent 轨迹归一与评估
 │   └── harness_common/  # 中立共享层：verdict / llm / report_kit
 ├── go/                  # Go SDK（参考实现，形状对齐 spec/）
+├── typescript/          # TypeScript SDK；trace-harness 对齐 Python 分析 IR
 ├── examples/            # 接入示例：api-test / agent-test
 └── docs/                # 跨 SDK 设计文档
 ```
@@ -65,10 +66,13 @@ uv run trace single trace_harness/tests/fixtures/trace_genai_sample.jsonl --diag
 
 # Go（参考实现）
 cd go && go test ./...
+
+# TypeScript trace-harness
+cd typescript/trace-harness && bun install --frozen-lockfile && bun test
 ```
 
 各 SDK 的接入方式见其目录下的 `README.md`；开发者向的代码地图与约定见各 `AGENTS.md`。
 
 ## Status
 
-Early public release。`spec/` 里的 case/verdict schema 是稳定中心；SDK API 仍可能调整。Go SDK 按批次跟进 Python 侧。
+Early public release。`spec/` 里的 case/verdict schema 是稳定中心；SDK API 仍可能调整。Go SDK 按批次跟进 Python 侧，TypeScript trace-harness 的公开分析 IR 与 Python 保持对齐。

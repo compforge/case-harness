@@ -11,7 +11,7 @@ An AI project keeps growing — more features, longer chains, a wider test surfa
 | Are the APIs correct? | API testing (e2e, black-box) | `python/e2e_harness` |
 | Is the agent any good? | Quality evaluation (eval, black-box) | `python/eval_harness` |
 | How does it behave under pressure? | Load testing (perf, black-box) | `python/perf_harness` |
-| Which layer misbehaves first? | Trace analysis (trace, open-box) | `python/trace_harness` |
+| Which layer misbehaves first? | Trace analysis (trace, open-box) | `python/trace_harness` / `typescript/trace-harness` |
 | Were the agent's decisions and actions efficient? | Trajectory evaluation (open-box) | `python/trajectory_harness` |
 
 This repo ships SDKs, not tests: the system under test (SUT) integrates the SDK in its own repo, organized around its own protocol / auth / resource lifecycle.
@@ -42,6 +42,7 @@ case-harness/
 │   ├── trajectory_harness/ # agent trajectory normalization + evaluation
 │   └── harness_common/  # neutral shared layer: verdict / llm / report_kit
 ├── go/                  # Go SDK (reference implementation, shapes aligned to spec/)
+├── typescript/          # TypeScript SDK; trace-harness aligned with the Python analysis IR
 ├── examples/            # integration examples: api-test / agent-test
 └── docs/                # cross-SDK design docs
 ```
@@ -65,10 +66,13 @@ uv run trace single trace_harness/tests/fixtures/trace_genai_sample.jsonl --diag
 
 # Go (reference implementation)
 cd go && go test ./...
+
+# TypeScript trace-harness
+cd typescript/trace-harness && bun install --frozen-lockfile && bun test
 ```
 
 Per-SDK integration guides live in each SDK's `README.md`; developer-facing code maps and conventions in each `AGENTS.md`.
 
 ## Status
 
-Early public release. The case/verdict schemas under `spec/` are the stable center; SDK APIs may still move. The Go SDK tracks the Python side batch-wise.
+Early public release. The case/verdict schemas under `spec/` are the stable center; SDK APIs may still move. The Go SDK tracks the Python side batch-wise, while TypeScript trace-harness keeps its public analysis IR aligned with Python.
