@@ -57,4 +57,4 @@ dev = [
 
 [tool.uv.sources]
 prombed = { git = "https://github.com/compforge/prombed", subdirectory = "python" }
-spec-case = { git = "https://github.com/qiankunli/spec-case", subdirectory = "python" }
+spec-case = { git = "https://github.com/compforge/spec-case", subdirectory = "toolchains/python" }

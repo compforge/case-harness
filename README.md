@@ -1,6 +1,6 @@
 # case-harness
 
-> **Cases in, verdicts out.** A cross-language family of test harnesses that splits "is the system robust?" into separately-answerable questions — API correctness (e2e), agent quality (eval), capacity under pressure (perf), in-trace attribution (trace), and agent trajectory quality — all driven by the same reusable **case** assets. Sibling of [spec-case](https://github.com/qiankunli/spec-case) (the asset format) and [case-code-review](https://github.com/qiankunli/case-code-review) (the white-box consumer). ｜ 中文: [README.zh-CN.md](./README.zh-CN.md)
+> **Cases in, verdicts out.** A cross-language family of test harnesses that splits "is the system robust?" into separately-answerable questions — API correctness (e2e), agent quality (eval), capacity under pressure (perf), in-trace attribution (trace), and agent trajectory quality — all driven by the same reusable **case** assets. Sibling of [spec-case](https://github.com/compforge/spec-case) (the asset format) and [case-code-review](https://github.com/compforge/case-code-review) (the white-box consumer). ｜ 中文: [README.zh-CN.md](./README.zh-CN.md)
 
 ## Why this repo exists
 
@@ -18,7 +18,7 @@ This repo ships SDKs, not tests: the system under test (SUT) integrates the SDK 
 
 ## Core ideas
 
-1. **Different judgments, one case format.** A case only describes "how to exercise the system once" — never how to judge it. The same case drives e2e (correctness), eval (quality) and perf (capacity). Consistency lives in the data format under `spec/`, not in shared code.
+1. **Different judgments, one case format.** A case only describes "how to exercise the system once" — never how to judge it. The same case drives e2e (correctness), eval (quality) and perf (capacity). `spec-case` owns the canonical asset format and model; this repo keeps only runtime conventions and a compatibility projection under `spec/`.
 2. **Cases are accumulating assets.** Decoupled from judgment, cases keep piling up; the more you have, the more a full pre-release run actually means something.
 3. **One experiment = one config yaml; artifacts land per run.** Results go to `runs/<scope>/<run-id>/`; recording is separated from rendering, runs accumulate instead of overwriting, and reports can aggregate across runs.
 4. **One execution, many observations.** A single request can feed correctness (e2e), quality (eval), latency/resources (perf), in-chain attribution (trace), and decision-path evaluation (trajectory). The harnesses are viewpoints, not separate load generators.
@@ -27,13 +27,13 @@ The unified output is `verdict.json` (schema: [`spec/verdict-schema.yaml`](spec/
 
 ## Division of labor with spec-case
 
-[spec-case](https://github.com/qiankunli/spec-case) is the **asset layer**: `@spec`/`@case`/`@rule` markers live on the code, distilled by per-language tools into machine-readable assets bound to code via symbol-id; it also ships the canonical `Case` model (`spec_case.model`). case-harness is the **runtime layer**: it runs those cases black-box into verdicts. The same assets' white-box consumer is [case-code-review](https://github.com/qiankunli/case-code-review), which attaches spec/case to review units as a checklist.
+[spec-case](https://github.com/compforge/spec-case) is the **asset layer**: `@spec`/`@case`/`@rule` markers live on the code, distilled by per-language tools into machine-readable assets bound to code via symbol-id; it also ships the canonical `Case` model (`spec_case.model`). case-harness is the **runtime layer**: it runs those cases black-box into verdicts. The same assets' white-box consumer is [case-code-review](https://github.com/compforge/case-code-review), which attaches spec/case to review units as a checklist.
 
 ## Layout
 
 ```
 case-harness/
-├── spec/                # language-neutral conventions: case-schema / verdict-schema / conventions
+├── spec/                # runtime conventions: case compatibility projection / verdict / config
 ├── python/              # Python workspace (uv), five sibling SDKs + shared harness_common
 │   ├── e2e_harness/     # API testing: deterministic contract tests, judgment-as-data, pytest-driven
 │   ├── eval_harness/    # quality evaluation: experiment/Env arms + Worksheet + reconciler
@@ -75,4 +75,4 @@ Per-SDK integration guides live in each SDK's `README.md`; developer-facing code
 
 ## Status
 
-Early public release. The case/verdict schemas under `spec/` are the stable center; SDK APIs may still move. The Go SDK tracks the Python side batch-wise, while TypeScript trace-harness keeps its public analysis IR aligned with Python.
+Early public release. The canonical case schema comes from `spec-case`; verdict and runtime conventions under `spec/` are this repo's stable center. SDK APIs may still move. The Go SDK tracks the Python side batch-wise, while TypeScript trace-harness keeps its public analysis IR aligned with Python.
