@@ -50,8 +50,8 @@ slo:
   - { metric: drop_rate,  lt: 0.01 }                            # 饱和预算（接 2a）
   - { metric: 'p99_ms{difficulty="complex"}',         lt: 5000 }   # facet 切片
   - { metric: 'request.throughput_rps{stage="hold@40"}', gte: 40 } # stage 切片
-  - { metric: 'top.cpu_m{service="planit"}.peak',     lt: 1500 }   # 资源·某服务
-  - { metric: 'metrics.task_count{service="worker",task_type="batch",state="running"}.last', window: cooldown, lte: 0 }
+  - { metric: 'top.cpu_m{service="worker"}.peak',     lt: 1500 }   # 资源·某服务
+  - { metric: 'prometheus.task_count{service="worker",task_type="batch",state="running"}.last', window: cooldown, lte: 0 }
 ```
 
 - **metric**：`<name>{labels}.<stat>`（或 undotted 别名 `p99_ms`/`error_rate`/…，可带 label）。
@@ -59,7 +59,7 @@ slo:
 - **window**：默认 `measurement`，读取负载测量窗口的既有汇总；`cooldown` 从
   `Workload.deactivate()` 返回后开始，在 `cooldown_s` 内对资源侧 gauge/counter 原始
   series 重新聚合。cooldown 需要 `cooldown_s > 0`，不支持请求分布或无原始 series
-  的 derived scalar。
+  的无原始 series 标量。
 - **label**：`{service="…"}`（资源·某服务；`observe:` 开 `per_pod` 时该服务的 series 为 `{pod="…",service="…"}`，按 replica 拆）/ `{facetkey="val"}`（请求 facet 切片）/ `{stage="…"}`。统一 `<name>{labels}.<stat>` 寻址，和报告 by_facet/by_service pivot 同一个 group-by-label；资源 metric 是 trial 全局，不能配 facet/stage label。per_pod 服务没有 service 级聚合 series，`{service="…"}` 的 SLO 解析期直接报错（防 CI 门静默变 skip）。
 
 **评估与产出**：每条断言对**每个 trial** 求值（trial 自带 overall/by_facet/by_stage 切片，resolver 按 label 路由）。数据结构：

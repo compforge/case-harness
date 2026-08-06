@@ -49,7 +49,7 @@ class HelmProvisioner(Provisioner):
 
     ``set_paths`` maps ResourceProfile fields to chart value paths so the same
     provisioner works across services with different values.yaml shapes; the
-    defaults match the AS planit/chat charts (``uvicorn.workers``,
+    defaults match common service charts (``uvicorn.workers``,
     ``resources.limits.*``). Unknown/None fields are skipped.
     """
 

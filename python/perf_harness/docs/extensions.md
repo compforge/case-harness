@@ -49,7 +49,8 @@ setup → measurement → deactivation → cooldown → cleanup
 
 ## 自定义 Probe
 
-框架内置通用的 `metrics/top/rss/restart/limits/pods`。业务专用来源可以注册 Probe factory：
+框架内置通用的 `prometheus/top/rss/restart/limits/pods`。Prometheus 指标直接在内置
+probe 上声明 PromQL；其它业务专用来源才需要注册 Probe factory：
 
 ```python
 from perf_harness import FamilySpec, Probe, ProbeConfig, register_probe

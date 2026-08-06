@@ -195,7 +195,7 @@ def parse_ref(ref: str) -> tuple[str, dict[str, str], str | None]:
       - ``error_rate`` — undotted builtin alias (stat ``None``)
       - ``duration_ms.p99`` — dotted, overall
       - ``error_rate{difficulty="complex"}`` — alias + a label
-      - ``duration_ms{difficulty="simple"}.p99`` / ``top.cpu_m{service="planit"}.peak``
+      - ``duration_ms{difficulty="simple"}.p99`` / ``top.cpu_m{service="worker"}.peak``
 
     ``labels`` is the Prometheus ``{…}`` block; service / facet / stage are all just
     labels — the resolver routes on them. ``stat`` is the trailing ``.segment``."""

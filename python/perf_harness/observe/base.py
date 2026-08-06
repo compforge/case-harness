@@ -20,6 +20,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 import httpx
+from prombed import Prombed, ScrapeTarget
 
 from perf_harness.metric import (
     MetricFamily,
@@ -179,294 +180,169 @@ class ClientProbe(Probe):
         return {"inflight": float(ctx.stats.inflight), "sent": float(ctx.stats.sent)}
 
 
-@dataclass
-class ScrapeSpec:
-    """One EXTRA Prometheus sample family to scrape off the Subject's ``/metrics``.
+@dataclass(frozen=True)
+class PrometheusQuery:
+    """One bounded PromQL result exported into perf's resource metric table.
 
-    The generic seam for app-specific server metrics (e.g. the GenAI SSE hooks):
-    ``source`` is the exposition SAMPLE name — for a histogram scrape the suffixed
-    series (``…_count`` / ``…_sum``) as counters; Δsum ÷ Δcount over the steady
-    window is then the server-side mean. ``match`` keeps only label sets equal on
-    the given keys; ``drop`` removes label sets whose value is listed (e.g.
-    ``error_type`` in ``("", "client_disconnect")``). The sampled value is the SUM
-    over surviving label sets, recorded under the bare metric ``name``.
-
-    ``by`` keeps one series per distinct value of the listed labels instead
-    (PromQL's ``sum by (path) (…)``): keys go out in ``series_id`` form
-    (``name{path="…"}``) and the Engine groups/reports them like ``per_pod``
-    series — no per-value config entries needed. match/drop filter FIRST, then
-    ``by`` groups the survivors. Cardinality is the declarer's responsibility:
-    ``by`` a bounded label (route path, status class), never a free-form one
-    (user id, conversation id) — every distinct value becomes a full series.
-    """
-
-    source: str
-    name: str
-    value_kind: MetricValueKind = "counter"
-    unit: str = "count"
-    description: str = ""
-    match: dict[str, str] = field(default_factory=dict)
-    drop: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    by: tuple[str, ...] = ()
-
-
-@dataclass
-class DeriveSpec:
-    """A per-trial DERIVED scalar: the ratio of two counter families' steady-window
-    increases — a top-level ``derived:`` entry, evaluated at reduce time from the
-    already-collected series (collection itself stays dumb).
-
-    The Prometheus-histogram idiom made declarative: ``mean = Δ…_sum ÷ Δ…_count`` —
-    "did server-side ttft grow with pressure" becomes one response-curve point per
-    trial. ``num``/``den`` are counter FAMILY names (``metrics.sse_ttft_sum``); the
-    ratio is computed per label set where both exist (so a per-service or ``by:``
-    fan-out derives one ratio per series, automatically). The result registers as
-    family ``name`` (``side="resource"``, ``value_kind="scalar"``, addressed
-    ``<name>{service=…}.value``). Computed from reset-aware increases, and
-    observational like everything scraped — it gates nothing unless an SLO
-    explicitly references it.
+    ``labels`` is the declared output contract and cardinality boundary. Prombed may
+    evaluate arbitrary supported PromQL, but every returned vector must carry exactly
+    these labels after target-owned labels are removed.
     """
 
     name: str
-    num: str
-    den: str
+    promql: str
+    value_kind: MetricValueKind = "gauge"
     unit: str = ""
     description: str = ""
+    labels: tuple[str, ...] = ()
 
 
-class MetricsScrapeProbe(Probe):
-    """Http Source: scrape the Subject's Prometheus ``/metrics`` over time.
+class PrometheusProbe(Probe):
+    """Scrape and query a Prometheus endpoint through an embedded Prombed runtime.
 
-    Tracks the request counter (collapsed to server-observed RPS) and the
-    in-progress gauge (collapsed to peak). The ``prefix`` defaults to the
-    Subject's ``K8sRef.metrics_prefix`` (starlette_exporter prefix). ``scrape``
-    adds arbitrary exposition families (``ScrapeSpec``) — they enter the same
-    metric model (``metrics.<name>{service=…}``), so report/SLO/analysis see them
-    like any builtin.
+    Perf owns the observation cadence and final report/SLO model; Prombed owns the
+    Prometheus text format, bounded short-term storage, scrape health, counter reset
+    semantics, and PromQL evaluation. A fresh runtime is created for each Trial so
+    range queries can never read samples from a previous load arm.
     """
 
-    name = "metrics"
-    source = "http"
-    families = {
-        "req_total": FamilySpec("count", "counter", "server-side request counter (from /metrics)"),
-        "in_progress": FamilySpec(
-            "count", "gauge", "server-side in-progress requests (from /metrics)"
-        ),
-    }
+    name = "prometheus"
+    source = "prometheus"
 
     def __init__(
         self,
         *,
-        prefix: str | None = None,
-        path: str = "/metrics",
+        queries: list[PrometheusQuery],
         service: str | None = None,
-        scrape: list[ScrapeSpec] | None = None,
         url: str | None = None,
+        headers: dict[str, str] | None = None,
+        timeout_ms: int = 5_000,
+        max_scrape_bytes: int = 16 * 1024 * 1024,
+        retention_ms: int = 10 * 60_000,
+        max_series: int = 20_000,
+        max_samples_per_series: int = 10_000,
     ) -> None:
-        self._prefix = prefix
-        self._path = path
+        self.queries = list(queries)
         self._service = service
-        # public: config's top-level `derived:` validation reads the by-groupings
-        self.scrape = list(scrape or [])
-        # explicit exposition URL (convention: http://<service-ip>:<port>/metrics) —
-        # unbinds the probe from the Subject so downstream services' /metrics are
-        # observable too; None → the Subject's base_url + path (the default).
         self._url = url
-        # per-instance vocabulary: scraped extras join the SAME declaration table the
-        # builtins live in, so describe()/summarize() see them like builtins
+        self._headers = dict(headers or {})
+        self._timeout_ms = timeout_ms
+        self._max_scrape_bytes = max_scrape_bytes
+        self._retention_ms = retention_ms
+        self._max_series = max_series
+        self._max_samples_per_series = max_samples_per_series
+        self._runtime: Prombed | None = None
+        self._trial_t0: float | None = None
+        self._client: httpx.AsyncClient | None = None
         self.families = {
-            **type(self).families,
-            **{s.name: FamilySpec(s.unit, s.value_kind, s.description, s.by) for s in self.scrape},
+            query.name: FamilySpec(
+                query.unit,
+                query.value_kind,
+                query.description,
+                query.labels,
+            )
+            for query in self.queries
         }
-        if service:  # unique store id (metrics.chat); family stays "metrics", service is a label
+        if len(self.families) != len(self.queries):
+            raise ValueError("Prometheus query names must be unique within one probe")
+        if service:
             self.name = f"{self.name}.{service}"
 
-    def _resolve_prefix(self, ctx: ProbeContext) -> str | None:
-        if self._prefix:
-            return self._prefix
-        return ctx.target.k8s.metrics_prefix if ctx.target.k8s else None
+    async def _fetch(
+        self,
+        url: str,
+        headers: dict[str, str],
+        timeout: float,
+        max_bytes: int,
+    ) -> bytes:
+        if self._client is None:
+            raise RuntimeError("Prometheus probe has no observer client")
+        body = bytearray()
+        async with self._client.stream("GET", url, headers=headers, timeout=timeout) as response:
+            response.raise_for_status()
+            async for chunk in response.aiter_bytes():
+                body.extend(chunk)
+                if len(body) > max_bytes:
+                    raise ValueError(
+                        f"Prometheus response exceeds configured limit of {max_bytes} bytes"
+                    )
+        return bytes(body)
 
-    def _specs(self, prefix: str | None) -> list[ScrapeSpec]:
-        """Everything this probe scrapes, as ONE vocabulary: the two builtins are just
-        canned ScrapeSpecs for the starlette_exporter naming convention — a soft
-        default (absent family → key omitted), not a coupling; ``scrape`` adds the
-        rest through the same path."""
-        builtin = (
-            [
-                ScrapeSpec(source=f"{prefix}_requests_total", name="req_total"),
-                ScrapeSpec(
-                    source=f"{prefix}_requests_in_progress",
-                    name="in_progress",
-                    value_kind="gauge",
-                ),  # fmt: skip
-            ]
-            if prefix
-            else []
+    def _start_trial(self, ctx: ProbeContext) -> None:
+        url = self._url or ctx.target.base_url.rstrip("/") + "/metrics"
+        # Subject credentials apply only to its implicit endpoint. A downstream
+        # Prometheus URL must opt in its own headers; forwarding Subject auth would
+        # cross a service trust boundary.
+        target_headers = ctx.target.headers if self._url is None else {}
+        target = ScrapeTarget(
+            url,
+            headers={
+                **target_headers,
+                **self._headers,
+                "User-Agent": "case-harness/perf",
+            },
+            timeout_ms=self._timeout_ms,
+            max_body_bytes=self._max_scrape_bytes,
         )
-        return builtin + self.scrape
+        self._runtime = Prombed(
+            targets=[target],
+            retention_ms=self._retention_ms,
+            max_series=self._max_series,
+            max_samples_per_series=self._max_samples_per_series,
+            scrape_timeout_ms=self._timeout_ms,
+            max_scrape_bytes=self._max_scrape_bytes,
+            fetch=self._fetch,
+        )
+        self._trial_t0 = ctx.t0
+
+    @staticmethod
+    def _labels(metric: dict[str, str]) -> dict[str, str]:
+        # Prombed injects target identity for scrape correctness. Perf already owns
+        # service identity, so target labels must not become accidental fan-out axes.
+        return {key: value for key, value in metric.items() if key not in {"__name__", "instance"}}
+
+    def _record_vector(
+        self,
+        out: dict[str, float],
+        query: PrometheusQuery,
+        rows: list[dict],
+    ) -> None:
+        expected = set(query.labels)
+        for row in rows:
+            labels = self._labels(row["metric"])
+            if set(labels) != expected:
+                raise ValueError(
+                    f"Prometheus query {query.name!r} declared labels {sorted(expected)!r} "
+                    f"but returned {sorted(labels)!r}"
+                )
+            key = series_id(query.name, labels)
+            if key in out:
+                raise ValueError(f"Prometheus query {query.name!r} returned duplicate series {key}")
+            out[key] = float(row["value"][1])
 
     async def sample(self, ctx: ProbeContext) -> dict[str, float]:
-        specs = self._specs(self._resolve_prefix(ctx))
-        if not specs:
-            return {}
-        url = self._url or ctx.target.base_url.rstrip("/") + self._path
-        # scrape etiquette per the reference consumer (Prometheus's targetScraper):
-        # pin the classic text format via Accept (a content-negotiating endpoint must
-        # not hand us OpenMetrics/protobuf) and identify ourselves.
-        headers = {
-            "Accept": "text/plain;version=0.0.4",
-            "User-Agent": "perf-harness-scrape",
-        }
-        r = await ctx.probe_client.get(url, headers=headers, timeout=5.0)
-        # a 500/404 body must NOT be parsed as "no data" — raise so the Engine records
-        # a probe_error (observability failure is a fact, not an empty reading)
-        r.raise_for_status()
+        self._client = ctx.probe_client
+        if self._runtime is None or self._trial_t0 != ctx.t0:
+            self._start_trial(ctx)
+        assert self._runtime is not None
+        result = (await self._runtime.scrape_once())[0]
         out: dict[str, float] = {}
-        for spec in specs:
-            if spec.by:
-                # one series per distinct by-label value (series_id keys) — the
-                # Engine groups labeled keys per extra-label-set like per_pod
-                groups = prom_sum_by(r.text, spec.source, spec.by, match=spec.match, drop=spec.drop)
-                for vals, v in (groups or {}).items():
-                    out[series_id(spec.name, dict(zip(spec.by, vals, strict=True)))] = v
-            else:
-                v = prom_sum_where(r.text, spec.source, match=spec.match, drop=spec.drop)
-                if v is not None:
-                    out[spec.name] = v
-        return out
-
-
-def _parse_label_block(s: str) -> tuple[dict[str, str] | None, str]:
-    """Parse the inside of an exposition label block (after ``{``) → (labels, rest
-    after ``}``); ``(None, "")`` on malformed input. Quote-aware per the text format
-    spec (mirrors Prometheus's own parser): a quoted value may contain commas and the
-    escapes ``\\\\``, ``\\"``, ``\\n`` — a naive split-on-comma corrupts those."""
-    labels: dict[str, str] = {}
-    i, n = 0, len(s)
-    while i < n:
-        while i < n and s[i] in ", \t":  # separators between pairs
-            i += 1
-        if i < n and s[i] == "}":
-            return labels, s[i + 1 :]
-        j = i
-        while j < n and s[j] not in "=}":
-            j += 1
-        if j >= n or s[j] != "=":
-            return None, ""
-        key = s[i:j].strip()
-        i = j + 1
-        if i >= n or s[i] != '"':
-            return None, ""
-        i += 1
-        buf: list[str] = []
-        while i < n and s[i] != '"':
-            c = s[i]
-            if c == "\\" and i + 1 < n:
-                nxt = s[i + 1]
-                buf.append({"n": "\n", '"': '"', "\\": "\\"}.get(nxt, "\\" + nxt))
-                i += 2
+        for query in self.queries:
+            data = self._runtime.query(query.promql, result.scraped_at)["data"]
+            if data["resultType"] == "scalar":
+                if query.labels:
+                    raise ValueError(
+                        f"Prometheus scalar query {query.name!r} cannot declare output labels"
+                    )
+                out[query.name] = float(data["result"][1])
                 continue
-            buf.append(c)
-            i += 1
-        if i >= n:  # unterminated value
-            return None, ""
-        labels[key] = "".join(buf)
-        i += 1
-    return None, ""  # no closing brace
-
-
-def _parse_prom_line(raw: str) -> tuple[str, dict[str, str], float] | None:
-    """One exposition line → ``(sample_name, labels, value)``; None for comments /
-    unparseable lines. Shape: ``name[{labels}] value [timestamp]`` — the optional
-    trailing timestamp is ignored (we stamp our own sampling time)."""
-    line = raw.strip()
-    if not line or line.startswith("#"):
-        return None
-    if "{" in line:
-        name, _, rest = line.partition("{")
-        labels, tail = _parse_label_block(rest)
-        if labels is None:
-            return None
-    else:
-        name, _, tail = line.partition(" ")
-        labels = {}
-    parts = tail.split()
-    if not parts:
-        return None
-    try:
-        value = float(parts[0])  # the spec's +Inf/NaN parse natively
-    except ValueError:
-        return None
-    return name.strip(), labels, value
-
-
-def prom_sum(text: str, name: str) -> float | None:
-    """Sum a Prometheus sample family across ALL its label sets. None if absent."""
-    return prom_sum_where(text, name)
-
-
-def prom_sum_where(
-    text: str,
-    name: str,
-    *,
-    match: dict[str, str] | None = None,
-    drop: dict[str, tuple[str, ...]] | None = None,
-) -> float | None:
-    """Sum a sample family across the label sets that pass the filters.
-
-    ``match``: keep a line only if every given label equals its value. ``drop``:
-    discard a line if a given label's value is in the listed values. Returns None
-    only when the FAMILY is absent from the exposition; present-but-all-filtered
-    sums to 0.0 (so a counter rate stays well-defined, e.g. zero errors so far).
-    """
-    total = 0.0
-    seen = False
-    for raw in text.splitlines():
-        parsed = _parse_prom_line(raw)
-        if parsed is None or parsed[0] != name:
-            continue
-        seen = True
-        _, labels, value = parsed
-        if match and any(labels.get(k) != v for k, v in match.items()):
-            continue
-        if drop and any(labels.get(k) in vals for k, vals in drop.items()):
-            continue
-        total += value
-    return total if seen else None
-
-
-def prom_sum_by(
-    text: str,
-    name: str,
-    by: tuple[str, ...],
-    *,
-    match: dict[str, str] | None = None,
-    drop: dict[str, tuple[str, ...]] | None = None,
-) -> dict[tuple[str, ...], float] | None:
-    """Group-and-sum a sample family by the ``by`` labels' values (PromQL's
-    ``sum by (…)``), after the same match/drop filters as ``prom_sum_where``.
-
-    Keys are the ``by`` labels' values in declaration order; a label absent from
-    a line reads as ``""`` (it still forms a group — same as PromQL). Returns
-    None only when the FAMILY is absent from the exposition; present-but-all-
-    filtered is an empty dict (no groups, vs prom_sum_where's well-defined 0.0 —
-    a group that never existed has no counter to keep alive).
-    """
-    groups: dict[tuple[str, ...], float] = {}
-    seen = False
-    for raw in text.splitlines():
-        parsed = _parse_prom_line(raw)
-        if parsed is None or parsed[0] != name:
-            continue
-        seen = True
-        _, labels, value = parsed
-        if match and any(labels.get(k) != v for k, v in match.items()):
-            continue
-        if drop and any(labels.get(k) in vals for k, vals in drop.items()):
-            continue
-        key = tuple(labels.get(k, "") for k in by)
-        groups[key] = groups.get(key, 0.0) + value
-    return groups if seen else None
+            if data["resultType"] != "vector":
+                raise ValueError(
+                    f"Prometheus query {query.name!r} returned unsupported "
+                    f"result type {data['resultType']!r}"
+                )
+            self._record_vector(out, query, data["result"])
+        return out
 
 
 # Probe sample store: (probe.name, sample key) → time series. The sample key is what

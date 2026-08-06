@@ -27,7 +27,7 @@ perf_harness/
 │   ├── workload.py #   协议适配 fire/judge + register_workload；MockWorkload
 │   └── scheduler.py#   驱动循环：开/闭环 + 熔断 DECIDE + drain/cancel ENACT → TrialStop
 ├── observe/        # 看什么（扩展点②）；FamilySpec 单表声明 metric 元数据
-│   ├── base.py     #   Probe ABC + client/scrape 探针 + observe_loop（采样循环）
+│   ├── base.py     #   Probe ABC + client/Prombed 探针 + observe_loop（采样循环）
 │   └── k8s.py      #   top/rss/restart/limits（kubectl 系探针，纯函数解析器可单测）
 ├── metric/         # 收腰：唯一的那张表
 │   ├── family.py   #   纯模型：MetricFamily(side/value_kind)+summary union+Missing+寻址
@@ -50,7 +50,7 @@ perf_harness/
 ### 扩展点（业务接入只碰这两个）
 
 - **`Workload`**（怎么压 + 怎么判）：`fire(case)` 只记原始观测，`judge(outcome)→Verdict` 才裁决（纯函数，可离线重判）；SSE"200 但流坏了"靠 override `judge`。各服务在自己项目写、`register_workload` 注册；Trial 固定按 `setup → measurement → deactivation → cooldown → cleanup` 运行，其中业务 hook 只有 `setup/deactivate/cleanup`。
-- **`Probe`**（看什么）：`families` 单表声明元数据（FamilySpec：unit/value_kind/description，describe/summarize/Engine 共读），`sample()` 周期采样；Source 不绑 k8s（client/http/k8s 句柄），consumer 可通过 extension module + `register_probe` 扩展，一次 run 混挂多 Source 才能做瓶颈归因。
+- **`Probe`**（看什么）：`families` 单表声明元数据（FamilySpec：unit/value_kind/description，describe/summarize/Engine 共读），`sample()` 周期采样；Source 不绑 k8s，consumer 可通过 extension module + `register_probe` 扩展。Prometheus 来源由 `PrometheusProbe` 内嵌 Prombed，配置直接声明 PromQL 与输出 label 契约，不在 perf 内重复实现解析、存储和查询语义。
 - **压后观测不污染容量口径**：`cooldown_s` 延长 raw series 以观察回收/缩容；Trial 汇总与默认 SLO 只读 measurement window，只有显式 `window: cooldown` 的资源 SLO 读取 cooldown。
 
 ### 判定与可信度语义（细节见 docs/result-semantics.md + metric-model.md §3.6-3.8）
@@ -58,7 +58,7 @@ perf_harness/
 - 三层 verdict：per-request `judge` → per-slice `RequestStats` → per-run SLO（三态，skip ≠ pass、不计 capacity；typo 在解析期就死，进不了 skip）。
 - 两类停止不合并：within-trial 错误率熔断（实时保护被压服务）vs between-trial `abort_on_fail` SLO 门；每个 trial 以结构化 `TrialStop` 收尾。
 - 只有完成的请求才是延迟事实：drop（未发出）与 cancel（在途被切）绝不进延迟直方图——防 coordinated omission；caveat（co_biased/high_drop/…）随值走。
-- 观测面 ⟂ 判定面：scrape/derived 默认只观测；影响成败的唯一通道是显式 SLO 引用。
+- 观测面 ⟂ 判定面：Probe/PromQL 结果默认只观测；影响成败的唯一通道是显式 SLO 引用。
 
 ### 产物与运行
 

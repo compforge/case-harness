@@ -40,6 +40,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "prombed" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "spec-case", extra = ["model"] },
@@ -64,6 +65,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27,<1.0" },
+    { name = "prombed", git = "https://github.com/compforge/prombed?subdirectory=python" },
     { name = "pyarrow", marker = "extra == 'trace-corpus'", specifier = ">=14,<22" },
     { name = "pydantic", specifier = ">=2.0,<3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -182,6 +184,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
 ]
+
+[[package]]
+name = "prombed"
+version = "0.1.0"
+source = { git = "https://github.com/compforge/prombed?subdirectory=python#69b3a2e27d9ce35456dae4eae8a8be124f0d3a10" }
 
 [[package]]
 name = "pyarrow"
