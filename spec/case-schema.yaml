@@ -1,4 +1,6 @@
-# canonical case 文件 schema（语言无关，可分享的交换格式）
+# case-harness 运行时兼容投影；canonical 资产 schema 与 Case/CaseSet 模型归 spec-case。
+# 本文件保留现有 harness/Go/TypeScript 消费所需字段及 judge 等运行时扩展；共享字段变更应先落到
+# spec-case，再同步到这里，不能让本文件独立演进成第二套 canonical case。
 #
 # 一个 case 文件 = 一个 case 集：素材（sources）+ facet 词表 + cases。它是**可积累、可分享**的资产：
 # 把它给别人、或拿别人的来驱动你自己的 e2e/eval/perf——所以格式带版本（`schema_version`）。
@@ -6,11 +8,6 @@
 #   - 公共段（id / desc / input / facets / requires）三面共用；
 #   - 判定段（judge.<面>）按面分区、全部可选，字段各面自治；缺某面 = 该面只观测不判定。
 # 之所以能分享，全靠这些解耦：case 无环境 / 无实验参数 / 只声明素材不 provision——见 conventions.md「Case 规范」。
-#
-# 唯一类型：本 schema 的中立模型落在 `python/common/case.py`（CaseSet/Case/Source + load/validate/
-# case_hash），是**唯一的 case 类型**——三面（含 e2e）的行为各自直接读它（runner/solver/workload +
-# 读自己那面 judge），不存在 per-harness Case 类。`@case` 注解是 canonical case 的一种 **co-located
-# 编写前端**（贴 handler、便于发现 + 漂移检测），产出/链接 canonical case；e2e 也可直接吃 case.yaml。
 #
 # 与输出契约对称：判定面 `judge.<面>` 的 key = `common.Face`（e2e/eval/perf），与 `common/verdict.py`
 # 的 `harness` 字段共用；`case.id` == `verdict.case_id`，是输入→输出、跨 run、跨面的对齐主键。

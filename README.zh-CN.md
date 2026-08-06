@@ -1,6 +1,6 @@
 # case-harness
 
-> **Cases in, verdicts out.** 一组跨语言测试 harness，把"系统健壮不健壮"拆成若干可分开回答的问题——接口对错（e2e）、agent 效果（eval）、压力容量（perf）、链路归因（trace）与 agent 行动轨迹——共用同一份可积累的 **case** 资产。与 [spec-case](https://github.com/qiankunli/spec-case)（资产格式）、[case-code-review](https://github.com/qiankunli/case-code-review)（白盒消费方）互为姊妹仓。｜ English: [README.md](./README.md)
+> **Cases in, verdicts out.** 一组跨语言测试 harness，把"系统健壮不健壮"拆成若干可分开回答的问题——接口对错（e2e）、agent 效果（eval）、压力容量（perf）、链路归因（trace）与 agent 行动轨迹——共用同一份可积累的 **case** 资产。与 [spec-case](https://github.com/compforge/spec-case)（资产格式）、[case-code-review](https://github.com/compforge/case-code-review)（白盒消费方）互为姊妹仓。｜ English: [README.md](./README.md)
 
 ## 为什么有这个仓库
 
@@ -18,7 +18,7 @@
 
 ## 核心思想
 
-1. **不同判定实现思路迥异，但 case 应该一致**。case 只描述"如何给系统发请求"，不绑定怎么判定；同一份 case，e2e 拿去看对错，eval 拿去看效果，perf 拿去看压力下的表现。一致性落在数据格式而不是共享代码。
+1. **不同判定实现思路迥异，但 case 应该一致**。case 只描述"如何给系统发请求"，不绑定怎么判定；同一份 case，e2e 拿去看对错，eval 拿去看效果，perf 拿去看压力下的表现。canonical 资产格式与模型由 `spec-case` 持有，本仓 `spec/` 只保留运行时约定与兼容投影。
 2. **case 是可积累的资产**。case 与判定解耦后就能持续积累；case 攒得越多，发版前全量跑一遍，就越有底气相信系统没问题。
 3. **一个 experiment 一份 config yaml，产物按 run 落盘**。结果落在 `runs/<scope>/<run-id>/`，记录与渲染分离，历次 run 累积不覆盖，可跨 run 汇总对比。
 4. **一次执行，多面观测**。同一次请求可同时服务对错（e2e）、效果（eval）、延迟/资源（perf）、链路归因（trace）和行动轨迹（trajectory）——这些 harness 是不同视角，不是多次独立发压。
@@ -27,13 +27,13 @@
 
 ## 与 spec-case 的分工
 
-[spec-case](https://github.com/qiankunli/spec-case) 是**资产层**：`@spec`/`@case`/`@rule` 标注长在代码上，经工具链蒸馏成机器可读资产，靠 symbol-id 与代码稳定绑定；canonical `Case` 模型也由它提供（`spec_case.model`）。case-harness 是**运行层**：黑盒地把这些 case 跑成 verdict。同一份资产的白盒消费方是 [case-code-review](https://github.com/qiankunli/case-code-review)（把 spec/case 附到评审 unit 上作 checklist）。
+[spec-case](https://github.com/compforge/spec-case) 是**资产层**：`@spec`/`@case`/`@rule` 标注长在代码上，经工具链蒸馏成机器可读资产，靠 symbol-id 与代码稳定绑定；canonical `Case` 模型也由它提供（`spec_case.model`）。case-harness 是**运行层**：黑盒地把这些 case 跑成 verdict。同一份资产的白盒消费方是 [case-code-review](https://github.com/compforge/case-code-review)（把 spec/case 附到评审 unit 上作 checklist）。
 
 ## Layout
 
 ```
 case-harness/
-├── spec/                # 语言无关约定层：case-schema / verdict-schema / conventions
+├── spec/                # 运行时约定层：case 兼容投影 / verdict / config
 ├── python/              # Python 工程（uv），五个 sibling SDK + 共享 harness_common
 │   ├── e2e_harness/     # API 测试：确定性契约测试，判定即数据，pytest 驱动
 │   ├── eval_harness/    # 效果测试：experiment/Env 对照臂 + Worksheet 大表 + reconciler
@@ -75,4 +75,4 @@ cd typescript/trace-harness && bun install --frozen-lockfile && bun test
 
 ## Status
 
-Early public release。`spec/` 里的 case/verdict schema 是稳定中心；SDK API 仍可能调整。Go SDK 按批次跟进 Python 侧，TypeScript trace-harness 的公开分析 IR 与 Python 保持对齐。
+Early public release。canonical case schema 来自 `spec-case`；本仓 `spec/` 下的 verdict 与运行时约定是稳定中心。SDK API 仍可能调整。Go SDK 按批次跟进 Python 侧，TypeScript trace-harness 的公开分析 IR 与 Python 保持对齐。

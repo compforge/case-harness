@@ -14,7 +14,7 @@
 
 **核心思想（后续演进的指导原则）**：
 
-1. **三类测试实现思路迥异，但 case 应该是一致的**。case 只描述"如何给系统发请求"，不绑定怎么判定；同一份 case，e2e 拿去看对错，eval 拿去看 agent 效果，perf 拿去看压力下的表现。一致性落在 `spec/` 的**数据格式**而不是共享代码——case 规范见 [`spec/conventions.md`](spec/conventions.md)「Case 规范」+ [`spec/case-schema.yaml`](spec/case-schema.yaml)，各 harness 从 canonical case 投影自己的内部模型。
+1. **三类测试实现思路迥异，但 case 应该是一致的**。case 只描述"如何给系统发请求"，不绑定怎么判定；同一份 case，e2e 拿去看对错，eval 拿去看 agent 效果，perf 拿去看压力下的表现。canonical Case/CaseSet 格式与模型由 [`spec-case`](https://github.com/compforge/spec-case) 持有；本仓 [`spec/case-schema.yaml`](spec/case-schema.yaml) 只是运行时兼容投影，harness 约定见 [`spec/conventions.md`](spec/conventions.md)「Case 规范」。
 2. **case 是可积累的资产**。case 与判定解耦后就能持续积累；case 攒得越多，发版前全量跑一遍没问题，就越有底气相对地相信系统没问题——把"慌张修完不敢保证"换成"跑完一遍心里有数"。
 3. **一个 experiment 一份 config yaml，产物按 run 落盘**。experiment 每 run 一次，结果落在 `runs/<experiment>/<run-id>/`，目录下有一份统一的记录文件（如 `result.csv`），report 由记录文件生成——记录与渲染分离，历次 run 累积不覆盖，未来可跨 run / 跨 experiment 汇出一份总 report。
 4. **一次执行，多面观测**。case 统一之后，跑一遍 case 不必只服务一类测试：同一次请求的产出，可以同时服务对错（e2e）、效果（eval）、延迟/资源（perf）、链路内部归因（trace）和行动轨迹（trajectory）——这些 harness 是不同视角，而不是多次独立发压。
@@ -36,7 +36,7 @@
 
 ```
 case-harness/
-├── spec/                # 语言无关约定层：case-schema / config-schema / conventions
+├── spec/                # 运行时约定层：case 兼容投影 / config / verdict / conventions
 ├── python/              # Python 工程（uv），五个 sibling SDK + 共享 common
 │   ├── e2e_harness/     # API 测试（e2e）：确定性契约测试，pytest 驱动      → 见其 AGENTS.md
 │   ├── eval_harness/    # 效果测试（eval）：非确定性质量评测，大表 + reconciler → 见其 AGENTS.md
@@ -54,6 +54,7 @@ case-harness/
 ## 关键约定
 
 - **md 文档分工**：`AGENTS.md` 给 developer 看（代码地图、约定、扩展点），`README.md` 给 user 看（怎么接入、怎么跑）。两者会共用一部分项目定位/边界的内容，但侧重点不同——允许适度重复，不允许混淆受众。
+- **case 资产只有一个 owner**：共享字段与模型先在 `spec-case` 演进；`spec/case-schema.yaml` 只保留当前 harness 的兼容投影和运行时扩展，不得独立定义第二套 canonical case。
 - 五个 Python SDK 共享同一个 uv 工程与 `spec/` 约定，**互不 import**；公共能力集中在 `common`（case / verdict / llm / facets + report_kit 报告 IR）这一中立共享层，而不是 SDK 之间互相复用。各 SDK 仍自带一小撮协议原语（Outcome 形状、runner、SSEParser；perf 自带 httpx 发压栈、trace 自带薄 driver）——**先复制后收敛**，确属公共再收进 `common`。trace 的 parquet 持久化走可选 extra `[trace-corpus]`，不给其它 SDK 增重。
 - 新增能力先想清楚归哪类问题（对错 / 效果 / 容量 / 归因），落到对应 SDK；跨 SDK 的"公共抽象"冲动默认抑制，先复制后收敛，确属公共再进 `common`。
 - Go SDK 短期不跟进 Python 侧新增，等形状稳定后批量同步。
