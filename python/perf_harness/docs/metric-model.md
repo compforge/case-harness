@@ -1,7 +1,7 @@
 # perf_harness 统一 metric 模型
 
 > 状态：**已实现**（greenfield 重构后收敛为 `metric/` 包：`family` + `store` + `reduce`）。本文是 perf 的**唯一 metric 概念**，也是整个 harness 的**脊柱**：加压 / Probe / Workload 只是 metric 的**生产者**，report / SLO / capacity 只是**消费者**，中间收腰在 `MetricFamily`（族）+ typed `MetricSummary`（值，带 caveats）+ `MetricStore`（读面）上——让 per-request 延迟、资源 gauge、server counter、派生标量走**同一条读取面**，消费方都只认 `<family>{labels}.<stat>`。
-> 取向参考 Prometheus 的 *typed metric* + *family/series + label* 思路（类型决定合法操作、label 即维度），但**不借它的存储形状**（见 §5）。
+> 取向参考 Prometheus 的 *typed metric* + *family/series + label* 思路（类型决定合法操作、label 即维度）。服务端遥测由内嵌 Prombed 按 Prometheus 语义抓取、存储和查询；查询结果再进入本模型（见 §5）。
 
 ---
 
@@ -13,7 +13,7 @@ perf 的中心不是"加压"，是 **metric**。它是个**收腰（沙漏）**�
 生产者（怎么来的·多样）             [收腰]               消费者（怎么看·多样）
  Workload.fire → 请求侧分布      ┐                      ┌→ report（汇总 / 按 facet / 按 service）
  Probe.sample  → 资源侧序列      ┼→  MetricFamily       ┼→ SLO gate（CI 退出码）
- reduce 聚合/派生 → request.*、derived: ┘ + MetricSummary └→ capacity（满足 SLO 的最高档）
+ reduce 聚合 → request.*                    ┘ + MetricSummary └→ capacity（满足 SLO 的最高档）
                                   + MetricStore
                                  `<family>{labels}.<stat>`
 ```
@@ -49,7 +49,7 @@ class MetricFamily:                # 族：元数据声明一次，NO label（la
     description: str = ""          # 人话含义；报告 tooltip 用
 
 def series_id(name, labels) -> str:    # 具体 series = 族 + labels（Prometheus 记法）
-    # 无 label → 'top.cpu_m'；有 → 'top.cpu_m{service="chat"}'（label 按 key 排序）
+    # 无 label → 'top.cpu_m'；有 → 'top.cpu_m{service="example"}'（label 按 key 排序）
     ...
 
 @dataclass(frozen=True)            # 每个 summary 自带 caveats（CO-bias 的 p99 不会被当干净值读）
@@ -96,9 +96,8 @@ ttft_ms.p95                          # request  / distribution
 request.duration_ms{difficulty="complex"}.p99   # request / distribution（facet 切片）
 request.error_rate.value             # request  / scalar
 client.inflight.peak                 # resource / gauge
-top.mem_mi{service="planit"}.peak    # resource / gauge（资源·某服务）
-metrics.req_total.rate               # resource / counter
-sse_ttft_mean_s{service="chat"}.value  # resource / scalar（顶层 derived: 比值）
+top.mem_mi{service="worker"}.peak    # resource / gauge（资源·某服务）
+prometheus.request_rate{service="example"}.mean  # resource / gauge（PromQL 结果）
 ```
 
 ---
@@ -116,7 +115,7 @@ sse_ttft_mean_s{service="chat"}.value  # resource / scalar（顶层 derived: 比
 
 - `side="request"`（Outcome 聚合而来：内置 `request.*`、ttft_ms、动态 `first_<event>_ms`）
   → 可带 `{facet="…"}`/`{stage="…"}` label（请求侧本就按 slice 聚合）。
-- `side="resource"`（Probe 序列 + 顶层 `derived:` 比值）→ 只能裸或带**资源侧 label**：
+- `side="resource"`（Probe 序列，包括 PromQL 查询结果）→ 只能裸或带**资源侧 label**：
   `{service="…"}`；`observe:` 开 `per_pod` 时该服务的 series 变成 `{pod="…",service="…"}`
   （按 replica 拆，pod 只是又一个资源 label）。
 
@@ -179,7 +178,7 @@ SLO 配置在**解析期**统一校验，任一不过即 `ValueError`（绝不�
 
 ### 3.8 观测面与判定面：observational by default, gateable only by explicit SLO
 
-服务暴露的 metric（`scrape:`/`derive:` 进来的一切）默认只属于**观测面**：进报告、进响应曲线、进 analyze，但**不进 judge / 熔断 / capacity**。**判定面**只有三个成员——`Workload.judge`（单请求成败，输入签名只有 Outcome，probe 产物结构上到不了它）、错误率熔断（只读 judged outcomes）、run 级 SLO 门。观测数据影响成败的**唯一通道**是 config 里显式写的 SLO 引用（如 `metrics.sse_errors{service="chat"}.increase < 5`）——opt-in，不是默认。
+服务暴露的 PromQL 查询结果默认只属于**观测面**：进报告、进响应曲线、进 analyze，但**不进 judge / 熔断 / capacity**。**判定面**只有三个成员——`Workload.judge`（单请求成败，输入签名只有 Outcome，probe 产物结构上到不了它）、错误率熔断（只读 judged outcomes）、run 级 SLO 门。观测数据影响成败的**唯一通道**是 config 里显式写的 SLO 引用（如 `prometheus.error_rate{service="example"}.peak < 0.01`）——opt-in，不是默认。
 
 这个边界靠**类型签名**硬约束（不是目录约定）：`judge(outcome) -> Verdict`、`_breaker_snapshot(timed, …)`。`workload` 一个类骑跨两面（`fire` 观测、`judge` 判定）是刻意的两段式设计，不按面拆分。配套的观测可信原则：观测系统自身的故障必须可见（§3.7 的 `probe_error`、`Missing("probe_error")`、validity 红旗）——**宁可断线，不画假趋势**。
 
@@ -220,7 +219,7 @@ Histogram + Summary →  distribution   (合并：单 trial 内自算分位)
 (无)                 →  scalar         (trial 末派生值)
 ```
 
-差异本质：**Prometheus 的类型为"分布式 scrape + TSDB 查询 + 跨实例聚合"服务；我们的类型为"单 trial 聚合 + 静态可审查 SLO gate"服务。**
+边界本质：**Prombed 负责 trial 内的 Prometheus scrape + 短期 TSDB + PromQL；perf metric 负责把查询结果与客户端请求、K8s 资源放进同一张可报告、可静态审查 SLO 的表。**
 
 - **Histogram+Summary 合并成 `distribution`**：那俩的分裂是为了跨 scrape 目标聚合（Histogram 查询期 `histogram_quantile`、Summary 预算 φ 不可聚合）。perf 在单 trial 内持有 raw per-request 值自己算分位，**没有 fleet 要聚合**，分裂没意义。
   - **不借名字的真正原因**：借了反而坑懂 Prometheus 的人——`Histogram`/`Summary` 带着"可/不可聚合、分位在哪算"的预期，我们两个都违背；两个 value_kind 合法 stat 还一样 = 没挣到存在。用一张映射表教得更准。
@@ -228,9 +227,11 @@ Histogram + Summary →  distribution   (合并：单 trial 内自算分位)
 - **`side` 是我们的轴**：Prometheus 全是时间序列 scrape，没有"每请求"概念（延迟被迫塞 Histogram）。我们保留每请求 raw 值→distribution，对压测更忠实（不丢尾）；request/resource 一位就说清了"谁能按什么切"（§3.2），不需要按来路分三种 kind。
 - **temporality 词汇（对齐 OTLP）**：`CounterSummary` 同时携带两种 temporality 的读法——`total` 是 **cumulative**（窗口末累计值），`increase`/`rate` 是 **delta**（稳态窗口内的正增量累积，Prometheus `increase()` 语义，pod 重启回卷盖 `counter_reset`）。SLO 引用时选 stat 即选 temporality。
 - **labels → declared facets，更严**：Prometheus alert rule 可引任意 label（typo 易静默失效）；我们要求进 gate 的 facet 必须 declared（§3.4）。
-- **照搬的部分**：① **类型决定合法操作**（counter 不能 `rate` gauge、gauge 不能取 p99，且提前到解析期校验）；② **family/series + label 即维度**（`MetricFamily` 是族、`name{labels}` 是 series、service/facet/stage 都是 label，report by_service/by_facet = 同一个 group-by-label）；③ **抓取健康是合成 series**——Prometheus 每次 scrape 合成 `up`/`scrape_duration_seconds`，我们每 tick 合成 `<family>.up{service=…}`（1/0，mean=观测可用率，SLO 可寻址），trial 级 census（`probe_errors`）说"坏没坏"、up series 说"**什么时候**坏的"；④ **counter 语义**——正增量累积对应 `increase()`（我们不做窗口外推：窗口边界是自己定的，无需估计）；⑤ **exposition 解析按规范**——label 值的 `\"`/`\\`/`\n` 转义与含逗号值（对齐其 lvalReplacer），可选时间戳忽略。
+- **照搬的部分**：① **类型决定合法操作**（counter 不能 `rate` gauge、gauge 不能取 p99，且提前到解析期校验）；② **family/series + label 即维度**（`MetricFamily` 是族、`name{labels}` 是 series、service/facet/stage 都是 label，report by_service/by_facet = 同一个 group-by-label）；③ **抓取健康是合成 series**——Prombed 每次 scrape 合成 `up`/`scrape_duration_seconds`，perf 每 tick 另合成 `<family>.up{service=…}` 表示整个 probe（抓取加所有查询）的可用性；④ **Prometheus 语义不再复制**——文本解析、staleness、counter reset、窗口外推、聚合与 `histogram_quantile` 均由 Prombed 实现。
 
-> **未来 hook**：若将来 perf 去 scrape 被测服务自己暴露的 Prometheus histogram bucket（服务端直方图），再加一个 `histogram` value_kind 区别于客户端 `distribution`；`Summary`（预算 φ 分位）大概率永远用不上。现在不加。
+Prometheus histogram 不进入 perf 的 `histogram` value_kind；consumer 用 PromQL
+`histogram_quantile(...)` 将其投影成 gauge 序列。这样 Prometheus 原生类型留在 Prombed，perf
+只接收报告真正需要的结果类型。
 
 ---
 
@@ -271,8 +272,9 @@ pdata/pmetric（OTLP）与本模型独立收敛到同一形状：`Metric`(name/u
 1. **mdatagen 思想**：metric 元数据是一张声明表（Probe 的 `families: dict[name,
    FamilySpec]`），记录、注册表、文档共读，杜绝多份词汇漂移。
 2. **default/optional 准则**（collector `docs/scraping-receivers.md`）：默认观测 =
-   判断系统健康所必需；冗余表达 / 高基数（`scrape.by:` 自由值 label）/ 高开销 /
-   需特殊配置的 → 显式 opt-in。`observe:` 的 probes 选择与 `scrape:` 都按这把尺。
+   判断系统健康所必需；冗余表达 / 高基数 PromQL 输出 label / 高开销 /
+   需特殊配置的 → 显式 opt-in。Prometheus query 的 `labels` 是静态输出契约，也是 cardinality
+   边界；查询返回额外 label 时 probe 直接失败，不让自由维度悄悄进入报告。
 3. **exemplar（未来 hook，对接 trace_harness）**：OTLP 数据点可挂 exemplar 关联
    trace。perf 的对应位是 `Outcome.meta` 记 trace_id——延迟分布可下钻到具体
    trace，是"一次执行、多面观测"里 perf↔trace 两面的天然桥。现在不做，留指针。
@@ -282,4 +284,4 @@ pdata/pmetric（OTLP）与本模型独立收敛到同一形状：`Metric`(name/u
 ## References
 - 加压模型：[`load-model-redesign.md`](load-model-redesign.md)
 - 结果语义 / SLO：[`result-semantics.md`](result-semantics.md)
-- 当前实现锚点：`metric.py`(MetricFamily/*Summary/Missing/resolve) · `store.py`(MetricStore) · `reduce.py`(铸币) · `probe/base.py`(describe/summarize) · `slo.py`+`config.py`(三态/校验)
+- 当前实现锚点：`metric/family.py`（MetricFamily/*Summary/Missing/resolve）· `metric/store.py`（MetricStore）· `metric/reduce.py`（铸币）· `observe/base.py`（Probe/Prombed）· `slo.py` + `config.py`（三态/校验）

@@ -13,32 +13,41 @@
 
 ```yaml
 # my-exp.yaml —— 压一个已部署的服务，最小配置
-name: chat-sizing
+name: example-sizing
 extensions: [my_project.perf]            # import 后注册 workload / 自定义 probe
 subject:
-  name: chat-server
-  base_url: http://chat-server.vke-system.svc:8001
-  k8s: { kubeconfig: ~/.kube/a-dev, namespace: vke-system,    # 可选：开 k8s 资源观测
-         app_label: app.kubernetes.io/name=chat-server }
+  name: example
+  base_url: http://example.default.svc:8000
+  k8s: { kubeconfig: ~/.kube/config, namespace: default,      # 可选：开 k8s 资源观测
+         app_label: app.kubernetes.io/name=example }
 
-workload: { name: chat, path: /api/v1/chats/, timeout: 180 }  # 你注册的协议适配（见下）
+workload: { name: example, path: /api/v1/run, timeout: 180 }  # 你注册的协议适配（见下）
 
 cases:                                  # 混合流量：weight = 本实验怎么用这个 case
-  - { id: hello,  weight: 70, facets: {difficulty: simple},  input_file: ./q_hello.json }
-  - { id: caocao, weight: 30, facets: {difficulty: complex}, input_file: ./q_caocao.json }
+  - { id: simple,  weight: 70, facets: {difficulty: simple},  input_file: ./simple.json }
+  - { id: complex, weight: 30, facets: {difficulty: complex}, input_file: ./complex.json }
 facets: { difficulty: { values: [simple, complex], ordered: true } }
 
 load: { model: closed, levels: [5, 10, 20, 40], ramp_s: 20, steady_s: 120 }  # 容量扫描
 
 observe:                                # 看谁（资源侧）；省 k8s 的条目 = subject 自己
-  - { name: chat, probes: [metrics, top, rss, limits, pods] }
+  - name: example
+    probes:
+      - name: prometheus                # Prombed 抓 /metrics 并执行 PromQL
+        queries:
+          - { name: request_rate, promql: "sum(rate(http_requests_total[1m]))", unit: req/s }
+          - { name: active, promql: "sum(http_requests_active)", kind: gauge }
+      - top
+      - rss
+      - limits
+      - pods
 
 cooldown_s: 60                          # 可选：停用后继续采样回收/缩容曲线
 
 slo:                                    # 可选：run 级门 → CI 退出码
   - { metric: error_rate, lt: 0.01 }
   - { metric: 'p99_ms{difficulty="complex"}', lt: 30000 }
-  - { metric: 'metrics.task_count{service="worker",task_type="batch",state="running"}.last', window: cooldown, lte: 0 }
+  - { metric: 'prometheus.active{service="example"}.last', window: cooldown, lte: 0 }
 ```
 
 SLO 是 Service Level Objective（服务级别目标），即我们希望系统达到的、可以量化验证的目标。
@@ -72,9 +81,8 @@ report.md/html · summary.csv · by_facet.csv · verdict.json   # 视图层（�
 | `workload` | 协议适配器（你写、`register_workload` 注册；框架只内置 mock） | 见下「接入一个服务」 |
 | `extensions` | 运行前导入的 consumer 模块；模块注册 workload / 自定义 probe | 配置和 CLI/SDK 使用同一发现方式 |
 | `cases` / `facets` | 混合流量（输入 + facets + weight）；报告按 facet 边际拆 | 聚合 p99 双峰没意义，拆开才有用 |
-| `observe` | 资源观测：看谁（self+下游同一形状）、抓什么（metrics/top/rss/restart/limits/pods、自定义 probe + `scrape:` 任意 Prometheus 族） | `service` 是 label，报告按服务分小节 |
+| `observe` | 资源观测：看谁（self+下游同一形状）、抓什么（prometheus/top/rss/restart/limits/pods 或自定义 probe）；prometheus 内声明 PromQL `queries` | Prombed 负责抓取/存储/查询；`service` 是 perf 的 label |
 | `cooldown_s` | measurement 结束且 `deactivate()` 完成后继续采样的秒数；用于回收、缩容与泄漏曲线 | 原始 series 保留；普通汇总/SLO 不纳入，`window: cooldown` 的 SLO 专门读取该窗口 |
-| `derived` | 两个 counter 族的比值（Δnum÷Δden，如服务端 ttft 均值），reduce 期按 label 自动 join | 观测性的；要当门需显式 SLO 引用 |
 | `slo` | run 级断言；可用 `window: cooldown` 检查 cooldown 最终状态（三态 pass/fail/skipped，cooldown 的 skip 按失败处理）→ 退出码与 SLO-aware 容量 | [`docs/result-semantics.md`](docs/result-semantics.md) |
 
 ## 接入一个服务
@@ -86,7 +94,7 @@ report.md/html · summary.csv · by_facet.csv · verdict.json   # 视图层（�
    Trial 依次经历 `setup → measurement → deactivation → cooldown → cleanup`；
    consumer 只需实现 `setup` / `deactivate` / `cleanup`。
 3. 在配置的 `extensions:` 写该模块名；需要业务观测源时用 `register_probe` 注册。
-4. 复制 [`examples/chat.yaml`](examples/chat.yaml) 改 `workload.name` / `subject` / `load`。
+4. 复制 [`examples/example.yaml`](examples/example.yaml) 改 `workload.name` / `subject` / `load`。
 
 完整扩展契约、生命周期顺序和动态 Pod 曲线见
 [`docs/extensions.md`](docs/extensions.md)。

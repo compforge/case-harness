@@ -59,12 +59,13 @@ from perf_harness.model import make_run_id as make_run_id
 from perf_harness.observe import ClientProbe as ClientProbe
 from perf_harness.observe import FamilySpec as FamilySpec
 from perf_harness.observe import KubectlTopProbe as KubectlTopProbe
-from perf_harness.observe import MetricsScrapeProbe as MetricsScrapeProbe
 from perf_harness.observe import PerWorkerRSSProbe as PerWorkerRSSProbe
 from perf_harness.observe import PodCountProbe as PodCountProbe
 from perf_harness.observe import Probe as Probe
 from perf_harness.observe import ProbeConfig as ProbeConfig
 from perf_harness.observe import ProbeContext as ProbeContext
+from perf_harness.observe import PrometheusProbe as PrometheusProbe
+from perf_harness.observe import PrometheusQuery as PrometheusQuery
 from perf_harness.observe import ResourceLimitsProbe as ResourceLimitsProbe
 from perf_harness.observe import RestartProbe as RestartProbe
 from perf_harness.observe import register_probe as register_probe

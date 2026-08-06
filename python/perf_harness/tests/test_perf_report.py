@@ -27,7 +27,7 @@ def _stats(n=100, n_ok=95, err=0.05, breakdown=None) -> RequestStats:
 
 def _trial(level=10) -> TrialResult:
     return TrialResult(
-        subject="chat-server",
+        subject="example",
         resources=ResourceProfile(workers=2, memory="2Gi"),
         load=LoadProfile(model="closed", schedule=Schedule.ramp_hold(level, 0.0, 1.0)),
         overall=_stats(),

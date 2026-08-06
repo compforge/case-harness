@@ -1,8 +1,9 @@
 from perf_harness.model import Sample, Target
 from perf_harness.observe import (
     KubectlTopProbe,
-    MetricsScrapeProbe,
     ProbeContext,
+    PrometheusProbe,
+    PrometheusQuery,
     RestartProbe,
 )
 
@@ -30,8 +31,14 @@ def test_default_summarize_gauge_mean_and_peak():
     assert out["cpu_m"].mean == 600 and out["cpu_m"].peak == 700
 
 
-def test_metrics_scrape_summarize_counter_rate():
-    out = MetricsScrapeProbe().summarize(
+def test_prometheus_summarize_counter_rate():
+    probe = PrometheusProbe(
+        queries=[
+            PrometheusQuery("req_total", "sum(requests_total)", "counter"),
+            PrometheusQuery("in_progress", "sum(requests_in_progress)"),
+        ]
+    )
+    out = probe.summarize(
         {
             "req_total": [Sample(0, 100), Sample(10, 300)],  # counter → rate
             "in_progress": [Sample(0, 5), Sample(5, 8)],  # gauge → peak
@@ -51,7 +58,10 @@ def test_counter_reset_uses_positive_delta_accumulation():
     # a scraped service counter resets when its pod restarts: last-first would be
     # NEGATIVE and poison rate/SLO. increase = Σ max(0, Δ) (Prometheus increase()
     # semantics) and the summary carries the counter_reset caveat.
-    out = MetricsScrapeProbe().summarize(
+    probe = PrometheusProbe(
+        queries=[PrometheusQuery("req_total", "sum(requests_total)", "counter")]
+    )
+    out = probe.summarize(
         {"req_total": [Sample(0, 100), Sample(5, 160), Sample(10, 20), Sample(20, 80)]}
     )
     s = out["req_total"]
@@ -59,5 +69,5 @@ def test_counter_reset_uses_positive_delta_accumulation():
     assert s.rate == 6.0  # 120 / 20s — positive, never negative
     assert "counter_reset" in s.caveats
     # …and a clean counter stays caveat-free with identical numbers as before
-    clean = MetricsScrapeProbe().summarize({"req_total": [Sample(0, 100), Sample(10, 300)]})
+    clean = probe.summarize({"req_total": [Sample(0, 100), Sample(10, 300)]})
     assert clean["req_total"].increase == 200.0 and not clean["req_total"].caveats

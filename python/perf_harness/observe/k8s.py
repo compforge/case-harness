@@ -40,10 +40,10 @@ class _K8sProbe(Probe):
     specific service's pod when bound to its own ``K8sRef`` + ``service`` label.
 
     ``observe:`` in the config builds these against downstream services on the
-    request chain (e.g. planit / executor), so one run can chart cpu/mem across the
+    request chain (e.g. api / worker), so one run can chart cpu/mem across the
     whole chain, not just the Subject. A bound probe prefixes its metric name with
-    the service (``top`` → ``top.planit``) — series never collide, and the report
-    overlays same-unit series (chat cpu vs planit cpu) on one chart.
+    the service (``top`` → ``top.worker``) — series never collide, and the report
+    overlays same-unit series (api cpu vs worker cpu) on one chart.
     """
 
     source = "k8s"

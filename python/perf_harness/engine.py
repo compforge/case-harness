@@ -25,7 +25,6 @@ from perf_harness.drive.workload import TrialContext, Workload
 from perf_harness.metric import (
     MetricFamily,
     MetricSummary,
-    ScalarSummary,
     series_id,
     split_series,
 )
@@ -46,7 +45,6 @@ from perf_harness.model import (
 )
 from perf_harness.observe import (
     ClientStats,
-    DeriveSpec,
     Probe,
     ProbeContext,
     ProbeStore,
@@ -72,9 +70,6 @@ class Experiment:
     resources: list[ResourceProfile]
     loads: list[LoadProfile]
     probes: list[Probe] = field(default_factory=list)
-    # top-level derived ratio metrics (Δnum ÷ Δden of two counter families), evaluated
-    # at reduce time per label set — see DeriveSpec
-    derived: list[DeriveSpec] = field(default_factory=list)
     cases: list[Case] = field(default_factory=list)
     # experiment workload mix: load weight per case.id (unwritten → 1.0; unknown id → error).
     # An Overlay, not a Case field — weight is "how this run uses the case", not its identity.
@@ -356,35 +351,6 @@ class Engine:
                     description="probe health (1 ok / 0 failed) — Prometheus `up` 的对应物；"
                     "mean 即观测可用率",
                     labels=frozenset(probe.labels),
-                )
-
-        # top-level derived ratios (DeriveSpec): Δnum ÷ Δden of two counter FAMILIES over
-        # the steady window (reset-aware increases), evaluated here at reduce time from
-        # the already-collected summaries — collection stays dumb. The ratio is computed
-        # per label set where BOTH families have a series (label join), so a per-service
-        # or by:-grouped scrape derives one ratio per series automatically. Observational
-        # scalars — they gate nothing without an explicit SLO.
-        for spec in exp.derived:
-            for sid, num in list(probe_metrics.items()):  # snapshot — the loop inserts
-                fam_name, labels = split_series(sid)
-                if fam_name != spec.num:
-                    continue
-                den = probe_metrics.get(series_id(spec.den, labels))
-                inc_n = getattr(num, "increase", None)
-                inc_d = getattr(den, "increase", None)
-                if inc_n is None or not inc_d:  # no data / zero denominator → no sample
-                    continue
-                probe_metrics[series_id(spec.name, labels)] = ScalarSummary(
-                    value=inc_n / inc_d, caveats=num.caveats | den.caveats
-                )
-                registry[spec.name] = MetricFamily(
-                    name=spec.name,
-                    unit=spec.unit,
-                    side="resource",
-                    value_kind="scalar",
-                    source="http",
-                    description=spec.description,
-                    labels=registry[spec.num].labels | registry[spec.den].labels,
                 )
 
         return TrialResult(

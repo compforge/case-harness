@@ -1,0 +1,93 @@
+# Example sizing sweep against an already-deployed service, observed via k8s and
+# an embedded Prometheus runtime. Run from your consumer project (the one that does
+# register_workload("example", ...)). Semantics live in the docs — this file is a
+# template to copy, not a manual:
+#   load shape / breaker / graceful stop → docs/load-model-redesign.md
+#   SLO refs / labels / skip semantics   → docs/result-semantics.md + metric-model.md
+name: example-sizing              # experiment name → runs/<name>/<run_id>/ (runs accumulate)
+# extensions: [my_project.perf]   # imports register_workload/register_probe side effects
+
+subject:                          # 压谁 + 怎么到达；不写 provisioner = 直连已部署服务
+  name: example
+  base_url: http://example.default.svc:8000
+  headers: {}
+  k8s:                            # enables top/rss/restart/limits/pods probes
+    kubeconfig: ~/.kube/config
+    namespace: default
+    app_label: app.kubernetes.io/name=example
+  # --- 让 harness 自己扫资源档时才配（resources 条目会被真实施加）---
+  # provisioner:
+  #   type: helm
+  #   release: example
+  #   chart_path: ./manifests/example
+  #   base_values: ./manifests/example/values.yaml
+
+resources:                        # 资源档（网格第一轴）；无 provisioner 时仅标注 trial
+  - { workers: 2, memory: 2Gi }
+  - { workers: 4, memory: 2Gi }
+
+workload:                         # 协议适配 — register_workload("example", ...) in your project
+  name: example
+  path: /api/v1/run
+  headers_file: ./headers.json    # X-Proxy-Tenant-ID / X-Proxy-User-ID
+  timeout: 180                    # one agent answer can take tens of seconds
+
+# 混合流量：简单/复杂问题资源成本差很多，报告按 facet 拆开看；weight 是本实验的用法
+facets:
+  difficulty: { values: [simple, complex], ordered: true }
+cases:
+  - { id: simple,  weight: 70, facets: {difficulty: simple},  input_file: ./simple.json }
+  - { id: complex, weight: 30, facets: {difficulty: complex}, input_file: ./complex.json }
+
+load:                             # 负载档（网格第二轴）
+  model: closed                   # closed = N 并发用户; open = 到达率 rps（配 max_inflight）
+  levels: [5, 10, 20, 40]         # 容量扫描：每档一个 ramp→hold arm
+  ramp_s: 20
+  steady_s: 120
+  # pacing: { kind: constant_pacing, secs: 1 }   # closed 的 think-time（省略=背靠背）
+  # abort_on_error_rate: 0.10     # within-trial 熔断：这一档压崩了就停它（safety net）
+  # graceful_stop_s: 30           # 停时 drain 在途的窗口（0 = 硬停）
+  # --- 或显式 shape（单 arm，可阶梯/尖刺）---
+  # model: open
+  # max_inflight: 200
+  # stages:
+  #   - { ramp_to: 10, over_s: 30 }
+  #   - { hold: 10, for_s: 120 }
+
+observe:                          # 资源观测：self + 下游同一形状；省 k8s 的条目 = subject
+  - name: example
+    probes:
+      - name: prometheus          # 默认抓 subject.base_url + /metrics
+        queries:
+          - { name: request_rate, promql: "sum(rate(http_requests_total[1m]))", unit: req/s }
+          - name: latency_p95_s
+            promql: "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[1m])))"
+            unit: s
+          - name: request_rate_by_route
+            promql: "sum by (route) (rate(http_requests_total[1m]))"
+            labels: [route]       # 查询输出 label 契约，也是 cardinality 边界
+      - top
+      - rss
+      - restart
+      - limits
+      - pods
+  # 下游服务显式给 Prometheus URL；其 k8s 资源探针仍可并列。
+  # - name: worker
+  #   k8s: { kubeconfig: ~/.kube/config, namespace: default, app_label: app=worker }
+  #   probes:
+  #     - { name: prometheus, url: "http://worker.default.svc:8000/metrics",
+  #         queries: [ { name: tasks, promql: "sum(tasks)" } ] }
+  #     - top
+
+observe_interval_s: 5
+# cooldown_s: 300                 # deactivate 后继续采样；默认不进汇总/SLO，window: cooldown 可门禁
+runs_dir: ./runs                  # each run → runs/example-sizing/<run_id>/
+
+# slo:                            # run 级门（三态，skip≠pass）→ CI 退出码 + SLO-aware 容量
+#   - { metric: error_rate,        lt: 0.01 }
+#   - { metric: drop_rate,         lt: 0.01 }
+#   - { metric: p99_ms,            lt: 5000, level: 40 }
+#   - { metric: ttft_ms.p95,       lt: 2000 }
+#   - { metric: 'p99_ms{difficulty="complex"}',     lt: 30000 }
+#   - { metric: 'prometheus.latency_p95_s{service="example"}.peak', lt: 2 }
+# abort_on_fail: false            # between-trial SLO 门：一档压完不达标即停 sweep

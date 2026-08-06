@@ -119,7 +119,7 @@ class K8sRef:
 
     kubeconfig: str
     namespace: str
-    app_label: str  # e.g. "app.kubernetes.io/name=chat-server"
+    app_label: str  # e.g. "app.kubernetes.io/name=example"
     metrics_prefix: str = ""  # starlette_exporter prefix, e.g. "chat"
     metrics_port: int = 8000
     container: str | None = None
@@ -358,7 +358,7 @@ class SloAssertion:
 
     The slice is selected by the metric's **labels** (no separate ``scope``): bare
     ``p99_ms`` is overall; ``duration_ms{difficulty="simple"}.p99`` a facet slice;
-    ``duration_ms{stage="hold@40"}.p99`` a stage; ``top.cpu_m{service="planit"}.peak``
+    ``duration_ms{stage="hold@40"}.p99`` a stage; ``top.cpu_m{service="worker"}.peak``
     a service. ``threshold`` is a float for lt/lte/gt/gte, a ``(lo, hi)`` for between.
     ``window="cooldown"`` re-reduces a resource gauge/counter after ``deactivate``;
     the default ``measurement`` reads the normal load-window summary.

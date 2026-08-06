@@ -32,16 +32,15 @@ from perf_harness.model import (
 )
 from perf_harness.observe import (
     ClientProbe,
-    DeriveSpec,
     KubectlTopProbe,
-    MetricsScrapeProbe,
     PerWorkerRSSProbe,
     PodCountProbe,
     Probe,
     ProbeConfig,
+    PrometheusProbe,
+    PrometheusQuery,
     ResourceLimitsProbe,
     RestartProbe,
-    ScrapeSpec,
     build_probe,
 )
 from perf_harness.subject import HelmProvisioner, Provisioner
@@ -54,7 +53,6 @@ _SLO_WINDOWS = get_args(SloWindow)
 
 _PROBES = {
     "client": ClientProbe,
-    "metrics": MetricsScrapeProbe,
     "top": KubectlTopProbe,
     "rss": PerWorkerRSSProbe,
     "restart": RestartProbe,
@@ -104,13 +102,17 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
     if "probes" in raw:
         raise ValueError(
             "`probes:` was removed — `client` is always recorded; put "
-            "metrics/top/rss/restart/limits/pods or registered custom probes under "
+            "prometheus/top/rss/restart/limits/pods or registered custom probes under "
             "`observe:` (the Subject is the entry that omits `k8s`)"
         )
     # client (load-gen's own inflight/sent) is harness-intrinsic → always on, not a
     # config knob. observe: is the one place for per-service resource observation.
     probes = [ClientProbe(), *_parse_observe(raw.get("observe"))]
-    derived = _parse_derived(raw.get("derived"), probes)
+    if "derived" in raw:
+        raise ValueError(
+            "`derived:` was removed — express server-side ratios and rates directly "
+            "as PromQL queries on the `prometheus` probe"
+        )
     cases = _parse_cases(raw)
     mix = _parse_mix(raw, cases)
     slo = _parse_slo(raw.get("slo"))
@@ -118,7 +120,7 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
     if cooldown_s < 0:
         raise ValueError("cooldown_s must be >= 0")
     _validate_producers(probes, workload)
-    registry = _static_registry(probes, workload, derived)
+    registry = _static_registry(probes, workload)
     declared_facets = _declared_facet_pairs(raw.get("facets"), cases, workload)
     # observed services close the `{service="…"}` label value space (the family-keyed
     # registry no longer carries a per-service entry to check against)
@@ -155,7 +157,6 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
         resources=resources,
         loads=loads,
         probes=probes,
-        derived=derived,
         cases=cases,
         mix=mix,
         facet_order=_parse_facet_order(raw.get("facets")),
@@ -264,37 +265,24 @@ def _parse_k8s(c: dict | None) -> K8sRef | None:
 def _parse_observe(items: list[dict] | None) -> list[Probe]:
     """``observe:`` → the ONE place for per-service resource observation, self +
     downstream in one shape. Each item: ``name`` + ``probes`` + an OPTIONAL ``k8s``
-    block; omit ``k8s`` and the entry is the **Subject** (its pod via
-    ``subject.provisioner.k8s``, its ``/metrics`` via the Subject base_url). Pod
-    probes (top/rss/restart/limits/pods) read a K8sRef; ``metrics`` scrapes the Subject's
-    ``/metrics`` (downstream /metrics needs a URL — unsupported, so it's only valid
-    on the k8s-less Subject entry). Metrics are service-prefixed (``top.<name>.…``),
-    so the report overlays same-unit series across services."""
+    block; omit ``k8s`` and the entry is the **Subject**. Pod probes read a K8sRef;
+    ``prometheus`` embeds Prombed and requires declarative PromQL queries. Resource
+    families remain service-labeled, so reports can compare the same signal across
+    observed services."""
     out: list[Probe] = []
     for item in items or []:
         service = str(item["name"])
-        if "derive" in item:
+        obsolete = {"derive", "scrape", "metrics_url"} & item.keys()
+        if obsolete:
             raise ValueError(
-                f"observe[{service}].derive moved to the TOP-LEVEL `derived:` key — "
-                f"ratios are computed at reduce time from counter families "
-                f"(`ratio: [metrics.<num>, metrics.<den>]`), not configured per probe"
+                f"observe[{service}]: removed keys {sorted(obsolete)!r}; configure "
+                "PromQL under `probes: [{name: prometheus, queries: [...]}]`"
             )
         ref = _parse_k8s(item.get("k8s"))  # None → the Subject (its pod + base_url)
         # per_pod: top/limits emit one {pod}-labeled series per pod instead of the
         # service-level sum (per-pod usage vs its OWN request/limit on one chart)
         per_pod = bool(item.get("per_pod", False))
         probes = item.get("probes") or ["top"]
-        probe_names = [
-            p if isinstance(p, str) else p.get("name") if isinstance(p, dict) else None
-            for p in probes
-        ]
-        scrape = _parse_scrape(item.get("scrape"), service)
-        if scrape and "metrics" not in probe_names:
-            raise ValueError(
-                f"observe[{service}].scrape: needs the `metrics` probe on this "
-                f"entry (it rides the /metrics scrape)"
-            )
-        metrics_url = item.get("metrics_url")  # convention: http://<service-ip>:<port>/metrics
         for probe_item in probes:
             if isinstance(probe_item, str):
                 pname = probe_item
@@ -318,26 +306,39 @@ def _parse_observe(items: list[dict] | None) -> list[Probe]:
                         f"got {sorted(options)}"
                     )
                 out.append(_PROBES[pname](k8s=ref, service=service, per_pod=per_pod))
-            elif pname == "metrics":
-                if options:
+            elif pname == "prometheus":
+                queries = _parse_prometheus_queries(options.pop("queries", None), service)
+                url = options.pop("url", None)
+                if ref is not None and not url:
                     raise ValueError(
-                        f"observe[{service}].probes[metrics]: configure scrape/metrics_url "
-                        "on the observe entry, not inside probes"
+                        f"observe[{service}].probes[prometheus]: a downstream service "
+                        "needs an explicit `url`"
                     )
-                if ref is not None and not metrics_url:
+                headers = options.pop("headers", None)
+                if headers is not None and not isinstance(headers, dict):
                     raise ValueError(
-                        f"observe[{service}].probes: `metrics` on a downstream entry "
-                        f"needs `metrics_url` (the Subject entry defaults to base_url"
-                        f" + /metrics)"
+                        f"observe[{service}].probes[prometheus].headers must be a mapping"
+                    )
+                allowed_limits = {
+                    "timeout_ms",
+                    "max_scrape_bytes",
+                    "retention_ms",
+                    "max_series",
+                    "max_samples_per_series",
+                }
+                unknown = set(options) - allowed_limits
+                if unknown:
+                    raise ValueError(
+                        f"observe[{service}].probes[prometheus]: unknown options "
+                        f"{sorted(unknown)!r}"
                     )
                 out.append(
-                    MetricsScrapeProbe(
+                    PrometheusProbe(
                         service=service,
-                        scrape=scrape,
-                        url=str(metrics_url) if metrics_url else None,
-                        # a downstream entry's starlette prefix comes from ITS k8s ref
-                        # (the sample-time fallback reads the Subject's)
-                        prefix=ref.metrics_prefix if ref and ref.metrics_prefix else None,
+                        queries=queries,
+                        url=str(url) if url else None,
+                        headers={str(k): str(v) for k, v in (headers or {}).items()},
+                        **{key: int(value) for key, value in options.items()},
                     )
                 )
             elif pname == "client":
@@ -360,103 +361,46 @@ def _parse_observe(items: list[dict] | None) -> list[Probe]:
     return out
 
 
-def _parse_derived(items: list[dict] | None, probes: list[Probe]) -> list[DeriveSpec]:
-    """Top-level ``derived:`` → per-trial ratio scalars (``Δnum ÷ Δden`` of two counter
-    FAMILIES over the steady window — the Prometheus-histogram mean idiom). ``num``/
-    ``den`` are family names (``metrics.sse_ttft_sum``); the Engine joins them per
-    label set at reduce time, so a per-service or ``by:``-grouped scrape derives one
-    ratio per series automatically. Fail fast on a name that is not a declared
-    counter family — a silent no-join would render as 'no data'."""
-    counters = {d.name for p in probes for d in p.describe() if d.value_kind == "counter"}
-    taken = {d.name for p in probes for d in p.describe()}
-    # by-grouping per scraped family — num/den must agree, else the reduce-time label
-    # join finds no common label set and the ratio silently reads as 'no data'
-    by_of: dict[str, tuple[str, ...]] = {}
-    for p in probes:
-        for s in getattr(p, "scrape", []):
-            by_of[f"{p.family}.{s.name}"] = s.by
-    out: list[DeriveSpec] = []
-    for d in items or []:
-        name = d.get("as")
+def _parse_prometheus_queries(items: object, service: str) -> list[PrometheusQuery]:
+    if not isinstance(items, list) or not items:
+        raise ValueError(f"observe[{service}].probes[prometheus] needs a non-empty `queries` list")
+    out: list[PrometheusQuery] = []
+    seen = {"up"}
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"observe[{service}].probes[prometheus].queries entries must be mappings"
+            )
+        name = item.get("name")
+        promql = item.get("promql")
         if not isinstance(name, str) or not name:
-            raise ValueError(f"derived entry needs a string `as`: {d!r}")
-        ratio = d.get("ratio")
-        if not (isinstance(ratio, list) and len(ratio) == 2):
-            raise ValueError(f"derived[{name}]: needs `ratio: [num, den]`, got {ratio!r}")
-        num, den = (str(x) for x in ratio)
-        for ref_name in (num, den):
-            if ref_name not in counters:
-                raise ValueError(
-                    f"derived[{name}]: {ref_name!r} is not a declared counter family "
-                    f"(declared: {sorted(counters) or 'none'})"
-                )
-        if by_of.get(num, ()) != by_of.get(den, ()):
-            raise ValueError(
-                f"derived[{name}]: num/den must share the same `by` grouping, got "
-                f"{num!r} by={list(by_of.get(num, ()))} vs {den!r} by={list(by_of.get(den, ()))}"
-            )
-        if name in taken or any(o.name == name for o in out):
-            raise ValueError(f"derived: duplicate metric name {name!r}")
-        out.append(
-            DeriveSpec(
-                name=name,
-                num=num,
-                den=den,
-                unit=str(d.get("unit", "")),
-                description=str(d.get("description", "")),
-            )
-        )
-    return out
-
-
-def _parse_scrape(items: list[dict] | None, service: str) -> list[ScrapeSpec]:
-    """``observe[].scrape:`` → extra Prometheus families for the ``metrics`` probe.
-
-    Each item: ``from`` (exposition sample name; for a histogram use its ``…_count``
-    / ``…_sum`` series) + optional ``as`` (bare metric name, default ``from``),
-    ``kind`` (counter|gauge, default counter — an instantaneous scrape can't be a
-    distribution), ``unit``, ``description``, ``match`` ({label: value} keep-filter),
-    ``drop`` ({label: [values]} discard-filter) and ``by`` (label name or list —
-    keep one series per distinct label value, PromQL's ``sum by``; mind the
-    cardinality, see ``ScrapeSpec``)."""
-    out: list[ScrapeSpec] = []
-    # builtin bare names + the synthesized health series — a scrape may not shadow
-    seen = {"req_total", "in_progress", "up"}
-    for s in items or []:
-        source = s.get("from")
-        if not isinstance(source, str) or not source:
-            raise ValueError(f"observe[{service}].scrape entry needs a string `from`: {s!r}")
-        name = str(s.get("as") or source)
-        kind = str(s.get("kind", "counter"))
-        if kind not in ("counter", "gauge"):
-            raise ValueError(
-                f"observe[{service}].scrape[{name}]: kind must be counter|gauge, got {kind!r}"
-            )
+            raise ValueError(f"Prometheus query needs a non-empty string `name`: {item!r}")
+        if not isinstance(promql, str) or not promql:
+            raise ValueError(f"Prometheus query {name!r} needs a non-empty string `promql`")
         if name in seen:
-            raise ValueError(f"observe[{service}].scrape: duplicate/builtin metric name {name!r}")
+            raise ValueError(f"Prometheus query name {name!r} is duplicate or reserved")
         seen.add(name)
-        by_raw = s.get("by")
-        if isinstance(by_raw, str):
-            by_raw = [by_raw]
-        if by_raw is not None and not (
-            isinstance(by_raw, list) and by_raw and all(isinstance(x, str) and x for x in by_raw)
+        kind = str(item.get("kind", "gauge"))
+        if kind not in ("counter", "gauge"):
+            raise ValueError(f"Prometheus query {name!r}: kind must be counter|gauge, got {kind!r}")
+        labels = item.get("labels", [])
+        if not (
+            isinstance(labels, list)
+            and all(isinstance(label, str) and label for label in labels)
+            and len(set(labels)) == len(labels)
         ):
-            raise ValueError(
-                f"observe[{service}].scrape[{name}]: `by` must be a label name or a "
-                f"non-empty list of label names, got {s.get('by')!r}"
-            )
+            raise ValueError(f"Prometheus query {name!r}: labels must be a list of unique names")
+        unknown = set(item) - {"name", "promql", "kind", "unit", "description", "labels"}
+        if unknown:
+            raise ValueError(f"Prometheus query {name!r}: unknown keys {sorted(unknown)!r}")
         out.append(
-            ScrapeSpec(
-                source=source,
+            PrometheusQuery(
                 name=name,
+                promql=promql,
                 value_kind=kind,  # type: ignore[arg-type]
-                unit=str(s.get("unit", "count")),
-                description=str(s.get("description", "")),
-                match={str(k): str(v) for k, v in (s.get("match") or {}).items()},
-                drop={
-                    str(k): tuple(str(x) for x in vals) for k, vals in (s.get("drop") or {}).items()
-                },
-                by=tuple(by_raw or ()),
+                unit=str(item.get("unit", "")),
+                description=str(item.get("description", "")),
+                labels=tuple(labels),
             )
         )
     return out
@@ -670,22 +614,17 @@ def _validate_producers(probes: list[Probe], workload: Workload) -> None:
             _claim(d, f"Probe {type(p).__name__}.describe()")
 
 
-def _static_registry(
-    probes: list[Probe], workload: Workload, derived: list[DeriveSpec]
-) -> dict[str, MetricFamily]:
+def _static_registry(probes: list[Probe], workload: Workload) -> dict[str, MetricFamily]:
     """Statically-knowable metric FAMILIES for SLO validation: builtin ``request.*`` +
-    each Probe's ``describe()`` + top-level ``derived:`` ratios + the Workload's declared
-    per-request metrics. Keyed by family name (labels are slice selectors, not identity),
-    so unit/value_kind/description is stored once per family — not duplicated per
-    service. (Dynamic, undeclared per-request metrics aren't here — discovered only at
-    run time, so a dotted ref to one is allowed and skip-checked.)"""
+    each Probe's ``describe()`` + the Workload's declared per-request metrics. Keyed
+    by family name so metadata is stored once rather than once per service."""
     reg: dict[str, MetricFamily] = {
         d.name: d for d in (*REQUEST_DESCRIPTORS, *PER_REQUEST_DESCRIPTORS)
     }
     for p in probes:
         reg.update({d.name: d for d in p.describe()})  # by family (dedup across services)
-        # the Engine synthesizes `<family>.up` health series per probe (Prometheus `up`
-        # analogue) — declare them so e.g. `metrics.up{service="…"}.mean` can gate
+        # the Engine synthesizes `<family>.up` health series per probe — declare it
+        # so observation availability can be an explicit SLO.
         reg[f"{p.family}.up"] = MetricFamily(
             name=f"{p.family}.up",
             unit="",
@@ -694,16 +633,6 @@ def _static_registry(
             source=p.source,
             description="probe health (1 ok / 0 failed) — mean 即观测可用率",
             labels=frozenset(p.labels),
-        )
-    for spec in derived:  # derived ratio scalars are declared too → SLO-addressable
-        reg[spec.name] = MetricFamily(
-            name=spec.name,
-            unit=spec.unit,
-            side="resource",
-            value_kind="scalar",
-            source="http",
-            description=spec.description,
-            labels=reg[spec.num].labels | reg[spec.den].labels,
         )
     reg.update({d.name: d for d in workload.describe()})
     return reg
