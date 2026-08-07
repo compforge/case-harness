@@ -140,9 +140,11 @@ async def test_circuit_breaker_aborts_trial_on_error_rate():
         ],
         observe_interval_s=0.05,
     )
-    r = (await Engine(exp).run()).trials[0]
+    run = await Engine(exp).run()
+    r = run.trials[0]
     # structured TrialStop (the truth); aborted is a convenience alias over stop.early
     assert r.aborted is True and r.stop.early is True
+    assert not run.passed  # a partial measurement window cannot pass the run gate
     assert r.stop.reason == "error_rate"
     snap = r.stop.snapshot
     assert snap is not None  # the trip view (not post-warmup overall)

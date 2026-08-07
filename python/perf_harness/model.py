@@ -411,8 +411,9 @@ class Run:
     ``Engine.run()`` returns this; ``write_run`` lays it out under
     ``runs/<experiment>/<run_id>/`` and serialises it to ``run.json``. ``trials``
     are the cells of the Constraint × Load sweep (the experiment's arms).
-    ``passed`` is the run-level SLO gate (all gated trials met their SLOs) — the
-    CLI maps it to the process exit code for CI.
+    ``passed`` is the operational run gate: every trial completed its planned
+    window and all gated SLOs passed. The CLI maps it to the process exit code for
+    CI.
     """
 
     run_id: str

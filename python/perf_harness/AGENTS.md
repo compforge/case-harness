@@ -56,7 +56,7 @@ perf_harness/
 ### 判定与可信度语义（细节见 docs/result-semantics.md + metric-model.md §3.6-3.8）
 
 - 三层 verdict：per-request `judge` → per-slice `RequestStats` → per-run SLO（三态，skip ≠ pass、不计 capacity；typo 在解析期就死，进不了 skip）。
-- 两类停止不合并：within-trial 错误率熔断（实时保护被压服务）vs between-trial `abort_on_fail` SLO 门；每个 trial 以结构化 `TrialStop` 收尾。
+- 两类停止不合并：within-trial 错误率熔断（实时保护被压服务）vs between-trial `abort_on_fail` run 门；每个 trial 以结构化 `TrialStop` 收尾，提前停止的部分窗口不能确认容量并使 run 失败。
 - 只有完成的请求才是延迟事实：drop（未发出）与 cancel（在途被切）绝不进延迟直方图——防 coordinated omission；caveat（co_biased/high_drop/…）随值走。
 - 观测面 ⟂ 判定面：Probe/PromQL 结果默认只观测；影响成败的唯一通道是显式 SLO 引用。
 

@@ -456,19 +456,22 @@ def write_report(
 
 
 def _render_slo(lines: list[str], results: list[TrialResult]) -> None:
-    """SLO gate section: run verdict (three-state) + each failing check + SLO-aware
-    capacity. A skipped check (slice absent) is shown distinctly and never folded into
-    PASS — it's not a pass (the default gate is lenient on skip for the exit code, but
-    the report must not read green)."""
-    if not any(r.slo for r in results):
+    """Run gate: trial completeness, SLO checks, and confirmed capacity."""
+    early = [r for r in results if r.stop.early]
+    if not any(r.slo for r in results) and not early:
         return
-    has_fail = any(c.failed for r in results for c in r.slo)
+    has_fail = bool(early) or any(c.failed for r in results for c in r.slo)
     has_skip = any(c.skipped for r in results for c in r.slo)
-    lines.append("## SLO（run 判定）")
+    lines.append("## Run 判定（trial 完整性 + SLO）")
     lines.append("")
     verdict = "FAIL ❌" if has_fail else ("PASS ✅（含 skipped，见下）" if has_skip else "PASS ✅")
     lines.append(f"**{verdict}**")
     lines.append("")
+    if early:
+        lines.append("**提前停止**（部分窗口不能确认该负载档容量）：")
+        for r in early:
+            lines.append(f"- `{_stop_brief(r)}`")
+        lines.append("")
     for r in results:
         fails = [c for c in r.slo if c.failed]
         if not fails:
@@ -495,10 +498,10 @@ def _render_slo(lines: list[str], results: list[TrialResult]) -> None:
             "**skipped**（该 metric 的 slice 在此 trial 无数据 → 未判定，**别误读为通过**；"
             f"留意 label 拼写）：{', '.join(skipped)}"
         )
-    cap = slo_aware_capacity(results)
-    if any(v is not None for v in cap.values()):
+    if any(r.slo for r in results):
+        cap = slo_aware_capacity(results)
         lines.append("")
-        lines.append("**SLO-aware 容量**（满足全部 SLO 的最高档）：")
+        lines.append("**SLO-aware 容量**（完整运行且满足全部 SLO 的最高档）：")
         for label, lvl in cap.items():
             lines.append(f"- `{label}`: {f'{lvl:g}' if lvl is not None else '—（无档达标）'}")
     lines.append("")
@@ -515,12 +518,20 @@ def _build_doc(
     subject = results[0].subject if results else "?"
     report = Report(title=f"perf report — {subject}", meta=[("subject", subject)])
 
-    # SLO gate (three-state: a skipped check is shown distinctly, not folded into PASS)
-    if any(r.slo for r in results):
-        has_fail = any(c.failed for r in results for c in r.slo)
+    # Run gate: a partial trial fails before the three-state SLO rollup.
+    early = [r for r in results if r.stop.early]
+    if any(r.slo for r in results) or early:
+        has_fail = bool(early) or any(c.failed for r in results for c in r.slo)
         has_skip = any(c.skipped for r in results for c in r.slo)
         verdict = "FAIL ❌" if has_fail else ("PASS ✅（含 skipped）" if has_skip else "PASS ✅")
-        sec = Section("SLO（run 判定）", [Prose(verdict)])
+        sec = Section("Run 判定（trial 完整性 + SLO）", [Prose(verdict)])
+        if early:
+            sec.blocks.append(
+                Table(
+                    ["early stop"],
+                    [[_stop_brief(r)] for r in early],
+                )
+            )
         fail_rows: list[list[str]] = []
         for r in results:
             for c in (c for c in r.slo if c.failed):
@@ -546,8 +557,8 @@ def _build_doc(
             sec.blocks.append(
                 Prose("skipped（slice 无数据 → 未判定，别误读为通过）：" + ", ".join(skipped))
             )
-        cap = slo_aware_capacity(results)
-        if any(v is not None for v in cap.values()):
+        if any(r.slo for r in results):
+            cap = slo_aware_capacity(results)
             sec.blocks.append(
                 KV(
                     [

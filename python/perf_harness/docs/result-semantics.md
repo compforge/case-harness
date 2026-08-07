@@ -30,7 +30,7 @@ run
       ├─ 聚合：overall + by_facet + by_stage   # RequestStats 切片（新增 by_stage）
       ├─ SLO 评估（对该 trial 的聚合指标）       # 新增
       └─ TrialResult(... slo: [SloCheck])
- └─ Run(passed = 所有受门 trial 通过) → CLI 退出码（0/1）
+ └─ Run(passed = 所有 trial 完整运行且受门 SLO 通过) → CLI 退出码（0/1）
 ```
 
 ---
@@ -84,9 +84,11 @@ class SloCheck:                     # 求值结果（三态）
 
 读经 `MetricStore.query`：返回 `Missing` ⇒ `skipped`，否则比较得 `pass`/`fail`。**skip ≠ pass**（三态的要点）：
 
-- `Run.passed`（CLI 退出码）默认**只看 fail**；measurement 的 skip 仅在
-  `strict_slo: true` 时失败，cooldown 的 skip 始终失败，避免观测缺失被误读为已经回收。
+- `Run.passed`（CLI 退出码）先要求 trial 完整运行；对 SLO 默认**只看 fail**，measurement 的
+  skip 仅在 `strict_slo: true` 时失败，cooldown 的 skip 始终失败，避免观测缺失被误读为已经回收。
 - `slo_passed`（capacity 用）要求**全部 pass**——skip 的档不算确认容量（保守）。
+- `TrialStop.early` 表示只得到部分测量窗口——即使已求值的 SLO 都通过，run 仍失败，且该档不计
+  SLO-aware 容量；熔断保护被压服务，不能反过来成为容量达标证据。
 - typo 进不了 skip：结构非法在解析期就 `ValueError`（见 metric-model.md §3.5）。
 
 **🔶 开放问题 1：sweep 下哪些 trial 受门？** 容量扫描 `levels:[10,20,40]` 故意压到打挂，对全部 trial 施加同一 SLO 必然在高档失败。三个候选默认：

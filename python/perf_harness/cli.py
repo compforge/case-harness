@@ -90,11 +90,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"report: {paths['report']}")
     if paths.get("report_html"):
         print(f"  html: {paths['report_html']}")
-    if run_result.trials and any(r.slo for r in run_result.trials):
+    early = [r for r in run_result.trials if r.stop.early]
+    if early:
+        reasons = ", ".join(sorted({r.stop.reason for r in early}))
+        print(f"run: FAIL ({len(early)} trial(s) stopped early: {reasons})")
+    elif run_result.trials and any(r.slo for r in run_result.trials):
         skipped = sum(1 for r in run_result.trials for c in r.slo if c.observed is None)
         note = f" ({skipped} skipped — metric/slice absent; check label typos)" if skipped else ""
         print(f"SLO: {'PASS' if run_result.passed else 'FAIL'}{note}")
-    # non-zero exit on SLO failure → CI gate
+    # non-zero exit on an incomplete trial or SLO failure → CI gate
     return 0 if run_result.passed else 1
 
 

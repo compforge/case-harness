@@ -13,7 +13,7 @@ from pathlib import Path
 
 from harness_common import verdict as _v
 
-from perf_harness.model import Run, SloCheck
+from perf_harness.model import Run, SloCheck, TrialResult
 
 
 def _check_verdict(c: SloCheck) -> _v.CheckVerdict:
@@ -31,31 +31,30 @@ def _check_verdict(c: SloCheck) -> _v.CheckVerdict:
 
 
 def _build(run: Run) -> _v.RunVerdict:
-    """Run → RunVerdict. status is the *recorded* SLO-gate verdict, derived from the
-    per-trial check states with the cross-harness rollup precedence (fail > pass >
-    skipped) — deliberately NOT from ``run.passed``. ``run.passed`` is the engine's
-    *operational* gate (exit code / abort / ``strict_slo`` leniency) and by default lets
-    a skipped check slide; the recorded verdict must not, or a capacity run whose SLO
-    never evaluated (every slice absent, or no SLO declared) would read green and a
-    verdict consumer would trust an unverified run. So: any real fail → fail; else any
-    real pass → pass; else (all skipped / nothing declared) → skipped."""
+    """Run → RunVerdict. Early-stopped trials fail before SLO rollup because their
+    partial windows cannot verify a load level. Otherwise status follows the recorded
+    SLO checks (fail > pass > skipped), deliberately not ``run.passed`` because the
+    engine's default skip policy is lenient while persisted evidence must not read
+    green when no assertion was verified."""
     raw: list[SloCheck] = [c for t in run.trials for c in t.slo]
+    early = [t for t in run.trials if t.stop.early]
     n_pass = sum(1 for c in raw if c.state == "pass")
     n_fail = sum(1 for c in raw if c.state == "fail" and c.observed is not None)
 
     if not run.trials:
         status = "skipped"
-    elif n_fail:
+    elif early or n_fail:
         status = "fail"
     elif n_pass:
         status = "pass"
     else:
         status = "skipped"  # SLO declared but every check skipped, or no SLO at all
-    reason = (
-        _fail_reason([c for c in raw if c.state == "fail" and c.observed is not None])
-        if status == "fail"
-        else None
-    )
+    if early:
+        reason = _early_stop_reason(early)
+    elif n_fail:
+        reason = _fail_reason([c for c in raw if c.state == "fail" and c.observed is not None])
+    else:
+        reason = None
 
     return _v.build_run_verdict(
         "perf",
@@ -77,6 +76,15 @@ def _fail_reason(failed: list[SloCheck]) -> str:
     window = f" [{slo_window}]" if slo_window != "measurement" else ""
     detail = f"{a.metric}{window} {a.op} {a.threshold} (observed {first.observed})"
     return f"{len(failed)} SLO failed; first — {detail}"
+
+
+def _early_stop_reason(trials: list[TrialResult]) -> str:
+    stop = trials[0].stop
+    detail = stop.reason
+    if stop.snapshot is not None:
+        snap = stop.snapshot
+        detail += f" at {snap.at_s:.1f}s ({snap.errors}/{snap.sent} errors)"
+    return f"{len(trials)} trial(s) stopped early; first — {detail}"
 
 
 def build_verdict_doc(run: Run) -> dict:

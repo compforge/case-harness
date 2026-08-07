@@ -52,7 +52,8 @@ slo:                                    # 可选：run 级门 → CI 退出码
 
 SLO 是 Service Level Objective（服务级别目标），即我们希望系统达到的、可以量化验证的目标。
 默认在负载测量窗口求值；`window: cooldown` 则在 `deactivate()` 完成后的 cooldown
-恢复窗口重新聚合资源侧 gauge/counter，用来把回收、缩容或泄漏曲线变成自动门禁。
+恢复窗口重新聚合资源侧 gauge/counter，用来把回收、缩容或泄漏曲线变成自动门禁。错误率熔断
+提前结束的 trial 只有部分测量窗口，会使 run 失败，也不会计入 SLO-aware 容量。
 
 ```bash
 # 离线 smoke（无需服务/集群，内置 MockWorkload）：

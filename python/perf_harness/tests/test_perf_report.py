@@ -7,7 +7,11 @@ from perf_harness.model import (
     ResourceProfile,
     Sample,
     Series,
+    SloAssertion,
+    SloCheck,
+    StopSnapshot,
     TrialResult,
+    TrialStop,
 )
 from perf_harness.report import write_report
 
@@ -74,6 +78,28 @@ def test_report_flags_knee(tmp_path):
     paths = write_report([low, high], str(tmp_path))
     md = Path(paths["report"]).read_text()
     assert "拐点" in md
+
+
+def test_report_rejects_early_stop_as_capacity(tmp_path):
+    trial = _trial(level=10)
+    trial.stop = TrialStop(
+        reason="error_rate",
+        snapshot=StopSnapshot(
+            at_s=34.0,
+            sent=50,
+            errors=7,
+            error_rate=0.14,
+            threshold=0.1,
+        ),
+    )
+    assertion = SloAssertion("p99_ms", "lt", 1000)
+    trial.slo = [SloCheck(assertion, observed=400, state="pass")]
+
+    paths = write_report([trial], str(tmp_path))
+    md = Path(paths["report"]).read_text()
+    assert "Run 判定（trial 完整性 + SLO）" in md
+    assert "FAIL" in md and "部分窗口不能确认" in md
+    assert "SLO-aware 容量" in md and "—（无档达标）" in md
 
 
 def test_facet_order_sorts_ordinal(tmp_path):
