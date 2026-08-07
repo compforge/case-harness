@@ -150,7 +150,8 @@ async def stream_sse(
     ``on_frame``, frames are counted cheaply by ``data:`` boundaries.
 
     Any transport/timeout error is recorded into ``meta["exc"]`` (the exception
-    class name) rather than raised, so the load generator keeps running. If
+    class name) and ``meta["exc_detail"]`` (its message) rather than raised, so
+    the load generator keeps running. If
     ``done_marker`` is given, ``meta["saw_done"]`` records whether that terminal
     sentinel (e.g. ``b"[DONE]"``) was seen. The success/error verdict is NOT
     decided here; that's ``Workload.judge``'s job.
@@ -193,6 +194,7 @@ async def stream_sse(
                     on_frame((time.monotonic() - t0) * 1000.0, data)
     except Exception as e:  # noqa: BLE001 — load gen must survive any client error
         meta["exc"] = type(e).__name__
+        meta["exc_detail"] = str(e)
     if done_marker is not None:
         meta["saw_done"] = saw_done
     if ttft_ms is not None:

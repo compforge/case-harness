@@ -84,6 +84,7 @@ class Outcome:
     facets: dict[str, str] = field(
         default_factory=dict
     )  # fired Case's dims; report pivots by these
+    case_id: str = ""  # canonical Case.id stamped by the scheduler for cross-run joins
 
 
 @dataclass(frozen=True)

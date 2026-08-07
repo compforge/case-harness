@@ -289,6 +289,7 @@ def _outcome_json(trial_id: str, t: float, o: Outcome) -> dict:
     return {
         "trial": trial_id,
         "t": round(t, 3),
+        "case_id": o.case_id,
         "status": o.status,
         "duration_ms": o.duration_ms,
         "ok": o.ok,
@@ -310,6 +311,7 @@ def _outcome_from(d: dict) -> tuple[str, float, Outcome]:
         Outcome(
             status=d.get("status"),
             duration_ms=d.get("duration_ms", 0.0),
+            case_id=d.get("case_id", ""),
             ok=d.get("ok", False),
             error_kind=d.get("error_kind"),
             events=d.get("events", 0),

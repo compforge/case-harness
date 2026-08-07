@@ -42,7 +42,11 @@ async def _fire(
     try:
         outcome = await workload.fire(ctx.target, ctx.client, case, run_id)
     except Exception as e:  # noqa: BLE001 — never let one fire kill the generator
-        outcome = Outcome(status=None, duration_ms=0.0, meta={"exc": type(e).__name__})
+        outcome = Outcome(
+            status=None,
+            duration_ms=0.0,
+            meta={"exc": type(e).__name__, "exc_detail": str(e)},
+        )
     finally:
         ctx.stats.done()
     # judge is the sole verdict authority — even a transport exception is judged
@@ -50,6 +54,7 @@ async def _fire(
     verdict = workload.judge(outcome)
     outcome.ok = verdict.ok
     outcome.error_kind = verdict.error_kind
+    outcome.case_id = case.id
     outcome.stage = stage  # per-stage attribution (None for single-stage schedules)
     # stamp the fired Case's facets (a Workload may have added runtime-derived ones)
     outcome.facets = {**case.facets, **outcome.facets}
@@ -158,6 +163,7 @@ async def drive_open(
                             ok=False,
                             status=None,
                             duration_ms=0.0,
+                            case_id=case.id,
                             error_kind="client_saturated",
                             dropped=True,
                             stage=stage,
