@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile, Pacing, Schedule
 from perf_harness.drive.workload import MockWorkload, Workload
@@ -17,6 +18,13 @@ class _AlwaysFailWL(Workload):
     async def fire(self, target, client, case, run_id):
         await asyncio.sleep(0.001)
         return Outcome(status=500, duration_ms=1.0)
+
+
+class _RaisesWL(Workload):
+    name = "raises"
+
+    async def fire(self, target, client, case, run_id):
+        raise RuntimeError("transport detail")
 
 
 async def test_engine_smoke_offline():
@@ -42,6 +50,24 @@ async def test_engine_smoke_offline():
     assert any(k.startswith("client.") for k in r.series)
     assert "client.inflight" in r.probe_metrics  # typed gauge summary
     assert r.probe_metrics["client.inflight"].peak is not None
+
+
+async def test_engine_stamps_case_id_and_preserves_exception_detail():
+    experiment = Experiment(
+        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        workload=_RaisesWL(),
+        resources=[ResourceProfile()],
+        loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.05))],
+        cases=[Case(id="transport-case", input={})],
+        observe_interval_s=0.01,
+    )
+
+    trial = (await Engine(experiment).run()).trials[0]
+    assert trial.outcomes
+    outcomes = [outcome for _, outcome in trial.outcomes]
+    assert {outcome.case_id for outcome in outcomes} == {"transport-case"}
+    assert {outcome.meta["exc"] for outcome in outcomes} == {"RuntimeError"}
+    assert {outcome.meta["exc_detail"] for outcome in outcomes} == {"transport detail"}
 
 
 async def test_engine_sweeps_grid():

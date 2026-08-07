@@ -142,7 +142,8 @@ async def test_outcomes_jsonl_is_the_request_raw_layer(tmp_path):
     # one record per recorded fire, in order, incl. warmup (raw layer ≥ post-warmup n)
     assert len(rows) == len(live.outcomes) >= live.overall.n
     t0, o0 = rows[0]
-    assert o0.status == 200 and o0.ok and o0.facets == {"difficulty": "simple"}
+    assert o0.status == 200 and o0.ok and o0.case_id == "a"
+    assert o0.facets == {"difficulty": "simple"}
     assert o0.metrics["ttft_ms"] == 5.0  # per_request raw values survive
 
 
