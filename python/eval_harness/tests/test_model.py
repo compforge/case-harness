@@ -9,7 +9,7 @@ from eval_harness.model.evalset import (
     FacetSpec,
     eval_view,
 )
-from eval_harness.model.experiment import Env, Experiment, Target, expand_matrix
+from eval_harness.model.experiment import Arm, Experiment, Target, expand_matrix
 from eval_harness.model.sample import MetricResult
 from eval_harness.tests.eval_cases import make_eval_case
 
@@ -70,38 +70,38 @@ def _target(tenant="t1"):
 _HEAVY = ["config.tenant_id"]
 
 
-def test_env_resolve_and_dotted_override():
-    env = Env(
-        name="e",
+def test_arm_resolve_and_dotted_override():
+    arm = Arm(
+        id="e",
         overrides={
             "config.params.target_searches": 6,
             "config.host.base_url": "http://y",
         },
     )
-    r = env.resolve(_target())
+    r = arm.resolve(_target())
     assert r.config["params"]["target_searches"] == 6
     assert r.config["host"]["base_url"] == "http://y"
     assert r.config["tenant_id"] == "t1"
 
 
-def test_env_key_light_vs_heavy():
+def test_arm_key_light_vs_heavy():
     t = _target()
-    base = Env(name="base", overrides={})
-    light = Env(name="light", overrides={"llm.model": "model-beta"})  # light → same key
-    heavy = Env(name="heavy", overrides={"config.tenant_id": "t2"})  # heavy → different key
+    base = Arm(id="base", overrides={})
+    light = Arm(id="light", overrides={"llm.model": "model-beta"})  # light → same key
+    heavy = Arm(id="heavy", overrides={"config.tenant_id": "t2"})  # heavy → different key
     assert base.key("rag", t, _HEAVY) == light.key("rag", t, _HEAVY)
     assert base.key("rag", t, _HEAVY) != heavy.key("rag", t, _HEAVY)
     assert base.key("rag", t, _HEAVY) != base.key("other_corpus", t, _HEAVY)  # corpus is heavy
 
 
 def test_expand_matrix():
-    envs = expand_matrix({"config.params.target_searches": [3, 6], "config.tenant_id": ["a", "b"]})
-    assert len(envs) == 4
-    names = {e.name for e in envs}
+    arms = expand_matrix({"config.params.target_searches": [3, 6], "config.tenant_id": ["a", "b"]})
+    assert len(arms) == 4
+    names = {arm.id for arm in arms}
     assert "target_searches=3__tenant_id=a" in names
 
 
-def _exp(envs=None, matrix=None):
+def _exp(arms=None, matrix=None):
     return Experiment(
         name="exp",
         target=_target(),
@@ -111,21 +111,26 @@ def _exp(envs=None, matrix=None):
                 cases=[make_eval_case(id="q1", query="q", ground_truth="a")],
             )
         ],
-        envs=envs or [],
+        arms=arms or [],
         matrix=matrix or {},
         metrics=["correctness"],
         weights={"correctness": 1.0},
     )
 
 
-def test_resolved_envs_defaults_to_one():
-    envs = _exp().resolved_envs()
-    assert len(envs) == 1 and envs[0].name == "default" and envs[0].overrides == {}
+def test_resolved_arms_defaults_to_one():
+    arms = _exp().resolved_arms()
+    assert len(arms) == 1 and arms[0].id == "default" and arms[0].overrides == {}
+
+
+def test_arm_ids_must_be_unique():
+    with pytest.raises(ValueError, match="duplicate arm id"):
+        _exp(arms=[Arm(id="same"), Arm(id="same")])
 
 
 def test_experiment_hash_stable_and_sensitive():
-    e1 = _exp(envs=[Env(name="a"), Env(name="b")])
-    e2 = _exp(envs=[Env(name="b"), Env(name="a")])  # order-independent
+    e1 = _exp(arms=[Arm(id="a"), Arm(id="b")])
+    e2 = _exp(arms=[Arm(id="b"), Arm(id="a")])  # order-independent
     assert e1.experiment_hash() == e2.experiment_hash()
-    e3 = _exp(envs=[Env(name="a"), Env(name="c")])  # different env set
+    e3 = _exp(arms=[Arm(id="a"), Arm(id="c")])  # different arm_id set
     assert e1.experiment_hash() != e3.experiment_hash()

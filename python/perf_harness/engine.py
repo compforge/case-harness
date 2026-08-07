@@ -1,9 +1,9 @@
-"""Engine — pure orchestration: sweep the resources × load grid, one Trial per cell.
+"""Engine — pure orchestration: resolve Arms and execute one Trial per Arm.
 
 One Trial: apply the ResourceProfile (via the Subject's provisioner, if any) →
 open a client → drive the load (``drive.scheduler``) while the observer samples
 every Probe (``observe.observe_loop``) → collapse outcomes + series into a
-TrialResult (``_aggregate``, minting via ``metric.reduce``). The grid is swept
+TrialRecord (``_aggregate``, minting via ``metric.reduce``). The grid is swept
 resources-outer so each profile is provisioned once and all load levels run
 under it. Execution detail lives in the packages; this module only wires phases.
 """
@@ -11,9 +11,11 @@ under it. Execution detail lives in the packages; this module only wires phases.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import time
-from collections import defaultdict
-from dataclasses import dataclass, field, replace
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass, field, replace
 
 import httpx
 from harness_common.overlay import Overlay
@@ -24,23 +26,23 @@ from perf_harness.drive.scheduler import drive_closed, drive_open
 from perf_harness.drive.workload import TrialContext, Workload
 from perf_harness.metric import (
     MetricFamily,
-    MetricSummary,
     series_id,
     split_series,
 )
 from perf_harness.metric.reduce import request_stats, unit_of
 from perf_harness.metric.store import PER_REQUEST_DESCRIPTORS, REQUEST_DESCRIPTORS
 from perf_harness.model import (
+    Arm,
     Outcome,
     ProbeErrors,
-    RequestStats,
     ResourceProfile,
     Run,
     Sample,
     Series,
     SloAssertion,
     Target,
-    TrialResult,
+    TrialRecord,
+    Window,
     make_run_id,
 )
 from perf_harness.observe import (
@@ -83,9 +85,33 @@ class Experiment:
     cooldown_s: float = 0.0  # keep probes running after deactivation for scale-down curves
     teardown: bool = False
 
+    def resolved_arms(self) -> list[Arm]:
+        """Expand the configured resource × load axes into named comparison Arms."""
+        expanded = [
+            (f"{resources.label()}|{load.label()}", resources, load)
+            for resources in self.resources
+            for load in self.loads
+        ]
+        counts = Counter(base for base, _, _ in expanded)
+        arms: list[Arm] = []
+        for base, resources, load in expanded:
+            arm_id = base
+            if counts[base] > 1:
+                payload = json.dumps(
+                    {"resources": asdict(resources), "load": asdict(load)},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                arm_id = f"{base}@{hashlib.sha256(payload.encode()).hexdigest()[:8]}"
+            arms.append(Arm(id=arm_id, resources=resources, load=load))
+        ids = [arm.id for arm in arms]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"duplicate arm id: {ids}")
+        return arms
+
 
 class Engine:
-    """Runs one Experiment → a Run (run_id + one TrialResult per resources × load)."""
+    """Runs one Experiment → a Run (run_id + one TrialRecord per Arm)."""
 
     def __init__(self, experiment: Experiment, *, run_id: str | None = None) -> None:
         self.experiment = experiment
@@ -99,38 +125,35 @@ class Engine:
     async def run(self) -> Run:
         exp = self.experiment
         started = time.strftime("%Y-%m-%dT%H:%M:%S")
-        trials: list[TrialResult] = []
+        trials: list[TrialRecord] = []
         passed = True
-        aborted = False
         try:
-            for profile in exp.resources:
-                if exp.subject.provisioner is not None:
-                    await exp.subject.provisioner.apply(profile)
-                for load in exp.loads:
-                    trial = await self._run_trial(exp.subject.target, profile, load)
-                    # A breaker-ended trial only observed a partial load window. Even
-                    # if every evaluated SLO happens to pass, it cannot prove this
-                    # load level was sustained.
-                    failed = trial.stop.early
-                    if exp.slo:
-                        trial.slo = evaluate_slo(trial, exp.slo)
-                        # the run gate is lenient on skip by default: a skipped check
-                        # (slice absent) is surfaced but doesn't flip the exit code;
-                        # strict_slo treats an unverifiable SLO as a failure.
-                        failed = (
-                            failed
-                            or any(c.failed for c in trial.slo)
-                            or any(
-                                c.skipped and (exp.strict_slo or c.assertion.window == "cooldown")
-                                for c in trial.slo
-                            )
+            applied: ResourceProfile | None = None
+            for arm in exp.resolved_arms():
+                if exp.subject.provisioner is not None and arm.resources != applied:
+                    await exp.subject.provisioner.apply(arm.resources)
+                    applied = arm.resources
+                trial = await self._run_trial(exp.subject.target, arm)
+                # A breaker-ended trial only observed a partial load window. Even
+                # if every evaluated SLO happens to pass, it cannot prove this
+                # load level was sustained.
+                failed = trial.stop.early
+                if exp.slo:
+                    trial.slo = evaluate_slo(trial, exp.slo)
+                    # the run gate is lenient on skip by default: a skipped check
+                    # (slice absent) is surfaced but doesn't flip the exit code;
+                    # strict_slo treats an unverifiable SLO as a failure.
+                    failed = (
+                        failed
+                        or any(c.failed for c in trial.slo)
+                        or any(
+                            c.skipped and (exp.strict_slo or c.assertion.window.kind == "cooldown")
+                            for c in trial.slo
                         )
-                    passed = passed and not failed
-                    trials.append(trial)
-                    if exp.abort_on_fail and failed:
-                        aborted = True  # stop the sweep on the first invalid/failing trial
-                        break
-                if aborted:
+                    )
+                passed = passed and not failed
+                trials.append(trial)
+                if exp.abort_on_fail and failed:
                     break
         finally:
             if exp.teardown and exp.subject.provisioner is not None:
@@ -144,10 +167,9 @@ class Engine:
             passed=passed,
         )
 
-    async def _run_trial(
-        self, target: Target, profile: ResourceProfile, load: LoadProfile
-    ) -> TrialResult:
+    async def _run_trial(self, target: Target, arm: Arm) -> TrialRecord:
         exp = self.experiment
+        profile, load = arm.resources, arm.load
         stats = ClientStats()
         cap = max(64, int(load.schedule.peak_level) * 2)
         limits = httpx.Limits(max_connections=cap, max_keepalive_connections=cap)
@@ -159,6 +181,7 @@ class Engine:
         probe_errors: dict[str, ProbeErrors] = {}
         measurement_end_s = 0.0
         cooldown_start_s: float | None = None
+        cooldown_end_s: float | None = None
 
         # trust_env=False: the load generator connects DIRECTLY to the Subject's
         # base_url — never via an ambient HTTP(S)_PROXY/ALL_PROXY from the shell (a
@@ -196,7 +219,9 @@ class Engine:
                 )
                 # Post-load samples remain in the raw series for cooldown/scale-down
                 # charts, but summaries must describe only the load measurement window.
-                measurement_end_s = time.monotonic() - ctx.t0
+                measurement_end_s = (
+                    trial_stop.snapshot.at_s if trial_stop.snapshot is not None else load.duration_s
+                )
                 await exp.workload.deactivate(trial_ctx)
                 if exp.cooldown_s:
                     cooldown_start_s = time.monotonic() - ctx.t0
@@ -208,6 +233,10 @@ class Engine:
                 if observer is not None:
                     stop.set()
                     probe_errors = await observer
+                    if cooldown_start_s is not None:
+                        # The observer takes one final tick after ``stop`` wakes it.
+                        # Close the Window only after that tick has been recorded.
+                        cooldown_end_s = time.monotonic() - ctx.t0
                 try:
                     await exp.workload.cleanup(trial_ctx)
                 except BaseException as cleanup_error:
@@ -216,13 +245,13 @@ class Engine:
                     primary_error.add_note(f"cleanup also failed: {cleanup_error!r}")
 
         trial = self._aggregate(
-            profile,
-            load,
+            arm,
             timed,
             store,
             probe_errors,
             measurement_end_s=measurement_end_s,
             cooldown_start_s=cooldown_start_s,
+            cooldown_end_s=cooldown_end_s,
         )
         trial.stop = trial_stop  # how the trial ended (deadline / breaker) + enact census
         trial.outcomes = timed  # raw layer (incl. warmup/drops) — runio persists these
@@ -230,50 +259,78 @@ class Engine:
 
     def _aggregate(
         self,
-        profile: ResourceProfile,
-        load: LoadProfile,
+        arm: Arm,
         timed: list[tuple[float, Outcome]],
         store: ProbeStore,
         probe_errors: dict[str, ProbeErrors] | None = None,
         *,
         measurement_end_s: float | None = None,
         cooldown_start_s: float | None = None,
-    ) -> TrialResult:
+        cooldown_end_s: float | None = None,
+    ) -> TrialRecord:
         exp = self.experiment
+        load = arm.load
         warmup = load.warmup_s
         closed = load.model == "closed"  # → the slice's latency carries the co_biased caveat
-        outcomes = [o for (t, o) in timed if t >= warmup]
+        measured_end = measurement_end_s if measurement_end_s is not None else load.duration_s
 
-        overall = request_stats(outcomes, load.steady_s, closed=closed)
+        windows = [
+            Window(
+                id="measurement",
+                name="measurement",
+                kind="measurement",
+                start_s=warmup,
+                end_s=max(warmup, measured_end),
+                complete=measured_end >= load.duration_s,
+            )
+        ]
+        clock = 0.0
+        for index, stage in enumerate(load.schedule.stages):
+            stage_start, stage_end = clock, clock + stage.over_s
+            start, end = max(stage_start, warmup), min(stage_end, measured_end)
+            if end > start:
+                windows.append(
+                    Window(
+                        id=f"stage-{index}",
+                        name=stage.label,
+                        kind=stage.kind,
+                        start_s=start,
+                        end_s=end,
+                        complete=measured_end >= stage_end,
+                        target_level=stage.to_level,
+                    )
+                )
+            clock = stage_end
+        if cooldown_start_s is not None and cooldown_end_s is not None:
+            windows.append(
+                Window(
+                    id="cooldown",
+                    name="cooldown",
+                    kind="cooldown",
+                    start_s=cooldown_start_s,
+                    end_s=cooldown_end_s,
+                    complete=True,
+                )
+            )
 
-        # marginal pivot: per facet key, group outcomes by value → its own stats
-        by_facet: dict[str, dict[str, RequestStats]] = {}
-        facet_keys = {k for o in outcomes for k in o.facets}
-        for key in facet_keys:
-            groups: dict[str, list[Outcome]] = defaultdict(list)
-            for o in outcomes:
-                if key in o.facets:
-                    groups[o.facets[key]].append(o)
-            by_facet[key] = {
-                val: request_stats(g, load.steady_s, closed=closed) for val, g in groups.items()
-            }
+        for window in windows:
+            if window.kind == "cooldown":
+                continue
+            selected = [o for t, o in timed if window.start_s <= t < window.end_s]
+            window.request = request_stats(selected, max(window.duration_s, 1e-9), closed=closed)
+            facet_keys = {key for outcome in selected for key in outcome.facets}
+            for key in facet_keys:
+                groups: dict[str, list[Outcome]] = defaultdict(list)
+                for outcome in selected:
+                    if key in outcome.facets:
+                        groups[outcome.facets[key]].append(outcome)
+                window.by_facet[key] = {
+                    value: request_stats(group, max(window.duration_s, 1e-9), closed=closed)
+                    for value, group in groups.items()
+                }
 
-        # per-stage pivot (multi-stage schedules only): group by the stage label
-        # stamped at fire time; each stage's throughput uses its own duration so a
-        # stepped/spike run yields a per-level capacity curve in one trial.
-        by_stage: dict[str, RequestStats] = {}
-        if load.schedule.is_multi_stage:
-            # denominator = each stage's POST-warmup duration (outcomes are already
-            # warmup-filtered), so a warmup-covered stage isn't under-counted
-            durations = load.schedule.stage_durations(after_s=warmup)
-            stage_groups: dict[str, list[Outcome]] = defaultdict(list)
-            for o in outcomes:
-                if o.stage is not None:
-                    stage_groups[o.stage].append(o)
-            by_stage = {
-                label: request_stats(g, durations.get(label) or 1e-9, closed=closed)
-                for label, g in stage_groups.items()
-            }
+        measurement = windows[0]
+        assert measurement.request is not None
 
         # unified metric registry: every report/SLO-visible metric → its descriptor.
         # (1) builtin request.* (duration_ms / error_rate / throughput_rps /
@@ -284,7 +341,7 @@ class Engine:
         # per-request descriptor precedence: Workload-declared > framework (ttft_ms) > inferred
         known = {d.name: d for d in PER_REQUEST_DESCRIPTORS}
         known.update({m.name: m for m in exp.workload.describe()})
-        for key in overall.metrics:
+        for key in measurement.request.metrics:
             registry[key] = known.get(
                 key,
                 MetricFamily(
@@ -299,11 +356,11 @@ class Engine:
         # resource-side: each probe collapses its (steady) series → typed summaries
         # (gauge/counter), keyed <probe>.<metric>; FAMILY descriptors come from
         # describe() (deduped by family name — service is a label on the series, not it).
-        probe_metrics: dict[str, MetricSummary] = {}
         series_out: dict[str, Series] = {}
         errors = probe_errors or {}
         for probe in exp.probes:
             registry.update({d.name: d for d in probe.describe()})  # by family (dedup)
+            up_samples = store.get((probe.name, "up"), [])
             # group this probe's sampled series by extra-label-set: a common probe's bare
             # keys all land in the one () group; a fan-out probe's labeled keys
             # (cpu_m{pod="…"}) land in one group per pod. Each group then summarizes
@@ -317,38 +374,57 @@ class Engine:
             for extra in sorted(groups):
                 by_bare = groups[extra]
                 labels = {**probe.labels, **dict(extra)}  # base {service} + e.g. {pod}
-                own_steady: dict[str, list[Sample]] = {}
                 for metric, spec in probe.families.items():
                     full = by_bare.get(metric, [])
                     sid = series_id(f"{probe.family}.{metric}", labels)
                     if full:
                         series_out[sid] = Series(metric, spec.unit, list(full))
-                    own_steady[metric] = [
-                        s
-                        for s in full
-                        if s.t >= warmup and (measurement_end_s is None or s.t <= measurement_end_s)
+                for window in windows:
+                    window_health = [
+                        sample for sample in up_samples if window.start_s <= sample.t < window.end_s
                     ]
-                for bare, summary in probe.summarize(own_steady).items():
-                    if probe.name in errors:
-                        # the probe missed ticks — its series have holes; the value
-                        # stands but a flat-looking trend may be a sampling artifact
-                        summary = replace(summary, caveats=summary.caveats | {"probe_error"})
-                    probe_metrics[series_id(f"{probe.family}.{bare}", labels)] = summary
+                    # Cooldown gates the final recovered state. A failed scrape, or
+                    # a labeled series that vanished before the last healthy tick,
+                    # cannot prove recovery; omit that summary so MetricStore returns
+                    # Missing instead of reusing a stale pre-scale-down value.
+                    if window.kind == "cooldown" and (
+                        not window_health or any(sample.value <= 0 for sample in window_health)
+                    ):
+                        continue
+                    own: dict[str, list[Sample]] = {
+                        metric: [
+                            sample
+                            for sample in by_bare.get(metric, [])
+                            if window.start_s <= sample.t < window.end_s
+                        ]
+                        for metric in probe.families
+                    }
+                    for bare, summary in probe.summarize(own).items():
+                        samples = own.get(bare)
+                        if (
+                            window.kind == "cooldown"
+                            and samples is not None
+                            and (not samples or samples[-1].t < window_health[-1].t)
+                        ):
+                            continue
+                        if probe.name in errors:
+                            # The probe missed ticks — its series have holes; the value
+                            # stands but a flat-looking trend may be a sampling artifact.
+                            summary = replace(summary, caveats=summary.caveats | {"probe_error"})
+                        window.probe_metrics[series_id(f"{probe.family}.{bare}", labels)] = summary
             # the synthesized health series (`up`, see _observe): full series for §4's
             # outage view, gauge summary (mean = availability ratio, SLO-addressable as
             # `<family>.up{service=…}.mean`). No probe_error caveat — up IS that signal.
-            up_samples = store.get((probe.name, "up"), [])
             if up_samples:
                 up_fam = f"{probe.family}.up"
                 sid = series_id(up_fam, probe.labels)
                 series_out[sid] = Series("up", "", list(up_samples))
-                measured_up = [
-                    s
-                    for s in up_samples
-                    if s.t >= warmup and (measurement_end_s is None or s.t <= measurement_end_s)
-                ]
-                for _, summary in probe.summarize({"up": measured_up}).items():
-                    probe_metrics[sid] = summary
+                for window in windows:
+                    measured_up = [
+                        sample for sample in up_samples if window.start_s <= sample.t < window.end_s
+                    ]
+                    for _, summary in probe.summarize({"up": measured_up}).items():
+                        window.probe_metrics[sid] = summary
                 registry[up_fam] = MetricFamily(
                     name=up_fam,
                     unit="",
@@ -360,16 +436,11 @@ class Engine:
                     labels=frozenset(probe.labels),
                 )
 
-        return TrialResult(
+        return TrialRecord(
             subject=exp.subject.name,
-            resources=profile,
-            load=load,
-            overall=overall,
-            by_facet=by_facet,
-            probe_metrics=probe_metrics,
+            arm=arm,
+            windows=windows,
             series=series_out,
-            by_stage=by_stage,
             metrics=registry,
             probe_errors=dict(errors),
-            cooldown_start_s=cooldown_start_s,
         )

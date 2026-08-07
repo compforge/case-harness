@@ -6,8 +6,7 @@ A run dir (``runs/<experiment>/<run_id>/``) holds three artifact layers:
          （probe 每 tick 采样）— append-only facts, never re-derived.
   model  ``run.json`` — the FULL serialized ``Run``（schema 版本化）: per trial the
          resources / load（含停止策略）/ stop / SLO 明细、metric registry（family →
-         unit/kind/source/description）、每个请求 slice（overall/by_facet/by_stage，
-         含 per_request summaries + caveats）、每条 probe series 的 typed summary。
+         unit/kind/source/description）、每个 Window 的请求/资源 summary。
          内存模型知道的一切，离线同样可寻址。
   views  ``report.md/html`` + ``summary/by_facet.csv``（``report.py``）— 给人看的
          渲染，从模型导出，不是事实来源。
@@ -35,6 +34,7 @@ from perf_harness.metric import (
     ScalarSummary,
 )
 from perf_harness.model import (
+    Arm,
     Outcome,
     ProbeErrors,
     RequestStats,
@@ -45,12 +45,14 @@ from perf_harness.model import (
     SloAssertion,
     SloCheck,
     StopSnapshot,
-    TrialResult,
+    TrialRecord,
     TrialStop,
+    Window,
+    WindowSelector,
 )
 
 #: bump when run.json's shape changes incompatibly — offline readers check this first
-RUN_SCHEMA = 2
+RUN_SCHEMA = 3
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +265,12 @@ def _slo_json(c: SloCheck) -> dict:
         "op": a.op,
         # a `between` threshold is a (lo, hi) tuple — JSON carries it as a list
         "threshold": list(a.threshold) if isinstance(a.threshold, tuple) else a.threshold,
-        "level": a.level,
-        "window": a.window,
+        "window": {
+            "kind": a.window.kind,
+            "name": a.window.name,
+            "level": a.window.level,
+        },
+        "window_id": c.window_id,
         "observed": c.observed,
         "state": c.state,
     }
@@ -272,16 +278,21 @@ def _slo_json(c: SloCheck) -> dict:
 
 def _slo_from(d: dict) -> SloCheck:
     thr = d["threshold"]
+    window = d.get("window") or {"kind": "measurement"}
     return SloCheck(
         assertion=SloAssertion(
             metric=d["metric"],
             op=d["op"],
             threshold=tuple(thr) if isinstance(thr, list) else thr,
-            level=d.get("level"),
-            window=d.get("window", "measurement"),
+            window=WindowSelector(
+                kind=window.get("kind", "measurement"),
+                name=window.get("name"),
+                level=window.get("level"),
+            ),
         ),
         observed=d.get("observed"),
         state=d["state"],
+        window_id=d.get("window_id"),
     )
 
 
@@ -297,7 +308,6 @@ def _outcome_json(trial_id: str, t: float, o: Outcome) -> dict:
         "events": o.events,
         "nbytes": o.nbytes,
         "dropped": o.dropped,
-        "stage": o.stage,
         "facets": dict(o.facets),
         "metrics": dict(o.metrics),
         "meta": o.meta,
@@ -318,31 +328,44 @@ def _outcome_from(d: dict) -> tuple[str, float, Outcome]:
             nbytes=d.get("nbytes", 0),
             metrics=dict(d.get("metrics") or {}),
             dropped=d.get("dropped", False),
-            stage=d.get("stage"),
             meta=d.get("meta") or {},
             facets=dict(d.get("facets") or {}),
         ),
     )
 
 
-def _trial_json(r: TrialResult) -> dict:
+def _trial_json(r: TrialRecord) -> dict:
     return {
         "id": r.label(),
         "subject": r.subject,
-        "resources": _resources_json(r.resources),
-        "load": _load_json(r.load),
+        "arm": {
+            "id": r.arm.id,
+            "resources": _resources_json(r.arm.resources),
+            "load": _load_json(r.arm.load),
+        },
         "stop": _stop_json(r.stop),
-        "cooldown_start_s": r.cooldown_start_s,
         "slo": [_slo_json(c) for c in r.slo],
         "registry": {name: _family_json(f) for name, f in r.metrics.items()},
-        "request": {
-            "overall": _stats_json(r.overall),
-            "by_facet": {
-                k: {v: _stats_json(s) for v, s in vals.items()} for k, vals in r.by_facet.items()
-            },
-            "by_stage": {k: _stats_json(s) for k, s in r.by_stage.items()},
-        },
-        "probe_metrics": {sid: _summary_json(s) for sid, s in r.probe_metrics.items()},
+        "windows": [
+            {
+                "id": window.id,
+                "name": window.name,
+                "kind": window.kind,
+                "start_s": window.start_s,
+                "end_s": window.end_s,
+                "complete": window.complete,
+                "target_level": window.target_level,
+                "request": _stats_json(window.request) if window.request is not None else None,
+                "by_facet": {
+                    key: {value: _stats_json(stats) for value, stats in values.items()}
+                    for key, values in window.by_facet.items()
+                },
+                "probe_metrics": {
+                    sid: _summary_json(summary) for sid, summary in window.probe_metrics.items()
+                },
+            }
+            for window in r.windows
+        ],
         "probe_errors": {
             name: {"failures": e.failures, "ticks": e.ticks, "last": e.last}
             for name, e in r.probe_errors.items()
@@ -350,23 +373,39 @@ def _trial_json(r: TrialResult) -> dict:
     }
 
 
-def _trial_from(d: dict, subject: str) -> TrialResult:
-    req = d.get("request") or {}
-    return TrialResult(
+def _trial_from(d: dict, subject: str) -> TrialRecord:
+    arm = d["arm"]
+    return TrialRecord(
         subject=d.get("subject", subject),
-        resources=_resources_from(d["resources"]),
-        load=_load_from(d["load"]),
-        overall=_stats_from(req["overall"]),
-        by_facet={
-            k: {v: _stats_from(s) for v, s in vals.items()}
-            for k, vals in (req.get("by_facet") or {}).items()
-        },
+        arm=Arm(
+            id=arm["id"],
+            resources=_resources_from(arm["resources"]),
+            load=_load_from(arm["load"]),
+        ),
+        windows=[
+            Window(
+                id=window["id"],
+                name=window["name"],
+                kind=window["kind"],
+                start_s=float(window["start_s"]),
+                end_s=float(window["end_s"]),
+                complete=bool(window["complete"]),
+                target_level=window.get("target_level"),
+                request=_stats_from(window["request"]) if window.get("request") else None,
+                by_facet={
+                    key: {value: _stats_from(stats) for value, stats in values.items()}
+                    for key, values in (window.get("by_facet") or {}).items()
+                },
+                probe_metrics={
+                    sid: _summary_from(summary)
+                    for sid, summary in (window.get("probe_metrics") or {}).items()
+                },
+            )
+            for window in d.get("windows") or []
+        ],
         series={},  # filled from timeseries.csv by load_run
-        by_stage={k: _stats_from(s) for k, s in (req.get("by_stage") or {}).items()},
         stop=_stop_from(d.get("stop") or {}),
-        cooldown_start_s=d.get("cooldown_start_s"),
         slo=[_slo_from(c) for c in d.get("slo") or []],
-        probe_metrics={sid: _summary_from(s) for sid, s in (d.get("probe_metrics") or {}).items()},
         metrics={name: _family_from(name, f) for name, f in (d.get("registry") or {}).items()},
         probe_errors={
             name: ProbeErrors(

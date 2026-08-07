@@ -50,9 +50,9 @@ def analyze(run: Run, store=None) -> list[Observation]:  # noqa: ARG001 — unif
 
         # breaker reachability: at the observed rps, how long until min_n is even
         # judged? Longer than half the window → the safety net mostly isn't armed.
-        ld = r.load
-        if ld.abort_on_error_rate is not None and r.overall.throughput_rps > 0:
-            t_arm = ld.breaker_min_n / r.overall.throughput_rps
+        ld = r.arm.load
+        if ld.abort_on_error_rate is not None and r.measurement.request.throughput_rps > 0:
+            t_arm = ld.breaker_min_n / r.measurement.request.throughput_rps
             window = ld.schedule.total_s
             if window and t_arm / window > BREAKER_WINDOW_SHARE:
                 out.append(
@@ -83,7 +83,7 @@ def analyze(run: Run, store=None) -> list[Observation]:  # noqa: ARG001 — unif
                 )
             )
 
-        for key, vals in sorted(r.by_facet.items()):
+        for key, vals in sorted(r.measurement.by_facet.items()):
             if len(vals) == 1:
                 only = next(iter(vals))
                 out.append(
@@ -96,14 +96,14 @@ def analyze(run: Run, store=None) -> list[Observation]:  # noqa: ARG001 — unif
                     )
                 )
 
-        if r.overall.drop_rate > DROP_FLAG:
+        if r.measurement.request.drop_rate > DROP_FLAG:
             out.append(
                 Observation(
                     "validity",
                     "flag",
-                    f"[{tid}] drop率 {r.overall.drop_rate * 100:.1f}%——压力机欠投放，"
+                    f"[{tid}] drop率 {r.measurement.request.drop_rate * 100:.1f}%——压力机欠投放，"
                     f"延迟/吞吐低估真实负载",
-                    {"trial": tid, "drop_rate": round(r.overall.drop_rate, 4)},
+                    {"trial": tid, "drop_rate": round(r.measurement.request.drop_rate, 4)},
                 )
             )
     return out

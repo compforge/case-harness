@@ -1,6 +1,6 @@
 """eval_harness — Experiment-first, table-centric evaluation harness.
 
-Spine (see plan / README): one evalset, run through one-or-more **Env**s
+Spine (see plan / README): one evalset, run through one-or-more **Arm**s
 (comparison arms), produces a single in-memory **Worksheet** (the big table)
 that a reconciler fills cell-by-cell, and a report renders by pure pivot.
 
@@ -42,7 +42,7 @@ from eval_harness.model.evalset import FacetSchema as FacetSchema
 from eval_harness.model.evalset import FacetSpec as FacetSpec
 from eval_harness.model.evalset import SourceRecord as SourceRecord
 from eval_harness.model.evalset import eval_view as eval_view
-from eval_harness.model.experiment import Env as Env
+from eval_harness.model.experiment import Arm as Arm
 from eval_harness.model.experiment import Experiment as Experiment
 from eval_harness.model.experiment import LLMSpec as LLMSpec
 from eval_harness.model.experiment import Target as Target

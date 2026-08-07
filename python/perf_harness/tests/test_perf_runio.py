@@ -13,7 +13,7 @@ from perf_harness.drive.workload import Workload
 from perf_harness.engine import Engine, Experiment, Subject
 from perf_harness.metric import series_id
 from perf_harness.metric.store import MetricStore
-from perf_harness.model import Outcome, ResourceProfile, SloAssertion, Target
+from perf_harness.model import Outcome, ResourceProfile, SloAssertion, Target, WindowSelector
 from perf_harness.observe import FamilySpec, Probe
 from perf_harness.report import write_run
 from perf_harness.runio import RUN_SCHEMA, load_outcomes, load_run
@@ -65,7 +65,7 @@ async def _run(tmp_path):
                 metric='top.cpu_m{service="chat"}.last',
                 op="lte",
                 threshold=123.0,
-                window="cooldown",
+                window=WindowSelector(kind="cooldown"),
             ),
         ],
         observe_interval_s=0.1,
@@ -84,22 +84,25 @@ async def test_run_json_is_the_full_model(tmp_path):
     t = doc["trials"][0]
     # everything the live model knows is on disk: identity, config, verdicts, metadata
     assert t["id"] == run.trials[0].label()
-    assert t["resources"]["workers"] == 2 and t["resources"]["memory"] == "2Gi"
-    assert t["load"]["abort_on_error_rate"] == 0.5 and t["load"]["breaker_min_n"] == 5
+    assert t["arm"]["resources"]["workers"] == 2
+    assert t["arm"]["resources"]["memory"] == "2Gi"
+    assert t["arm"]["load"]["abort_on_error_rate"] == 0.5
+    assert t["arm"]["load"]["breaker_min_n"] == 5
     assert t["stop"]["reason"] == "deadline"
-    states = {(c["metric"], c["window"]): c["state"] for c in t["slo"]}
+    states = {(c["metric"], c["window"]["kind"]): c["state"] for c in t["slo"]}
     assert states == {
         ("error_rate", "measurement"): "pass",
         ("nonexistent_ms.p95", "measurement"): "skipped",
         ('top.cpu_m{service="chat"}.last', "cooldown"): "pass",
     }
-    assert t["cooldown_start_s"] is not None
+    windows = {window["id"]: window for window in t["windows"]}
+    assert "cooldown" in windows
     assert t["registry"]["ttft_ms"]["unit"] == "ms"  # metric metadata persisted
-    assert t["request"]["overall"]["n"] == run.trials[0].overall.n
-    assert "simple" in t["request"]["by_facet"]["difficulty"]
+    assert windows["measurement"]["request"]["n"] == run.trials[0].measurement.request.n
+    assert "simple" in windows["measurement"]["by_facet"]["difficulty"]
     sid = series_id("top.cpu_m", {"service": "chat"})
-    assert t["probe_metrics"][sid]["kind"] == "gauge"
-    assert t["probe_metrics"][sid]["peak"] == 123.0
+    assert windows["measurement"]["probe_metrics"][sid]["kind"] == "gauge"
+    assert windows["measurement"]["probe_metrics"][sid]["peak"] == 123.0
 
 
 async def test_load_run_round_trips_the_store(tmp_path):
@@ -128,7 +131,9 @@ async def test_load_run_round_trips_the_store(tmp_path):
     assert offline.metrics["top.cpu_m"].labels == live.metrics["top.cpu_m"].labels
     # stop/slo verdicts survive (offline SLO re-reads agree)
     assert offline.stop == live.stop
-    assert offline.cooldown_start_s == live.cooldown_start_s
+    assert [(w.id, w.start_s, w.end_s) for w in offline.windows] == [
+        (w.id, w.start_s, w.end_s) for w in live.windows
+    ]
     assert [c.state for c in offline.slo] == [c.state for c in live.slo]
     assert [c.assertion.window for c in offline.slo] == [c.assertion.window for c in live.slo]
     assert evaluate_slo(offline, [offline.slo[-1].assertion])[0].passed
@@ -140,7 +145,7 @@ async def test_outcomes_jsonl_is_the_request_raw_layer(tmp_path):
     by_trial = load_outcomes(run_dir)
     rows = by_trial[live.label()]
     # one record per recorded fire, in order, incl. warmup (raw layer ≥ post-warmup n)
-    assert len(rows) == len(live.outcomes) >= live.overall.n
+    assert len(rows) == len(live.outcomes) >= live.measurement.request.n
     t0, o0 = rows[0]
     assert o0.status == 200 and o0.ok and o0.case_id == "a"
     assert o0.facets == {"difficulty": "simple"}

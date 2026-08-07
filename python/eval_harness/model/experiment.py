@@ -1,18 +1,18 @@
-"""Orchestration spec: ``Target`` (base SUT config), ``Env`` (comparison arm),
+"""Orchestration spec: ``Target`` (base SUT config), ``Arm`` (comparison arm),
 ``Experiment`` (the whole thing).
 
-An **Env** is the unit that varies across the comparison ("变量"): it is the
+An **Arm** is the unit that varies across the comparison ("变量"): it is the
 base ``target`` config patched by ``overrides``, and it spans two layers —
 
 - **heavy** (provisioned): the provisioned resource + ingested sources a solve queries
   against. Expensive, has a ``prepare()`` / ``clean()`` lifecycle (impl in
-  ``produce/provision``), and a reuse **key**. Envs whose key matches share one
+  ``produce/provision``), and a reuse **key**. Arms whose key matches share one
   provisioned resource (prepare once, clean once).
 - **light** (config): model / request params, applied per call, free to switch.
 
-``Env.key`` hashes only the **heavy-affecting** fields (corpus + the overrides
+``Arm.key`` hashes only the **heavy-affecting** fields (corpus + the overrides
 that touch ``HEAVY_FIELDS``, default ``tenant_id``). Light overrides
-(``params.*`` ...) are excluded — that is precisely why two Envs differing only
+(``params.*`` ...) are excluded — that is precisely why two Arms differing only
 in light config share the same provisioned resource.
 """
 
@@ -55,7 +55,7 @@ class LLMSpec(BaseModel):
     eval_harness only **carries + resolves** this (secrets via ``${ENV}``
     interpolation in the config loader); a consumer's Solver maps it to its SUT's
     per-request model config (e.g. the ``llm`` block), and the SUT
-    decides whether to honor it. Lives on ``Target`` so Env overrides patch it
+    decides whether to honor it. Lives on ``Target`` so Arm overrides patch it
     (``llm.model`` / ``llm.temperature`` ...); unless an experiment lists it in
     ``heavy_fields`` it is light, so swapping model shares the prepared resource.
     """
@@ -71,7 +71,7 @@ class LLMSpec(BaseModel):
 
 
 class Target(BaseModel):
-    """Base config of the system under test; all Envs derive from it (Env = target ⊕ overrides).
+    """Base config of the system under test; all Arms derive from it (Arm = target ⊕ overrides).
 
     SUT-agnostic — the framework only knows three things: ``name`` (a free-form variant
     label), an open ``config`` bag (the consumer's connection/request shape — host, ids,
@@ -88,23 +88,23 @@ class Target(BaseModel):
     llm: LLMSpec | None = None
 
 
-class Env(BaseModel):
+class Arm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str
+    id: str
     overrides: dict[str, Any] = Field(default_factory=dict)
 
     def resolve(self, target: Target) -> Target:
-        """Apply overrides onto the base target → the concrete config for this Env."""
+        """Apply overrides onto the base target → the concrete config for this Arm."""
         data = target.model_dump()
         for dotted, val in self.overrides.items():
             _deep_set(data, dotted.split("."), val)
         return Target.model_validate(data)
 
     def key(self, corpus: str, target: Target, heavy_fields: list[str]) -> str:
-        """Reuse identity of this Env's heavy (provisioned) layer.
+        """Reuse identity of this Arm's heavy (provisioned) layer.
 
-        Hash of (corpus + the heavy-affecting resolved fields, by dotted path). Two Envs
+        Hash of (corpus + the heavy-affecting resolved fields, by dotted path). Two Arms
         with the same key share one provisioned resource — so a light-only difference
         (e.g. ``llm.model``) reuses it; an empty ``heavy_fields`` ⇒ corpus alone is the key.
         """
@@ -114,21 +114,21 @@ class Env(BaseModel):
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
-def expand_matrix(matrix: dict[str, list[Any]]) -> list[Env]:
-    """Cartesian product of axes → list[Env] (sugar over an explicit env list).
+def expand_matrix(matrix: dict[str, list[Any]]) -> list[Arm]:
+    """Cartesian product of axes → list[Arm] (sugar over an explicit arm list).
 
     ``{"params.target_searches": [3, 6], "tenant_id": ["a", "b"]}`` →
-    4 Envs named like ``params.target_searches=3__tenant_id=a``.
+    4 Arms named like ``params.target_searches=3__tenant_id=a``.
     """
     if not matrix:
         return []
     keys = list(matrix)
-    envs: list[Env] = []
+    arms: list[Arm] = []
     for combo in itertools.product(*(matrix[k] for k in keys)):
         overrides = dict(zip(keys, combo, strict=True))
         name = "__".join(f"{k.split('.')[-1]}={v}" for k, v in overrides.items())
-        envs.append(Env(name=name, overrides=overrides))
-    return envs
+        arms.append(Arm(id=name, overrides=overrides))
+    return arms
 
 
 class Experiment(BaseModel):
@@ -145,12 +145,12 @@ class Experiment(BaseModel):
     # single-corpus run is just ``evalsets`` with one entry — no separate singular field.
     evalsets: list[EvalSet] = Field(min_length=1)
     facets: dict[str, FacetSpec] = Field(default_factory=dict)
-    envs: list[Env] = Field(default_factory=list)
+    arms: list[Arm] = Field(default_factory=list)
     matrix: dict[str, list[Any]] = Field(default_factory=dict)
     metrics: list[str] = Field(default_factory=list)
     weights: dict[str, float] = Field(default_factory=dict)
     # dotted target paths whose change re-provisions (e.g. "config.tenant_id"); [] ⇒ corpus
-    # alone keys provisioning, so all envs share one resource per corpus.
+    # alone keys provisioning, so all arms share one resource per corpus.
     heavy_fields: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -158,6 +158,9 @@ class Experiment(BaseModel):
         corpora = [es.corpus for es in self.evalsets]
         if len(set(corpora)) != len(corpora):
             raise ValueError(f"duplicate corpus across evalsets: {corpora}")
+        arm_ids = [arm.id for arm in self.resolved_arms()]
+        if len(set(arm_ids)) != len(arm_ids):
+            raise ValueError(f"duplicate arm id: {arm_ids}")
         return self
 
     @property
@@ -171,20 +174,20 @@ class Experiment(BaseModel):
     def facet_schema(self) -> FacetSchema:
         return FacetSchema(self.facets, base=BASE_FACETS)
 
-    def resolved_envs(self) -> list[Env]:
-        """Explicit ``envs`` plus matrix expansion; default to one identity Env
-        (a single run = a 1-Env experiment, no special-casing)."""
-        out = list(self.envs) + expand_matrix(self.matrix)
+    def resolved_arms(self) -> list[Arm]:
+        """Explicit ``arms`` plus matrix expansion; default to one identity Arm
+        (a single run = a 1-Arm experiment, no special-casing)."""
+        out = list(self.arms) + expand_matrix(self.matrix)
         if not out:
-            out = [Env(name="default", overrides={})]
+            out = [Arm(id="default", overrides={})]
         return out
 
     def experiment_hash(self) -> str:
         """Stable hash over the comparison-defining inputs; guards a resumed run
-        against an edited yaml (env labels must not silently drift)."""
-        envs = [{"name": e.name, "overrides": e.overrides} for e in self.resolved_envs()]
+        against an edited yaml (arm_id labels must not silently drift)."""
+        arms = [{"id": arm.id, "overrides": arm.overrides} for arm in self.resolved_arms()]
         payload = {
-            "envs": sorted(envs, key=lambda e: e["name"]),
+            "arms": sorted(arms, key=lambda arm: arm["id"]),
             "weights": dict(sorted(self.weights.items())),
             "metrics": sorted(self.metrics),
             # corpus-scoped case ids: spans all evalsets, collision-safe across corpora

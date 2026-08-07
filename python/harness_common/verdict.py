@@ -60,6 +60,7 @@ def rollup_status(statuses: list[Status]) -> Status:
 class CaseVerdict:
     case_id: str
     status: Status
+    arm_id: str | None = None
     reason: str | None = None
     score: float | None = None
     facets: dict[str, str] = field(default_factory=dict)
@@ -67,6 +68,8 @@ class CaseVerdict:
 
     def to_dict(self) -> dict:
         d: dict = {"case_id": self.case_id, "status": self.status}
+        if self.arm_id:
+            d["arm_id"] = self.arm_id
         if self.reason:
             d["reason"] = self.reason
         if self.score is not None:
@@ -99,9 +102,15 @@ class CheckVerdict:
     metric: str | None = None
     observed: float | None = None
     reason: str | None = None
+    arm_id: str | None = None
+    window_id: str | None = None
 
     def to_dict(self) -> dict:
         d: dict = {"name": self.name, "status": self.status}
+        if self.arm_id:
+            d["arm_id"] = self.arm_id
+        if self.window_id:
+            d["window_id"] = self.window_id
         if self.metric:
             d["metric"] = self.metric
         if self.observed is not None:

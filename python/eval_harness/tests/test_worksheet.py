@@ -1,5 +1,5 @@
 from eval_harness.model.evalset import EvalSet
-from eval_harness.model.experiment import Env, Experiment, Target
+from eval_harness.model.experiment import Arm, Experiment, Target
 from eval_harness.model.sample import MetricResult
 from eval_harness.tests.eval_cases import make_eval_case
 from eval_harness.worksheet.checkpoint import from_jsonl, to_jsonl
@@ -29,9 +29,9 @@ def _exp():
                 ],
             )
         ],
-        envs=[
-            Env(name="model-alpha"),
-            Env(name="model-beta", overrides={"config.tenant_id": "t2"}),
+        arms=[
+            Arm(id="model-alpha"),
+            Arm(id="model-beta", overrides={"config.tenant_id": "t2"}),
         ],
         metrics=["correctness", "citation"],
         weights={"correctness": 1.0},
@@ -41,7 +41,7 @@ def _exp():
 
 def test_build_rows_and_provisions():
     ws = Worksheet.build(_exp())
-    assert len(ws.rows) == 4  # 2 envs × 2 cases
+    assert len(ws.rows) == 4  # 2 arms × 2 cases
     assert len(ws.provisions) == 2  # model-alpha(t1) and model-beta(t2) differ by heavy key
     assert ws.stats()["rows"] == 4
 

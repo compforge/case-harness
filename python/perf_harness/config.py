@@ -27,8 +27,9 @@ from perf_harness.model import (
     ResourceProfile,
     SloAssertion,
     SloOp,
-    SloWindow,
     Target,
+    WindowKind,
+    WindowSelector,
 )
 from perf_harness.observe import (
     ClientProbe,
@@ -49,7 +50,7 @@ from perf_harness.subject import HelmProvisioner, Provisioner
 _LOAD_MODELS = get_args(LoadModel)
 _PACING_KINDS = get_args(PacingKind)
 _SLO_OPS = get_args(SloOp)
-_SLO_WINDOWS = get_args(SloWindow)
+_WINDOW_KINDS = get_args(WindowKind)
 
 _PROBES = {
     "client": ClientProbe,
@@ -542,9 +543,8 @@ def _parse_schedule(stages: list[dict], start_level: float) -> Schedule:
 
 
 def _parse_slo(items: list[dict] | None) -> list[SloAssertion]:
-    """``slo:`` list → SloAssertions. Each item: ``metric`` (carries any facet/stage/
-    service label, e.g. ``duration_ms{difficulty="simple"}.p99``) + exactly one op key
-    (``lt``/``lte``/``gt``/``gte``/``between``) + optional ``level`` and ``window``.
+    """``slo:`` list → SloAssertions. Metric labels select entities; ``window``
+    selects time. Each item carries exactly one comparison operator.
     Syntax only here; metric/label existence is checked in ``_validate_slo``."""
     out: list[SloAssertion] = []
     for s in items or []:
@@ -554,24 +554,30 @@ def _parse_slo(items: list[dict] | None) -> list[SloAssertion]:
         if "scope" in s:
             raise ValueError(
                 "slo.scope was removed — put the slice in the metric as a label: "
-                "facet:difficulty=simple → 'duration_ms{difficulty=\"simple\"}.p99', "
-                "stage:hold@40 → '...{stage=\"hold@40\"}...'"
+                "facet:difficulty=simple → 'duration_ms{difficulty=\"simple\"}.p99'"
             )
         ops = [k for k in _SLO_OPS if k in s]
         if len(ops) != 1:
             raise ValueError(f"slo entry needs exactly one of {list(_SLO_OPS)}: {s!r}")
         op = ops[0]
         threshold = tuple(float(x) for x in s[op]) if op == "between" else float(s[op])
-        level = s.get("level")
-        window = s.get("window", "measurement")
-        if window not in _SLO_WINDOWS:
-            raise ValueError(f"slo.window must be one of {list(_SLO_WINDOWS)}, got {window!r}")
+        window_raw = s.get("window") or {"kind": "measurement"}
+        if not isinstance(window_raw, dict):
+            raise ValueError("slo.window must be a mapping, e.g. {kind: hold}")
+        kind = window_raw.get("kind", "measurement")
+        if kind not in _WINDOW_KINDS:
+            raise ValueError(f"slo.window.kind must be one of {list(_WINDOW_KINDS)}, got {kind!r}")
+        level = window_raw.get("level")
+        window = WindowSelector(
+            kind=kind,
+            name=window_raw.get("name"),
+            level=float(level) if level is not None else None,
+        )
         out.append(
             SloAssertion(
                 metric=metric,
                 op=op,
                 threshold=threshold,
-                level=float(level) if level is not None else None,
                 window=window,
             )
         )
@@ -664,49 +670,49 @@ def _validate_slo(
 
     One rule per ``side`` (the family declares it; no name-pattern special cases):
       - resource side — selected by a ``{service=…}`` label: explicit legal stat,
-        observed service, no facet/stage co-labels, and the service must have an
+        observed service, and the service must have an
         aggregate series (a ``per_pod``-only family would skip every run).
-      - request side — facet/stage labels select a slice: at most ONE (the report is
+      - request side — facet labels select a slice: at most ONE (the report is
         a marginal pivot, not a cube) and its value must be one a run produces.
     ``value_kind`` gates the stat either way (``validate_ref``)."""
-    stage_labels = {
-        lbl for ld in loads if ld.schedule.is_multi_stage for lbl in ld.schedule.stage_durations()
-    }
+    planned = [stage for load in loads for stage in load.schedule.stages]
     for a in slo:
         name, labels, stat = parse_ref(a.metric)
         fam = registry.get(name)
         non_service_labels = {k: v for k, v in labels.items() if k != "service"}
 
-        if a.window == "cooldown":
+        if a.window.kind in ("ramp", "hold"):
+            candidates = [stage for stage in planned if stage.kind == a.window.kind]
+            if a.window.name is not None:
+                candidates = [stage for stage in candidates if stage.label == a.window.name]
+            if a.window.level is not None:
+                candidates = [stage for stage in candidates if stage.to_level == a.window.level]
+            if not candidates:
+                raise ValueError(f"slo.window {a.window!r} matches no configured stage")
+        elif a.window.name is not None or a.window.level is not None:
+            raise ValueError("slo.window name/level only apply to ramp or hold windows")
+
+        if a.window.kind == "cooldown":
             if cooldown_s <= 0:
                 raise ValueError(
-                    f"slo.metric {a.metric!r}: window='cooldown' requires cooldown_s > 0"
+                    f"slo.metric {a.metric!r}: cooldown window requires cooldown_s > 0"
                 )
             if fam is None or fam.side != "resource":
                 raise ValueError(
-                    f"slo.metric {a.metric!r}: window='cooldown' only supports "
+                    f"slo.metric {a.metric!r}: cooldown window only supports "
                     "resource-side time-sampled metrics"
                 )
             if fam.value_kind not in ("gauge", "counter"):
                 raise ValueError(
-                    f"slo.metric {a.metric!r}: window='cooldown' needs a raw "
+                    f"slo.metric {a.metric!r}: cooldown window needs a raw "
                     f"gauge/counter series, got {fam.value_kind}"
                 )
 
         if fam is not None and fam.side == "resource":
-            # Resource probes may expose their own bounded dimensions (for
-            # example task_type/state). Only request-slice labels are
-            # forbidden on this side.
-            slice_labels = {k: v for k, v in non_service_labels.items() if k == "stage"}
             if stat is None:
                 raise ValueError(
                     f"slo.metric {a.metric!r}: a resource metric needs an explicit "
                     "stat ('<name>{labels}.<stat>')"
-                )
-            if slice_labels:
-                raise ValueError(
-                    f"slo.metric {a.metric!r}: a resource metric can't also carry a facet/stage "
-                    f"label {sorted(slice_labels)}"
                 )
             unknown_labels = set(labels) - fam.labels
             if unknown_labels:
@@ -739,7 +745,7 @@ def _validate_slo(
         slice_labels = non_service_labels
         if len(slice_labels) > 1:
             raise ValueError(
-                f"slo.metric {a.metric!r}: at most one facet/stage slice label "
+                f"slo.metric {a.metric!r}: at most one facet slice label "
                 f"(report is a marginal pivot, not a cube); got {sorted(slice_labels)}"
             )
         if stat is None:
@@ -765,15 +771,9 @@ def _validate_slo(
                 "dynamic first_<event>_ms reaches the report but can't gate)"
             )
 
-        # the facet/stage label value must be one a run actually produces
+        # the facet label value must be one a run actually produces
         for k, v in slice_labels.items():
-            if k == "stage":
-                if v not in stage_labels:
-                    raise ValueError(
-                        f"slo.metric {a.metric!r}: stage {v!r} unknown "
-                        f"(multi-stage schedules expose: {sorted(stage_labels) or 'none'})"
-                    )
-            elif f"{k}={v}" not in declared_facets:
+            if f"{k}={v}" not in declared_facets:
                 raise ValueError(
                     f"slo.metric {a.metric!r}: facet {k}={v} unknown "
                     f"(declared: {sorted(declared_facets) or 'none'})"

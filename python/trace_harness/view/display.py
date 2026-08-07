@@ -4,6 +4,7 @@ facet 不拼字符串、不碰格式：它只产出结构化的 DisplayNode（�
 加 engine 绑上来的 findings），由序列化器（text/markdown/html/treecli）各自成文。一个 facet
 也可以产出**合成节点**（kind="" 的 collapse 行 / plan 分组头）——没有对应 Node 时 node_ids 为空。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

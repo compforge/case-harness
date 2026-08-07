@@ -44,7 +44,7 @@ setup → measurement → deactivation → cooldown → cleanup
 
 顶层 `cooldown_s` 控制停用后的观测窗口。cooldown 样本进入 `run.json` /
 `timeseries.csv` 和 HTML 曲线，用于回收、缩容与泄漏观察；Trial 汇总和默认 SLO
-仍只统计 measurement，只有显式 `window: cooldown` 的资源 SLO 读取 cooldown。
+仍只统计 measurement，只有显式 `window: {kind: cooldown}` 的资源 SLO 读取 cooldown。
 即使 setup 或 measurement 抛错，`cleanup` 仍会执行。
 
 ## 自定义 Probe

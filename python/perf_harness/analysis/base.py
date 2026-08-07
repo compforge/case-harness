@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from perf_harness.model import TrialResult
+from perf_harness.model import TrialRecord
 
 
 @dataclass(frozen=True)
@@ -28,14 +28,14 @@ class Observation:
     evidence: dict[str, object] = field(default_factory=dict)  # the numbers backing the title
 
 
-def by_resources(trials: list[TrialResult]) -> list[tuple[str, list[TrialResult]]]:
+def by_resources(trials: list[TrialRecord]) -> list[tuple[str, list[TrialRecord]]]:
     """Group trials by resource-profile label, each group sorted by peak level — the
     'sweep curves' every lens walks (x = load level within one profile)."""
-    groups: dict[str, list[TrialResult]] = {}
+    groups: dict[str, list[TrialRecord]] = {}
     for r in trials:
-        groups.setdefault(r.resources.label(), []).append(r)
+        groups.setdefault(r.arm.resources.label(), []).append(r)
     return [
-        (label, sorted(rs, key=lambda r: r.load.schedule.peak_level))
+        (label, sorted(rs, key=lambda r: r.arm.load.schedule.peak_level))
         for label, rs in groups.items()
     ]
 

@@ -43,7 +43,7 @@ def test_single_corpus_is_one_evalset():
 
 def test_build_spans_corpora_and_provisions_each():
     ws = Worksheet.build(_multi_exp())
-    assert len(ws.rows) == 2  # 1 env × 2 corpora × 1 case
+    assert len(ws.rows) == 2  # 1 arm_id × 2 corpora × 1 case
     assert len(ws.provisions) == 2  # one provisioned resource per corpus
     assert ("default", "finance", "q1") in ws.rows
     assert (
@@ -54,7 +54,7 @@ def test_build_spans_corpora_and_provisions_each():
     assert {r.corpus for r in ws.rows.values()} == {"finance", "news"}
     # the two corpora map to distinct provision keys
     assert (
-        ws.rows[("default", "finance", "q1")].env_key != ws.rows[("default", "news", "q1")].env_key
+        ws.rows[("default", "finance", "q1")].arm_key != ws.rows[("default", "news", "q1")].arm_key
     )
 
 
@@ -76,7 +76,7 @@ def test_by_corpus_pivot():
 
 def test_results_csv_has_corpus_column():
     csv_out = results_csv(_filled(), {"correctness": 1.0})
-    assert csv_out.splitlines()[0].startswith("env,corpus,case_id,")
+    assert csv_out.splitlines()[0].startswith("arm_id,corpus,case_id,")
     assert "default,finance,q1," in csv_out
     assert "default,news,q1," in csv_out
 
@@ -85,7 +85,7 @@ def test_results_digest_csv_is_slim():
     out = digest_csv(_filled(), {"correctness": 1.0})
     header = out.splitlines()[0]
     # slim: query + answer + metric score + overall; NO __judgement / provenance / facets
-    assert header == "env,corpus,case_id,query,answer,weighted_overall,correctness"
+    assert header == "arm_id,corpus,case_id,query,answer,weighted_overall,correctness"
     assert "__judgement" not in out and "trace_id" not in out
     assert "default,finance,q1,q,x,1.0,1.0" in out  # query=q answer=x overall=1 correctness=1
 

@@ -35,7 +35,7 @@ class _EchoSolver(Solver):
             response=resp,
             retrieved=["chunk-1"],
             observations={"total_ms": 900, "ttft_ms": 80},
-            meta={"message_id": f"m-{row.env}-{row.case_id}"},
+            meta={"message_id": f"m-{row.arm_id}-{row.case_id}"},
         )
 
 
@@ -44,7 +44,7 @@ def test_load_experiment_resolves_cases_and_facets():
     assert exp.name == "smoke"
     assert exp.evalsets[0].corpus == "demo"
     assert [c.id for c in exp.evalsets[0].cases] == ["f1", "f2", "r1"]
-    assert len(exp.resolved_envs()) == 2
+    assert len(exp.resolved_arms()) == 2
     # facet schema merged base + declared; validation already ran in loader
     assert "difficulty" in exp.facet_schema().facets
 
@@ -72,7 +72,7 @@ async def test_run_experiment_end_to_end(tmp_path):
     assert ws.rows[("model-alpha", "demo", "f1")].scores["latency"].result.value == 900
 
     # reports written under runs/<experiment>/<run-id>/ (run-id = experiment_hash);
-    # multi-env → report/ folder (comparison + per-env)
+    # multi-arm_id → report/ folder (comparison + per-arm_id)
     run_dir = tmp_path / "smoke" / ws.run_id
     assert (run_dir / "results.csv").is_file()
     assert (run_dir / "report" / "comparison.md").is_file()
@@ -98,7 +98,7 @@ def test_single_env_writes_flat_report_md(tmp_path):
         metrics=[],
     )
     out = write_reports(Worksheet.build(exp), exp, [], tmp_path / "solo")
-    # single env → flat report.md, no report/ folder
+    # single arm_id → flat report.md, no report/ folder
     assert (tmp_path / "solo" / "report.md").is_file()
     assert not (tmp_path / "solo" / "report").exists()
     assert out.name == "report.md"

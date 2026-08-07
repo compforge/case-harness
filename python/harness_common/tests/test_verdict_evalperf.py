@@ -22,7 +22,11 @@ OK, FAILED, PENDING = CellState.OK, CellState.FAILED, CellState.PENDING
 
 def _row(case_id, solve_state, score_states, dims=None, err=None):
     r = Row(
-        env="model-alpha", env_key="model-alpha", corpus="c", case_id=case_id, query="q"
+        arm_id="model-alpha",
+        arm_key="model-alpha",
+        corpus="c",
+        case_id=case_id,
+        query="q",
     )
     r.solve = SolveCell(
         state=solve_state, response="a" if solve_state is OK else None, error=err
@@ -55,10 +59,8 @@ def test_eval_verdict():
     )  # counts are read-time-derived from cases[], not on the wire
     by = {c["case_id"]: c for c in doc["cases"]}
     assert by["ok"]["status"] == "pass"
-    assert by["ok"]["facets"] == {
-        "env": "model-alpha",
-        "type": "factual",
-    }  # env rides in facets
+    assert by["ok"]["arm_id"] == "model-alpha"
+    assert by["ok"]["facets"] == {"type": "factual"}
     assert by["bad"]["status"] == "error" and by["bad"]["reason"].startswith(
         "solve: boom"
     )
@@ -77,9 +79,15 @@ def test_eval_verdict_all_pass_omits_reason():
 
 def _chk(metric, op, thr, observed, state, level=None, window="measurement"):
     return NS(
-        assertion=NS(metric=metric, op=op, threshold=thr, level=level, window=window),
+        assertion=NS(
+            metric=metric,
+            op=op,
+            threshold=thr,
+            window=NS(kind=window, name=None, level=level),
+        ),
         observed=observed,
         state=state,
+        window_id=window,
     )
 
 
@@ -93,6 +101,7 @@ def test_perf_verdict_fail():
         passed=False,
         trials=[
             NS(
+                arm=NS(id="arm"),
                 stop=NS(early=False),
                 slo=[
                     _chk("p99_ms", "lte", 100, 150, "fail"),
@@ -109,16 +118,19 @@ def test_perf_verdict_fail():
         "summary" not in doc and "cases" not in doc
     )  # no per-case unit → summary omitted
     by = {c["name"]: c for c in doc["checks"]}
-    assert by["p99_ms lte 100"] == {
-        "name": "p99_ms lte 100",
+    assert by["p99_ms lte 100 [window=measurement]"] == {
+        "name": "p99_ms lte 100 [window=measurement]",
         "status": "fail",
         "metric": "p99_ms",
         "observed": 150,
+        "arm_id": "arm",
+        "window_id": "measurement",
     }
     assert (
-        by["err lte 0.01"]["status"] == "pass" and by["err lte 0.01"]["observed"] == 0.0
+        by["err lte 0.01 [window=measurement]"]["status"] == "pass"
+        and by["err lte 0.01 [window=measurement]"]["observed"] == 0.0
     )
-    assert "p99_ms lte 100 (observed 150)" in doc["reason"]
+    assert "p99_ms [measurement] lte 100 (observed 150)" in doc["reason"]
     assert doc["artifact_paths"]["run"] == "run.json"
 
 
@@ -132,7 +144,11 @@ def test_perf_verdict_skipped_check_not_pass():
         created_at="t",
         passed=True,
         trials=[
-            NS(stop=NS(early=False), slo=[_chk("p99_ms", "lte", 100, None, "skip")])
+            NS(
+                arm=NS(id="arm"),
+                stop=NS(early=False),
+                slo=[_chk("p99_ms", "lte", 100, None, "skip")],
+            )
         ],
     )
     doc = PV.build_verdict_doc(run)
@@ -148,7 +164,7 @@ def test_perf_verdict_no_slo_is_skipped_not_pass():
         run_id="r",
         created_at="t",
         passed=True,
-        trials=[NS(stop=NS(early=False), slo=[])],
+        trials=[NS(arm=NS(id="arm"), stop=NS(early=False), slo=[])],
     )
     doc = PV.build_verdict_doc(run)
     assert (
@@ -170,15 +186,23 @@ def test_perf_verdict_pass():
         run_id="r",
         created_at="t",
         passed=True,
-        trials=[NS(stop=NS(early=False), slo=[_chk("p99_ms", "lte", 100, 80, "pass")])],
+        trials=[
+            NS(
+                arm=NS(id="arm"),
+                stop=NS(early=False),
+                slo=[_chk("p99_ms", "lte", 100, 80, "pass")],
+            )
+        ],
     )
     doc = PV.build_verdict_doc(run)
     assert doc["status"] == "pass" and "reason" not in doc
     assert doc["checks"][0] == {
-        "name": "p99_ms lte 100",
+        "name": "p99_ms lte 100 [window=measurement]",
         "status": "pass",
         "metric": "p99_ms",
         "observed": 80,
+        "arm_id": "arm",
+        "window_id": "measurement",
     }
 
 
@@ -190,6 +214,7 @@ def test_perf_verdict_names_cooldown_window():
         passed=True,
         trials=[
             NS(
+                arm=NS(id="arm"),
                 stop=NS(early=False),
                 slo=[
                     _chk(
@@ -205,7 +230,36 @@ def test_perf_verdict_names_cooldown_window():
         ],
     )
     doc = PV.build_verdict_doc(run)
-    assert doc["checks"][0]["name"].endswith("[cooldown]")
+    assert doc["checks"][0]["name"].endswith("[window=cooldown]")
+
+
+def test_perf_verdict_cooldown_skip_fails_closed():
+    run = NS(
+        experiment="e",
+        run_id="r",
+        created_at="t",
+        passed=False,
+        trials=[
+            NS(
+                arm=NS(id="arm"),
+                stop=NS(early=False),
+                slo=[
+                    _chk(
+                        "client.inflight.last",
+                        "lte",
+                        0,
+                        None,
+                        "skipped",
+                        window="cooldown",
+                    )
+                ],
+            )
+        ],
+    )
+    doc = PV.build_verdict_doc(run)
+    assert doc["status"] == "fail"
+    assert doc["checks"][0]["status"] == "skipped"
+    assert "recovery was not observed" in doc["reason"]
 
 
 def test_perf_verdict_early_stop_fails_even_when_slo_passes():
@@ -216,6 +270,7 @@ def test_perf_verdict_early_stop_fails_even_when_slo_passes():
         passed=False,
         trials=[
             NS(
+                arm=NS(id="arm"),
                 stop=NS(
                     early=True,
                     reason="error_rate",

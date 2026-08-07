@@ -215,8 +215,8 @@ def test_store_pivot_groups_by_service_label():
         'top.cpu_m{service="chat"}': GaugeSummary(last=300, mean=250, peak=305),
         'top.cpu_m{service="planit"}': GaugeSummary(last=460, mean=420, peak=467),
     }
-    r = SimpleNamespace(probe_metrics=pm, metrics={})
-    out = MetricStore([]).pivot(r, "top.cpu_m", "service")
+    r = SimpleNamespace(metrics={})
+    out = MetricStore([]).pivot(r, "top.cpu_m", "service", SimpleNamespace(probe_metrics=pm))
     assert {svc: s.peak for svc, s in out.items()} == {"chat": 305, "planit": 467}
 
 
@@ -229,8 +229,8 @@ def test_store_pivot_keeps_per_pod_entities_distinct():
         'top.cpu_m{pod="chat-a",service="chat"}': GaugeSummary(last=1, peak=305),
         'top.cpu_m{pod="chat-b",service="chat"}': GaugeSummary(last=1, peak=467),
     }
-    r = SimpleNamespace(probe_metrics=pm, metrics={})
-    out = MetricStore([]).pivot(r, "top.cpu_m", "service")
+    r = SimpleNamespace(metrics={})
+    out = MetricStore([]).pivot(r, "top.cpu_m", "service", SimpleNamespace(probe_metrics=pm))
     assert {svc: s.peak for svc, s in out.items()} == {
         "chat/chat-a": 305,
         "chat/chat-b": 467,
@@ -376,8 +376,8 @@ async def test_engine_fans_pod_labeled_keys_into_per_pod_series():
         'fan.up{service="chat"}',
     }
     # …and its own summary (constant gauges → peak == the per-pod constant)
-    assert r.probe_metrics['fan.cpu_m{pod="p0",service="chat"}'].peak == 100.0
-    assert r.probe_metrics['fan.cpu_m{pod="p1",service="chat"}'].peak == 200.0
+    assert r.measurement.probe_metrics['fan.cpu_m{pod="p0",service="chat"}'].peak == 100.0
+    assert r.measurement.probe_metrics['fan.cpu_m{pod="p1",service="chat"}'].peak == 200.0
     # the registry stays family-keyed — pod is a label, not a new family
     assert r.metrics["fan.cpu_m"].side == "resource"
 
@@ -653,9 +653,9 @@ async def test_up_series_synthesized_per_probe():
         observe_interval_s=0.05,
     )
     r = (await Engine(exp).run()).trials[0]
-    healthy = r.probe_metrics[series_id("fan.up", {"service": "chat"})]
+    healthy = r.measurement.probe_metrics[series_id("fan.up", {"service": "chat"})]
     assert healthy.mean == 1.0 and healthy.peak == 1.0
-    broken = r.probe_metrics[series_id("flaky.up", {"service": "chat"})]
+    broken = r.measurement.probe_metrics[series_id("flaky.up", {"service": "chat"})]
     assert broken.mean == 0.0  # every tick failed
     assert all(s.value == 0.0 for s in r.series[series_id("flaky.up", {"service": "chat"})].samples)
     assert r.metrics["flaky.up"].value_kind == "gauge"  # registered family

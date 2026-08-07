@@ -4,6 +4,7 @@ dispatch 取最高 priority 的 match；都不中 → DefaultFacet 兜底。skil
 在 import 时登记自己的 biz facet（像 framework 的 register_builder）。harness 自带的通用
 facet 在 `view.facets` 里登记。
 """
+
 from __future__ import annotations
 
 from trace_harness.model.node import Node

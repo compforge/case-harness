@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from perf_harness.analysis.base import Observation, by_resources, linfit, pct
 from perf_harness.metric.store import MetricStore
-from perf_harness.model import Run, TrialResult
+from perf_harness.model import Run, TrialRecord
 
 #: peak ≥ this share of the limit → "approaching its limit" flag
 NEAR_LIMIT = 0.8
@@ -47,7 +47,7 @@ def analyze(run: Run, store: MetricStore) -> list[Observation]:
     return out
 
 
-def _usage_families(r: TrialResult) -> list[str]:
+def _usage_families(r: TrialRecord) -> list[str]:
     """Resource-side gauges in a bounded unit, excluding the bounds themselves."""
     return sorted(
         name
@@ -59,7 +59,7 @@ def _usage_families(r: TrialResult) -> list[str]:
     )
 
 
-def _peaks(store: MetricStore, r: TrialResult, family: str) -> dict[str, float]:
+def _peaks(store: MetricStore, r: TrialRecord, family: str) -> dict[str, float]:
     """service/entity → peak for one family (per_pod entities pivot out the same way)."""
     out = {}
     for svc, summary in store.pivot(r, family, "service").items():
@@ -102,14 +102,14 @@ def _headroom(
 
 
 def _slope(
-    label: str, rs: list[TrialResult], store: MetricStore,
+    label: str, rs: list[TrialRecord], store: MetricStore,
     family: str, unit: str, svc: str, req: float | None, lim: float | None,
 ) -> list[Observation]:  # fmt: skip
     points = []
     for r in rs:
         peak = _peaks(store, r, family).get(svc)
         if peak is not None:
-            points.append((r.load.schedule.peak_level, peak))
+            points.append((r.arm.load.schedule.peak_level, peak))
     fit = linfit(points)
     if fit is None:
         return []
@@ -154,7 +154,7 @@ def _slope(
     ]
 
 
-def _growth(label: str, top: TrialResult, family: str, unit: str) -> list[Observation]:
+def _growth(label: str, top: TrialRecord, family: str, unit: str) -> list[Observation]:
     """Within-trial first→last growth at the top level (fast-climb smell; a slow leak
     still needs a soak run — this window is short by design)."""
     out: list[Observation] = []

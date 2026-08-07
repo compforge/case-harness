@@ -2,7 +2,7 @@ import pytest
 
 from eval_harness.metric.base import BaseMetric
 from eval_harness.model.evalset import EvalSet
-from eval_harness.model.experiment import Env, Experiment, Target
+from eval_harness.model.experiment import Arm, Experiment, Target
 from eval_harness.schedule.ratelimit import GateRegistry
 from eval_harness.schedule.reconcile import ReconcileEngine, Solver, SolveResult
 from eval_harness.tests.eval_cases import make_eval_case
@@ -42,7 +42,7 @@ class MockSolver(Solver):
             response=row.ground_truth or "",
             retrieved=["chunk-1"],
             observations={"total_ms": 1000, "ttft_ms": 120},
-            meta={"message_id": f"m-{row.env}-{row.case_id}"},
+            meta={"message_id": f"m-{row.arm_id}-{row.case_id}"},
         )
 
 
@@ -70,7 +70,7 @@ class Latency(BaseMetric):
         return self.measure(v, "ms") if v is not None else self.na()
 
 
-def _exp(cases=None, envs=None):
+def _exp(cases=None, arms=None):
     cases = cases or [
         make_eval_case(id="q1", query="q1", ground_truth="a1"),
         make_eval_case(id="q2", query="q2", ground_truth="a2"),
@@ -79,7 +79,7 @@ def _exp(cases=None, envs=None):
         name="exp",
         target=Target(name="chat", config={"tenant_id": "t1"}),
         evalsets=[EvalSet(corpus="rag", cases=cases)],
-        envs=envs or [Env(name="model-alpha")],
+        arms=arms or [Arm(id="model-alpha")],
         metrics=["correctness", "latency"],
         weights={"correctness": 1.0},
         heavy_fields=["config.tenant_id"],
@@ -102,9 +102,9 @@ def _engine(ws, exp, prov, solver, provision_attempts=1):
 
 async def test_full_fill():
     exp = _exp(
-        envs=[
-            Env(name="model-alpha"),
-            Env(name="model-beta", overrides={"config.tenant_id": "t2"}),
+        arms=[
+            Arm(id="model-alpha"),
+            Arm(id="model-beta", overrides={"config.tenant_id": "t2"}),
         ]
     )
     ws = Worksheet.build(exp)

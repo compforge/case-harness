@@ -6,7 +6,7 @@ dependencies are met and that is not yet OK. A crashed-then-reloaded Worksheet
 resumes by filling whatever is still PENDING/FAILED — at whatever granularity
 (provision / solve / a single metric) the gap happens to be.
 
-``provisions`` (env.key → Provision) is the shared heavy layer: many Envs may
+``provisions`` (Arm.key → Provision) is the shared heavy layer: many Arms may
 map to one key and share its provisioned resource. Kept in the
 Worksheet so a single checkpoint captures the whole resumable state.
 """
@@ -30,7 +30,7 @@ class CellState(str, Enum):
 
 @dataclass
 class Provision:
-    """Heavy provisioned resource for one env.key (shared across same-key Envs)."""
+    """Heavy provisioned resource for one Arm.key (shared across same-key Arms)."""
 
     key: str
     state: CellState = CellState.PENDING
@@ -57,13 +57,13 @@ class ScoreCell:
 
 @dataclass
 class Row:
-    env: str
-    env_key: str
+    arm_id: str
+    arm_key: str
     corpus: str
     case_id: str
     # seed (from evalset; never filled by solve/score)
     query: str
-    # the run's reuse namespace (a solver keys SUT lookups by it + env/corpus/case)
+    # the run's reuse namespace (a solver keys SUT lookups by it + arm_id/corpus/case)
     run_id: str = ""
     expected_behavior: str = "answer"
     ground_truth: str | None = None
@@ -82,7 +82,7 @@ class Row:
     def to_sample(self) -> Sample:
         return Sample(
             case_id=self.case_id,
-            env=self.env,
+            arm_id=self.arm_id,
             corpus=self.corpus,
             query=self.query,
             expected_behavior=self.expected_behavior,
@@ -111,7 +111,7 @@ class Worksheet:
         self.experiment_hash = experiment_hash
         self.metric_names = list(metric_names)
         self.run_id = run_id  # this run's reuse namespace (carried on rows + checkpoint meta)
-        # keyed by (env, corpus, case_id) — corpus in the key so an experiment can span
+        # keyed by (arm_id, corpus, case_id) — corpus in the key so an experiment can span
         # corpora without case_id collisions across corpora.
         self.rows: dict[tuple[str, str, str], Row] = rows or {}
         self.provisions: dict[str, Provision] = provisions or {}
@@ -120,23 +120,23 @@ class Worksheet:
 
     @classmethod
     def build(cls, exp: Experiment, run_id: str = "") -> Worksheet:
-        """Materialise all (env × corpus × case) rows in PENDING state.
+        """Materialise all (arm_id × corpus × case) rows in PENDING state.
 
-        Provisioning is keyed by ``Env.key`` (which already folds in corpus), so each
-        distinct corpus becomes its own provisioned resource and same-key envs still
+        Provisioning is keyed by ``Arm.key`` (which already folds in corpus), so each
+        distinct corpus becomes its own provisioned resource and same-key arms still
         share one — many corpora, one worksheet. ``run_id`` is this run's reuse
         namespace, stamped onto every row.
         """
         target = exp.target
         ws = cls(exp.name, exp.experiment_hash(), list(exp.metrics), run_id=run_id)
-        for env in exp.resolved_envs():
+        for arm in exp.resolved_arms():
             for corpus, case in exp.cases():
-                key = env.key(corpus, target, exp.heavy_fields)
+                key = arm.key(corpus, target, exp.heavy_fields)
                 ws.provisions.setdefault(key, Provision(key=key))
                 v = eval_view(case)  # eval's read of the canonical case → Row seed fields
                 row = Row(
-                    env=env.name,
-                    env_key=key,
+                    arm_id=arm.id,
+                    arm_key=key,
                     corpus=corpus,
                     case_id=case.id,
                     query=v.query,
@@ -148,7 +148,7 @@ class Worksheet:
                     candidate_sources=list(v.candidate_sources),
                     scores={m: ScoreCell() for m in exp.metrics},
                 )
-                ws.rows[(env.name, corpus, case.id)] = row
+                ws.rows[(arm.id, corpus, case.id)] = row
         return ws
 
     # ----- queries (what the reconciler needs) -----
@@ -162,7 +162,7 @@ class Worksheet:
         """Rows whose provision is OK but solve is not done."""
         out = []
         for row in self.rows.values():
-            prov = self.provisions.get(row.env_key)
+            prov = self.provisions.get(row.arm_key)
             if (
                 prov
                 and prov.state is CellState.OK

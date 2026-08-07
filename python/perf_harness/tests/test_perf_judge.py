@@ -73,6 +73,6 @@ async def test_engine_buckets_judged_errors():
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],
     )
     r = (await Engine(exp).run()).trials[0]
-    assert r.overall.n > 0
-    assert r.overall.error_rate == 1.0
-    assert r.overall.error_breakdown.get("500", 0) > 0
+    assert r.measurement.request.n > 0
+    assert r.measurement.request.error_rate == 1.0
+    assert r.measurement.request.error_breakdown.get("500", 0) > 0

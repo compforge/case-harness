@@ -2,6 +2,7 @@
 
 `producing(name, node)` 找产某个名、且 applies 这个 node 的 Feature（pull 时由 Ctx 调）。
 """
+
 from __future__ import annotations
 
 from trace_harness.feature.feature import Feature

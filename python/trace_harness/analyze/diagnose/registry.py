@@ -10,6 +10,7 @@
 
 domain（AS）用 `register_detector(fn)` 注册。
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

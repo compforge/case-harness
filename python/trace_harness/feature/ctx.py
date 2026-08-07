@@ -4,6 +4,7 @@
 Feature 现算（其 produces 一并缓存）。依赖经递归 get 自解，故引擎不用排序、不用 bottom-up。
 `raw` 有无随数据源——完整 trace 给 `raw_fn`，重载的瘦 IR 不给（读 raw 的 feature 自然降级返空）。
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

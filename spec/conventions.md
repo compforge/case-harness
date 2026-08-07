@@ -127,7 +127,7 @@ custom:                    # 服务自定义扩展区，框架透传
 
 - **e2e（API 测试）**: pytest 驱动 + `BaseCase` 三段式 + sync runner / AssertJudge / OutcomeMetric。
 - **eval（效果测试）**: `EvalEngine` 驱动大表 + reconciler 填表，per-case async runner + builder + metric set。
-- **perf（压力测试）**: `Engine` 按资源档 × 负载档网格逐 Trial 采样，出资源画像。
+- **perf（压力测试）**: `Engine` 把资源档 × 负载档解析为 Arm，逐 Trial 采样并按 Window 聚合，出容量与资源画像。
 
 三者**互不 import、不抽公共依赖**（耦合成本 > 省下的重复）：e2e/eval 各自复制一小撮 L2 原语
 （Outcome 形状 / runner / SSEParser / build_auth_headers），perf 自带 httpx 发压栈。唯一例外是
@@ -163,11 +163,11 @@ runs/<scope>/<run-id>/
 |---------|------------------|------|
 | e2e | `e2e_harness/api/verdict.py`（纯投影）+ `pytest_plugin.py`（conftest opt-in，钩 `pytest_runtest_logreport` 等聚合落盘）；pytest 仍驱动 | 现成 PASS/FAIL/ERROR 三态 |
 | eval | `eval_harness/verdict.py`，`engine.run_experiment` 收尾调用 `write_verdict()` | `row_overall`（weighted）+ per-cell state |
-| perf | `perf_harness/verdict.py`，`report.write_run` 收尾调用 `write_verdict()` | 每条 SLO check → `checks[]`；run status 按 per-check rollup（fail>pass>skipped）；**不取 `run.passed`** |
+| perf | `perf_harness/verdict.py`，`report.write_run` 收尾调用 `write_verdict()` | 每条 SLO check → `checks[]`；run status 按 per-check rollup，cooldown skip 失败关闭；**不取 `run.passed`** |
 | trace | `trace_harness/verdict.py`，`corpus.experiment.run_experiment` 收尾调用 `write_verdict()` | experiment 显式声明的 `gates:`（对三表/算子结果的断言）→ `checks[]`；**Finding 是发现不是判定**、永不直接变 verdict；无 gates → `skipped`（同 perf 记录门原则） |
 
 > status 语义：e2e/perf 有 pass/fail/error/skipped；eval **无 fail**（质量不判对错）——status 表"执行是否完成"（pass/error/skipped），质量信号走 `score`（run 级 weighted overall）。trace 与 perf 同型（判定单元是 run 级 check 而非 case），区别在判定对象：perf 断言压测聚合指标，trace 断言遥测分析产物（错误签名/离群/Finding 计数）。各家 error 优先于 fail：判不了 → 结果不可信 → 先暴露。
-> perf 尤其要分清两个门：`run.passed` 是**运行门**（CLI 退出码 / `abort_on_fail` / `strict_slo` 宽松），默认放过 skip；`verdict.status` 是**记录门**，按 per-check 状态 rollup——SLO 声明了却全 skip（或没声明 SLO）→ `skipped` 而非 `pass`，否则一次没验证过的容量跑会被读成 green。
+> perf 尤其要分清两个门：`run.passed` 是**运行门**（CLI 退出码 / `abort_on_fail` / `strict_slo` 宽松），默认放过普通 skip；`verdict.status` 是**记录门**，按 per-check 状态 rollup——SLO 声明了却全 skip（或没声明 SLO）→ `skipped` 而非 `pass`。cooldown 用于证明恢复，skip 在两个门都失败关闭。
 
 ## 对齐键（跨平面 join 的前提，各 harness 迭代必守）
 
@@ -175,14 +175,20 @@ runs/<scope>/<run-id>/
 （延迟资源）/ traces（链路）/ findings（判读）。devloop 消费与数据挖掘（顶层 AGENTS.md
 「愿景」）都靠对齐键把平面 join 起来——单平面数字不可行动（"fail 23 个"不知为何、
 "churn 率 20%"不知伤不伤），join 后才出可行动结论（"fail 的 23 个里 18 个命中 tool_churn
-→ 改该 tool 的 desc"）。三组键，**迭代时不得破坏，新增产物/列时优先携带**：
+→ 改该 tool 的 desc"）。四组键，**迭代时不得破坏，新增产物/列时优先携带**：
 
 - **case_id**：输入 `case.id` == 输出 `verdict.case_id`（「Case 规范」第 1 条主键）——
   case ↔ 判定的对齐，也是跨 harness 按题对齐的主键。
+- **arm_id**：Experiment 内命名配置的对齐键。一个 case 在多个 Arm 上执行时，`case_id`
+  不变、`arm_id` 区分配置；perf 的 SLO check 同样携带 Arm。Arm 的配置形状由各 harness
+  强类型定义，共享的是语义和键，不是一个通用配置袋。
 - **trace_id**：黑盒产物 ↔ 遥测的桥。各 harness 的 run 产物应尽量记录——eval `results.csv`
   已有列、perf `Outcome.meta` 已记、e2e 可放 `Outcome.metadata`；trace 的 `sibling_run`
   source 靠它把坏 case / 慢 Trial join 到链路归因。
 - **`runs/<scope>/<run-id>/` + verdict.json**：波次产物的定位骨架（上节），消费方按它
   glob 全收。
+
+perf 在一个 Trial 内还用 `window_id` 对齐时间切片；它是 perf 模型内的局部键，不提升为所有
+harness 都必须实现的运行层级。
 
 对齐键断一处，跨平面结论就拼不出来；修改这三组键的形状属于 spec 级变更，需过本文件。

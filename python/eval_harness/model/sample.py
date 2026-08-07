@@ -64,10 +64,10 @@ class MetricResult:
 
 @dataclass(frozen=True, slots=True)
 class Sample:
-    """Read-only view of one (env × case) row handed to a metric."""
+    """Read-only view of one (arm_id × case) row handed to a metric."""
 
     case_id: str
-    env: str
+    arm_id: str
     query: str
     corpus: str = ""  # which corpus this case ran against (experiments may span several)
     expected_behavior: str = "answer"  # "answer" | "refuse" — contract, drives applies_to

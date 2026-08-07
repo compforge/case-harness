@@ -1,49 +1,15 @@
+import asyncio
+import time
+
+import httpx
+from spec_case.model import Case
+
 from perf_harness.drive.load import LoadProfile, Schedule, Stage
-from perf_harness.drive.workload import MockWorkload
+from perf_harness.drive.scheduler import _fire
+from perf_harness.drive.workload import MockWorkload, Workload
 from perf_harness.engine import Engine, Experiment, Subject
-from perf_harness.model import ResourceProfile, Target
-
-
-def _stepped() -> Schedule:
-    return Schedule(
-        stages=(
-            Stage(over_s=1, to_level=10, kind="ramp"),
-            Stage(over_s=2, to_level=10, kind="hold"),
-            Stage(over_s=1, to_level=30, kind="ramp"),
-            Stage(over_s=2, to_level=30, kind="hold"),
-        )
-    )
-
-
-def test_stage_labels_and_durations():
-    s = _stepped()
-    assert s.is_multi_stage  # two holds
-    assert s.stage_label(0.5) == "ramp→10"  # [0,1)
-    assert s.stage_label(2.0) == "hold@10"  # [1,3)
-    assert s.stage_label(3.5) == "ramp→30"  # [3,4)
-    assert s.stage_label(5.0) == "hold@30"  # [4,6)
-    assert s.stage_durations() == {
-        "ramp→10": 1,
-        "hold@10": 2,
-        "ramp→30": 1,
-        "hold@30": 2,
-    }
-
-
-def test_stage_durations_after_warmup():
-    s = _stepped()  # ramp→10[0,1) hold@10[1,3) ramp→30[3,4) hold@30[4,6)
-    # warmup 2s: ramp→10 fully eaten, 1s of hold@10 eaten
-    d = s.stage_durations(after_s=2.0)
-    assert d["ramp→10"] == 0
-    assert d["hold@10"] == 1
-    assert d["ramp→30"] == 1
-    assert d["hold@30"] == 2
-    assert s.stage_durations()["hold@10"] == 2  # default (no warmup) unchanged
-
-
-def test_ramp_hold_is_single_stage():
-    assert not Schedule.ramp_hold(10, 1, 5).is_multi_stage  # one hold
-    assert Schedule.spike(5, 50, 1, 1, 1).is_multi_stage  # three holds
+from perf_harness.model import Outcome, ResourceProfile, Target
+from perf_harness.observe import ClientStats, ProbeContext
 
 
 def test_stage_name_overrides_auto_label():
@@ -51,8 +17,7 @@ def test_stage_name_overrides_auto_label():
     assert Stage(over_s=1, to_level=10, kind="hold").label == "hold@10"
 
 
-async def test_engine_pivots_by_stage_for_stepped_schedule():
-    # open 20→40 step; each hold is its own per-level slice via by_stage
+async def test_engine_reduces_one_window_per_stage():
     sched = Schedule(
         stages=(
             Stage(over_s=0.01, to_level=20, kind="ramp"),
@@ -68,13 +33,13 @@ async def test_engine_pivots_by_stage_for_stepped_schedule():
         loads=[LoadProfile(model="open", schedule=sched)],  # warmup_s defaults to 0
     )
     r = (await Engine(exp).run()).trials[0]
-    assert "hold@20" in r.by_stage and "hold@40" in r.by_stage
-    # the 40 rps hold sends ~2x the 10*... requests of the 20 rps hold in the same window
-    assert r.by_stage["hold@40"].n > r.by_stage["hold@20"].n
-    assert r.by_stage["hold@40"].throughput_rps > r.by_stage["hold@20"].throughput_rps
+    holds = {window.name: window for window in r.windows if window.kind == "hold"}
+    assert set(holds) == {"hold@20", "hold@40"}
+    assert holds["hold@40"].request.n > holds["hold@20"].request.n
+    assert holds["hold@40"].request.throughput_rps > holds["hold@20"].request.throughput_rps
 
 
-async def test_single_stage_run_has_no_by_stage():
+async def test_single_stage_run_still_has_a_hold_window():
     exp = Experiment(
         subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
         workload=MockWorkload(base_ms=2),
@@ -82,4 +47,36 @@ async def test_single_stage_run_has_no_by_stage():
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(3, 0.0, 0.3))],
     )
     r = (await Engine(exp).run()).trials[0]
-    assert r.by_stage == {}
+    holds = [window for window in r.windows if window.kind == "hold"]
+    assert len(holds) == 1 and holds[0].id == "stage-0"
+
+
+async def test_repeated_stage_names_remain_distinct_windows():
+    exp = Experiment(
+        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        workload=MockWorkload(base_ms=2),
+        resources=[ResourceProfile()],
+        loads=[LoadProfile(model="open", schedule=Schedule.spike(5, 20, 0.2, 0.01, 0.2))],
+    )
+    trial = (await Engine(exp).run()).trials[0]
+    baseline = [window for window in trial.windows if window.name == "hold@5"]
+    assert [window.id for window in baseline] == ["stage-0", "stage-4"]
+
+
+async def test_long_request_is_attributed_by_dispatch_time():
+    class SlowWorkload(Workload):
+        async def fire(self, target, client, case, run_id):
+            await asyncio.sleep(0.05)
+            return Outcome(status=200, duration_ms=50)
+
+    async with httpx.AsyncClient() as client:
+        ctx = ProbeContext(
+            target=Target(base_url="http://127.0.0.1:0"),
+            client=client,
+            t0=time.monotonic(),
+            stats=ClientStats(),
+        )
+        timed = []
+        await _fire(SlowWorkload(), ctx, Case(id="slow", input={}), "run", timed)
+
+    assert timed[0][0] < 0.02

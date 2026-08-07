@@ -1,15 +1,16 @@
 """perf_harness value objects — the ubiquitous language, as plain data.
 
-The whole harness is three lines::
+The whole harness is four lines::
 
-    一个 Experiment = ResourceProfile(资源档) × LoadProfile(负载档) 的网格;
-    每个格子(Trial)由 Workload 发带 facet 的 Case、Probe 周期采样, 产出一张 metric 表;
+    一个 Experiment 比较一组 Arm;
+    一个 Arm 是命名的 ResourceProfile(资源档) + LoadProfile(负载档);
+    一个 Trial 是 Arm 的真实执行, 由 Workload 发 Case、Probe 周期采样并按 Window 归约;
     report / SLO / analyze 都是对这张表的查询。
 
 This module holds the nouns that are *just data* (no behaviour): the
 time-series primitives (`Sample`/`Series`), one request's `Outcome` + its
 `Verdict`, the `ResourceProfile` (资源档) + reachability (`Target`/`K8sRef`),
-and the per-Trial/-Run aggregates (`RequestStats`/`TrialResult`/`Run`). The load
+    and the per-Trial/-Run aggregates (`RequestStats`/`TrialRecord`/`Run`). The load
 *shape* vocabulary (`LoadProfile`/`Schedule`/`Pacing`) lives in `load.py`;
 behaviour (firing load, sampling probes, provisioning) lives in sibling modules.
 """
@@ -77,7 +78,6 @@ class Outcome:
         default_factory=dict
     )  # per_request metric values fire() measured: ttft_ms / first_<event>_ms … (→ MetricStat)
     dropped: bool = False  # never-sent (open-loop max_inflight shed); NOT a latency sample
-    stage: str | None = None  # active schedule stage label (only stamped for multi-stage runs)
     meta: dict = field(
         default_factory=dict
     )  # raw signals fire() records for judge(): exc / saw_done / error_frames / ttft_ms …
@@ -154,6 +154,15 @@ class ResourceProfile:
 
 
 @dataclass(frozen=True)
+class Arm:
+    """One named configuration participating in an Experiment comparison."""
+
+    id: str
+    resources: ResourceProfile
+    load: LoadProfile
+
+
+@dataclass(frozen=True)
 class Target:
     """The Subject's reachability — substrate-agnostic. ``k8s`` enables K8s probes."""
 
@@ -169,7 +178,7 @@ class Target:
 
 @dataclass
 class RequestStats:
-    """Request-side aggregate over a set of Outcomes — a whole Trial, or one facet slice.
+    """Request-side aggregate over one Window, or one facet slice within it.
 
     ``n`` / latency / throughput / error_rate cover only *sent* requests. Open-loop
     ``client_saturated`` drops (never-sent shed load) are NOT latency samples and
@@ -213,9 +222,9 @@ class RequestStats:
 @dataclass(frozen=True)
 class StopSnapshot:
     """The watcher's view at the instant a breaker tripped — NOT the post-warmup
-    ``overall``. Captured from the breaker's own (cumulative, incl-warmup) window so
+    measurement Window. Captured from the breaker's own (cumulative, incl-warmup) view so
     the report can answer 'why did it stop' from the trip itself, not by reverse-
-    engineering ``overall``. ``None`` on a clean ``deadline`` stop."""
+    engineering the measurement aggregate. ``None`` on a clean ``deadline`` stop."""
 
     at_s: float  # seconds into the trial when it tripped
     sent: int  # requests sent at trip (the breaker's denominator)
@@ -260,42 +269,50 @@ class ProbeErrors:
     last: str
 
 
+WindowKind = Literal["measurement", "ramp", "hold", "cooldown"]
+
+
 @dataclass
-class TrialResult:
-    """Collapsed result of one (subject × resources × load) grid point.
+class Window:
+    """An observed time boundary within a Trial.
 
-    ``overall`` aggregates every Outcome. ``by_facet`` is the marginal pivot:
-    for each facet key present, value → its own RequestStats (other facets
-    marginalized), so the report can slice by whichever axis you're investigating
-    (difficulty today, kb tomorrow) without re-running. ``probe_metrics``/
-    ``series`` are the resource-side (per Probe).
-
-    ``by_stage`` is populated only for multi-stage schedules (spike/step): label →
-    stats for each schedule stage, so a stepped run yields a per-level capacity
-    curve in one trial. For those runs ``overall`` is a post-warmup average ACROSS
-    stages (mixed load levels) — read ``by_stage`` hold@ buckets for capacity.
+    Stage is the load plan; Window is the actual interval used to reduce request
+    and resource facts. Its interval is half-open: ``[start_s, end_s)``. ``id`` is
+    unique within a Trial even when display names
+    repeat (for example a spike's two ``hold@base`` legs).
     """
 
+    id: str
+    name: str
+    kind: WindowKind
+    start_s: float
+    end_s: float
+    complete: bool
+    target_level: float | None = None
+    request: RequestStats | None = None
+    by_facet: dict[str, dict[str, RequestStats]] = field(default_factory=dict)
+    probe_metrics: dict[str, MetricSummary] = field(default_factory=dict)
+
+    @property
+    def duration_s(self) -> float:
+        return max(self.end_s - self.start_s, 0.0)
+
+
+@dataclass
+class TrialRecord:
+    """The recorded execution of one Arm, reduced into addressable Windows."""
+
     subject: str
-    resources: ResourceProfile
-    load: LoadProfile
-    overall: RequestStats
-    by_facet: dict[str, dict[str, RequestStats]]
+    arm: Arm
+    windows: list[Window]
     series: dict[str, Series]
-    by_stage: dict[str, RequestStats] = field(default_factory=dict)
     stop: TrialStop = field(default_factory=TrialStop)
     """How this trial ended (every trial has one; default ``reason="deadline"`` =
     normal). When it stopped early (e.g. the error-rate breaker), the trial's numbers
     are *partial* — throughput especially understates (denominator is the planned
     window) — so the report flags it from ``stop.reason``/``stop.snapshot`` and reads
-    'it broke at this load', not a clean capacity point. Replaces the old ``aborted``
-    bool with a structured, explainable stop."""
+    'it broke at this load', not a clean capacity point."""
     slo: list[SloCheck] = field(default_factory=list)  # per-run SLO gate, evaluated on this trial
-    probe_metrics: dict[str, MetricSummary] = field(default_factory=dict)
-    """Trial-global ``time_sampled`` metric summaries (gauge/counter), keyed by
-    metric name (``top.mem_mi`` / ``metrics.req_total`` / ``client.inflight``).
-    Resource metrics are NOT per-facet/-stage sliceable — they only live here, at
-    the trial level (see metric-model.md §3.2)."""
     metrics: dict[str, MetricFamily] = field(default_factory=dict)
     """Unified metric registry: every report-visible metric FAMILY name → its
     family descriptor (no labels — metadata declared once), spanning all kinds:
@@ -315,32 +332,14 @@ class TrialResult:
     name, e.g. ``metrics.chat``). Their summaries carry the ``probe_error`` caveat,
     absent reads resolve to ``Missing("probe_error")`` (≠ "slice没数据"), and the
     validity lens flags them — so a broken /metrics never renders as a calm line."""
-    cooldown_start_s: float | None = None
-    """Start of the cooldown window in the raw Probe timeline.
-
-    Set after ``Workload.deactivate()`` returns. ``None`` means this trial had no
-    cooldown window.
-    """
 
     def label(self) -> str:
-        """Stable trial id within a run, e.g. ``w2/2Gi|closed/8c`` — keys the raw
-        artifacts (timeseries.csv / outcomes.jsonl rows) back to this trial."""
-        return f"{self.resources.label()}|{self.load.label()}"
+        """Stable Trial id within a Run; equal to the Arm alignment key."""
+        return self.arm.id
 
     @property
-    def aborted(self) -> bool:
-        """Did this trial stop early (breaker/external), vs run to its deadline?
-        Convenience over ``stop.early``; the structured truth is ``self.stop``."""
-        return self.stop.early
-
-    @property
-    def slo_passed(self) -> bool:
-        """Every SLO check on this trial definitively PASSED (vacuously true if none).
-
-        A ``skipped`` check (slice absent) is **not** a pass — so a level with an
-        unverifiable SLO does not count as confirmed capacity. The run-level exit
-        code is computed separately (lenient on skip unless ``strict_slo``)."""
-        return all(c.passed for c in self.slo)
+    def measurement(self) -> Window:
+        return next(window for window in self.windows if window.kind == "measurement")
 
 
 # ---------------------------------------------------------------------------
@@ -348,28 +347,35 @@ class TrialResult:
 # ---------------------------------------------------------------------------
 
 SloOp = Literal["lt", "lte", "gt", "gte", "between"]
-SloWindow = Literal["measurement", "cooldown"]
+
+
+@dataclass(frozen=True)
+class WindowSelector:
+    """Select Trial Windows by observed semantics, not by metric labels."""
+
+    kind: WindowKind = "measurement"
+    name: str | None = None
+    level: float | None = None
+
+    def matches(self, window: Window) -> bool:
+        return (
+            window.kind == self.kind
+            and (self.name is None or window.name == self.name)
+            and (self.level is None or window.target_level == self.level)
+        )
 
 
 @dataclass(frozen=True)
 class SloAssertion:
     """One declarative SLO: resolve ``metric`` on a trial and compare via ``op`` to
-    ``threshold``. ``level`` restricts which trials this gates (peak_level == level);
-    ``None`` gates every trial.
-
-    The slice is selected by the metric's **labels** (no separate ``scope``): bare
-    ``p99_ms`` is overall; ``duration_ms{difficulty="simple"}.p99`` a facet slice;
-    ``duration_ms{stage="hold@40"}.p99`` a stage; ``top.cpu_m{service="worker"}.peak``
-    a service. ``threshold`` is a float for lt/lte/gt/gte, a ``(lo, hi)`` for between.
-    ``window="cooldown"`` re-reduces a resource gauge/counter after ``deactivate``;
-    the default ``measurement`` reads the normal load-window summary.
+    ``threshold``. Metric labels select entities (facet/service); ``window`` selects
+    time. One selector may match multiple Windows, yielding one check per Window.
     """
 
     metric: str
     op: SloOp
     threshold: float | tuple[float, float]
-    level: float | None = None
-    window: SloWindow = "measurement"
+    window: WindowSelector = field(default_factory=WindowSelector)
 
 
 SloState = Literal["pass", "fail", "skipped"]
@@ -390,6 +396,7 @@ class SloCheck:
     assertion: SloAssertion
     observed: float | None
     state: SloState
+    window_id: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -420,5 +427,5 @@ class Run:
     experiment: str
     created_at: str  # ISO local time the run started
     subject: str
-    trials: list[TrialResult]
+    trials: list[TrialRecord]
     passed: bool = True

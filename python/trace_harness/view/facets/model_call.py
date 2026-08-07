@@ -4,6 +4,7 @@
 model-call 的 `http_status`（显示在 brief 上），故默认 `Hide` http 子——不出"… +N 折叠"噪声行，
 要拆延迟（看 http 那一跳自身耗时）再 expand。非 http 子（如残余 service 组）仍走默认 prune。
 """
+
 from __future__ import annotations
 
 from trace_harness.model.node import Node

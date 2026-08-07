@@ -6,7 +6,7 @@ Three layers, Prometheus-typed in spirit but not in storage (see docs/metric-mod
     metric's identity declared ONCE, with NO concrete labels. ``value_kind``
     (counter/gauge/distribution/scalar) decides which ``stat`` is legal, exactly
     like Prometheus's type decides valid functions. ``side`` says which slice axes
-    the family's series live on — ``request`` series slice by facet/stage,
+    the family's series live on — ``request`` series slice by facet,
     ``resource`` series by service (and only those; the SLO parser enforces it).
     A concrete *series* is the family plus labels (``top.cpu_m{service="chat"}``)
     — labels are NOT baked into the family, so its unit/value_kind/description are
@@ -32,9 +32,9 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 # Which storage/slice side a family's series live on. ``request`` = computed from
-# Outcomes, sliceable by facet/stage (overall / by_facet / by_stage). ``resource`` =
-# trial-global observations (Probe samples + observe-derived ratios), sliceable by
-# service only. This is the ONE routing bit the store/report/SLO need; how a value
+# Outcomes, sliceable by facet within any Window. ``resource`` = Probe samples,
+# sliceable by service within the same Window. This is the ONE routing bit the
+# store/report/SLO need; how a value
 # was produced is plain metadata (``source``), not a type axis.
 MetricSide = Literal["request", "resource"]
 MetricValueKind = Literal["counter", "gauge", "distribution", "scalar"]
@@ -71,7 +71,7 @@ class MetricFamily:
 
     name: str  # FAMILY: ttft_ms / top.mem_mi / metrics.req_total / request.duration_ms
     unit: str  # ms / MiB / count / tok
-    side: MetricSide  # request (slices by facet/stage) | resource (slices by service)
+    side: MetricSide  # request (slices by facet) | resource (slices by service)
     value_kind: MetricValueKind  # decides legal stat
     source: str = "client"  # client / http / k8s / server — bottleneck grouping
     description: str = ""  # human meaning; surfaced in the report header tooltip

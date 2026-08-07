@@ -5,9 +5,9 @@
 
 模型三行：
 
-> 一个 **Experiment** = 资源档（ResourceProfile）× 负载档（LoadProfile）的网格；
-> 每个格子（**Trial**）由 Workload 发带 facet 的 Case、Probe 周期采样，产出一张 **metric 表**；
-> report / SLO / analyze 都是对这张表的查询（统一寻址 `<family>{labels}.<stat>`）。
+> **Experiment** 把资源档 × 负载档解析成命名 **Arm**；
+> 每个 Arm 执行一次 **Trial**，计划用 Stage，观测按 **Window** 同时切请求与资源指标；
+> report / SLO / analyze 都按 Arm + Window 查询同一份 metric 数据。
 
 ## 最短路径
 
@@ -47,13 +47,14 @@ cooldown_s: 60                          # 可选：停用后继续采样回收/�
 slo:                                    # 可选：run 级门 → CI 退出码
   - { metric: error_rate, lt: 0.01 }
   - { metric: 'p99_ms{difficulty="complex"}', lt: 30000 }
-  - { metric: 'prometheus.active{service="example"}.last', window: cooldown, lte: 0 }
+  - { metric: error_rate, window: {kind: hold}, lt: 0.01 }
+  - { metric: 'prometheus.active{service="example"}.last', window: {kind: cooldown}, lte: 0 }
 ```
 
 SLO 是 Service Level Objective（服务级别目标），即我们希望系统达到的、可以量化验证的目标。
-默认在负载测量窗口求值；`window: cooldown` 则在 `deactivate()` 完成后的 cooldown
-恢复窗口重新聚合资源侧 gauge/counter，用来把回收、缩容或泄漏曲线变成自动门禁。错误率熔断
-提前结束的 trial 只有部分测量窗口，会使 run 失败，也不会计入 SLO-aware 容量。
+默认在 measurement Window 求值；`window: {kind: hold}` 会对每个 hold 分别求值，
+`window: {kind: cooldown}` 则读取 `deactivate()` 后的恢复窗口。Window selector 还可用
+`name` / `level` 缩小范围。错误率熔断会使 run 失败；capacity 只读取已完整观测的 hold Window。
 
 ```bash
 # 离线 smoke（无需服务/集群，内置 MockWorkload）：
@@ -69,7 +70,7 @@ python -m perf_harness.cli report  <run_dir>        # 从模型层重渲染报�
 ```
 outcomes.jsonl · timeseries.csv    # raw：每请求事实 / probe 采样
 run.json                           # 模型层（schema 版本化）：分析的唯一入口，load_run 可离线重建
-report.md/html · summary.csv · by_facet.csv · verdict.json   # 视图层（人看的，纯下游）
+report.md/html · summary.csv · by_facet.csv · windows.csv · verdict.json  # 视图层
 ```
 
 ## 配置面速查
@@ -83,8 +84,8 @@ report.md/html · summary.csv · by_facet.csv · verdict.json   # 视图层（�
 | `extensions` | 运行前导入的 consumer 模块；模块注册 workload / 自定义 probe | 配置和 CLI/SDK 使用同一发现方式 |
 | `cases` / `facets` | 混合流量（输入 + facets + weight）；报告按 facet 边际拆 | 聚合 p99 双峰没意义，拆开才有用 |
 | `observe` | 资源观测：看谁（self+下游同一形状）、抓什么（prometheus/top/rss/restart/limits/pods 或自定义 probe）；prometheus 内声明 PromQL `queries` | Prombed 负责抓取/存储/查询；`service` 是 perf 的 label |
-| `cooldown_s` | measurement 结束且 `deactivate()` 完成后继续采样的秒数；用于回收、缩容与泄漏曲线 | 原始 series 保留；普通汇总/SLO 不纳入，`window: cooldown` 的 SLO 专门读取该窗口 |
-| `slo` | run 级断言；可用 `window: cooldown` 检查 cooldown 最终状态（三态 pass/fail/skipped，cooldown 的 skip 按失败处理）→ 退出码与 SLO-aware 容量 | [`docs/result-semantics.md`](docs/result-semantics.md) |
+| `cooldown_s` | measurement 结束且 `deactivate()` 完成后继续采样的秒数；用于回收、缩容与泄漏曲线 | 原始 series 保留；`window: {kind: cooldown}` 显式读取 |
+| `slo` | run 级断言；metric label 选实体，`window: {kind/name/level}` 选时间（三态 pass/fail/skipped） | [`docs/result-semantics.md`](docs/result-semantics.md) |
 
 ## 接入一个服务
 

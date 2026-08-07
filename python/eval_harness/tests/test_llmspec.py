@@ -2,7 +2,7 @@ import pytest
 import yaml
 
 from eval_harness.config import load_experiment
-from eval_harness.model.experiment import Env, LLMSpec, Target, expand_matrix
+from eval_harness.model.experiment import Arm, LLMSpec, Target, expand_matrix
 from eval_harness.schedule.reconcile import _sut_endpoint
 
 _HEAVY = ["config.tenant_id"]
@@ -17,32 +17,32 @@ def _target(llm=None):
 
 
 def test_llm_override_patches_and_inherits():
-    r = Env(name="model-alpha", overrides={"llm.model": "model-alpha-pro"}).resolve(_target())
+    r = Arm(id="model-alpha", overrides={"llm.model": "model-alpha-pro"}).resolve(_target())
     assert r.llm.model == "model-alpha-pro"
     assert r.llm.base_url == "http://aigw"  # inherited from base
     assert r.llm.api_key == "K"
 
 
 def test_llm_override_when_base_llm_is_none():
-    r = Env(name="x", overrides={"llm.model": "m1"}).resolve(
+    r = Arm(id="x", overrides={"llm.model": "m1"}).resolve(
         Target(name="chat", config={"tenant_id": "t1"})
     )
     assert r.llm.model == "m1"
 
 
-def test_llm_is_light_not_in_env_key():
+def test_llm_is_light_not_in_arm_key():
     t = _target()
-    base = Env(name="b").key("rag", t, _HEAVY)
-    swap = Env(name="s", overrides={"llm.model": "model-beta"}).key("rag", t, _HEAVY)
+    base = Arm(id="b").key("rag", t, _HEAVY)
+    swap = Arm(id="s", overrides={"llm.model": "model-beta"}).key("rag", t, _HEAVY)
     assert base == swap  # swapping model keeps the key → shared prepare
-    heavy = Env(name="h", overrides={"config.tenant_id": "t2"}).key("rag", t, _HEAVY)
+    heavy = Arm(id="h", overrides={"config.tenant_id": "t2"}).key("rag", t, _HEAVY)
     assert base != heavy
 
 
 def test_matrix_sweeps_llm_model():
-    envs = expand_matrix({"llm.model": ["model-alpha", "model-beta"]})
-    assert {e.name for e in envs} == {"model=model-alpha", "model=model-beta"}
-    assert {"llm.model": "model-alpha"} in [e.overrides for e in envs]
+    arms = expand_matrix({"llm.model": ["model-alpha", "model-beta"]})
+    assert {arm.id for arm in arms} == {"model=model-alpha", "model=model-beta"}
+    assert {"llm.model": "model-alpha"} in [e.overrides for e in arms]
 
 
 def test_sut_endpoint_from_llm():

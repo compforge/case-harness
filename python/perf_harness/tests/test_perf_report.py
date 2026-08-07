@@ -3,6 +3,7 @@ from pathlib import Path
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.metric import CounterSummary, GaugeSummary
 from perf_harness.model import (
+    Arm,
     RequestStats,
     ResourceProfile,
     Sample,
@@ -10,8 +11,10 @@ from perf_harness.model import (
     SloAssertion,
     SloCheck,
     StopSnapshot,
-    TrialResult,
+    TrialRecord,
     TrialStop,
+    Window,
+    WindowSelector,
 )
 from perf_harness.report import write_report
 
@@ -29,29 +32,54 @@ def _stats(n=100, n_ok=95, err=0.05, breakdown=None) -> RequestStats:
     )
 
 
-def _trial(level=10) -> TrialResult:
-    return TrialResult(
+def _trial(level=10) -> TrialRecord:
+    resources = ResourceProfile(workers=2, memory="2Gi")
+    load = LoadProfile(model="closed", schedule=Schedule.ramp_hold(level, 0.0, 1.0))
+    stats = _stats()
+    return TrialRecord(
         subject="example",
-        resources=ResourceProfile(workers=2, memory="2Gi"),
-        load=LoadProfile(model="closed", schedule=Schedule.ramp_hold(level, 0.0, 1.0)),
-        overall=_stats(),
-        by_facet={
-            "difficulty": {
-                "simple": _stats(n=70, n_ok=70, err=0.0, breakdown={}),
-                "complex": _stats(n=30, n_ok=25, err=0.17, breakdown={"503": 5}),
-            }
-        },
-        probe_metrics={
-            "top.mem_mi": GaugeSummary(last=1800.0, mean=1400.0, peak=1800.0),
-            "metrics.req_total": CounterSummary(total=900.0, rate=9.0),
-        },
+        arm=Arm(f"{resources.label()}|{load.label()}", resources, load),
+        windows=[
+            Window(
+                "measurement",
+                "measurement",
+                "measurement",
+                0.0,
+                1.0,
+                True,
+                request=stats,
+                by_facet={
+                    "difficulty": {
+                        "simple": _stats(n=70, n_ok=70, err=0.0, breakdown={}),
+                        "complex": _stats(n=30, n_ok=25, err=0.17, breakdown={"503": 5}),
+                    }
+                },
+                probe_metrics={
+                    "top.mem_mi": GaugeSummary(last=1800.0, mean=1400.0, peak=1800.0),
+                    "metrics.req_total": CounterSummary(total=900.0, rate=9.0),
+                },
+            ),
+            Window("stage-0", f"hold@{level:g}", "hold", 0.0, 1.0, True, level, stats),
+        ],
         series={"top.mem_mi": Series("mem_mi", "MiB", [Sample(0, 1000), Sample(5, 1800)])},
     )
 
 
 def test_write_report_emits_artifacts(tmp_path):
-    paths = write_report([_trial()], str(tmp_path))
-    for key in ("summary", "by_facet", "timeseries", "report"):
+    trial = _trial()
+    trial.windows.append(
+        Window(
+            "cooldown",
+            "cooldown",
+            "cooldown",
+            1.0,
+            2.0,
+            True,
+            probe_metrics={"top.mem_mi": GaugeSummary(last=0, mean=10, peak=20)},
+        )
+    )
+    paths = write_report([trial], str(tmp_path))
+    for key in ("summary", "by_facet", "windows", "timeseries", "report"):
         assert Path(paths[key]).exists()
 
     summary = Path(paths["summary"]).read_text().splitlines()
@@ -69,12 +97,16 @@ def test_write_report_emits_artifacts(tmp_path):
     facet = Path(paths["by_facet"]).read_text()
     assert "difficulty" in facet and "simple" in facet and "complex" in facet
 
+    windows = Path(paths["windows"]).read_text()
+    assert "window_id" in windows and "top.mem_mi.peak" in windows
+    assert "cooldown" in windows
+
 
 def test_report_flags_knee(tmp_path):
     low = _trial(level=5)
-    low.overall.error_rate = 0.0
+    low.measurement.request.error_rate = 0.0
     high = _trial(level=40)
-    high.overall.error_rate = 0.11
+    high.measurement.request.error_rate = 0.11
     paths = write_report([low, high], str(tmp_path))
     md = Path(paths["report"]).read_text()
     assert "拐点" in md
@@ -102,6 +134,20 @@ def test_report_rejects_early_stop_as_capacity(tmp_path):
     assert "SLO-aware 容量" in md and "—（无档达标）" in md
 
 
+def test_report_names_actual_window_and_fails_closed_on_cooldown_skip(tmp_path):
+    trial = _trial(level=10)
+    assertion = SloAssertion(
+        "client.inflight.last", "lte", 0, window=WindowSelector(kind="cooldown")
+    )
+    trial.slo = [SloCheck(assertion, observed=None, state="skipped", window_id="cooldown")]
+
+    paths = write_report([trial], str(tmp_path))
+    md = Path(paths["report"]).read_text()
+    assert "FAIL" in md
+    assert "client.inflight.last [window=cooldown]" in md
+    assert "WindowSelector(" not in md
+
+
 def test_facet_order_sorts_ordinal(tmp_path):
     # ordered facet: simple before complex, despite alpha order complex < simple
     paths = write_report(
@@ -111,7 +157,7 @@ def test_facet_order_sorts_ordinal(tmp_path):
     assert md.index("| simple ") < md.index("| complex ")
 
 
-def _svc_trial(level: float) -> TrialResult:
+def _svc_trial(level: float) -> TrialRecord:
     """A trial with service-LABELED resource series + count gauges, the real-config
     shape: §3 response curves and §4 per-service sections key off these."""
     from perf_harness.metric import MetricFamily, series_id
@@ -119,7 +165,7 @@ def _svc_trial(level: float) -> TrialResult:
     r = _trial(level=level)
     cpu = series_id("top.cpu_m", {"service": "chat"})
     lim = series_id("limits.cpu_limit", {"service": "chat"})
-    r.probe_metrics = {
+    r.measurement.probe_metrics = {
         cpu: GaugeSummary(last=1.0, mean=1.0, peak=100.0 + level * 20),
         lim: GaugeSummary(last=500.0, mean=500.0, peak=500.0),
     }
@@ -171,7 +217,7 @@ def test_timeseries_section_left_resource_right_pressure(tmp_path):
     assert '"name": "client.sent"' in html
 
 
-def _biz_trial(level: float) -> TrialResult:
+def _biz_trial(level: float) -> TrialRecord:
     """Service-labeled BUSINESS metrics: a scraped counter + a derived scalar — the
     observation-plane signals that must ride §3 curves / §4 rate charts like resources."""
     from perf_harness.metric import (
@@ -184,8 +230,10 @@ def _biz_trial(level: float) -> TrialResult:
     r = _svc_trial(level)
     errs = series_id("metrics.sse_errors", {"service": "chat"})
     mean = series_id("sse_ttft_mean_s", {"service": "chat"})
-    r.probe_metrics[errs] = CounterSummary(total=level * 10, rate=level * 0.1, increase=level)
-    r.probe_metrics[mean] = ScalarSummary(value=0.1 + level * 0.01)
+    r.measurement.probe_metrics[errs] = CounterSummary(
+        total=level * 10, rate=level * 0.1, increase=level
+    )
+    r.measurement.probe_metrics[mean] = ScalarSummary(value=0.1 + level * 0.01)
     r.series[errs] = Series(
         "sse_errors", "count", [Sample(0, 0), Sample(5, level), Sample(10, level * 3)]
     )
@@ -212,11 +260,11 @@ def test_response_curves_group_by_label_fanout_under_one_service(tmp_path):
     # LINES in the one chart under the service's own heading
     from perf_harness.metric import CounterSummary, MetricFamily, series_id
 
-    def trial(level: float) -> TrialResult:
+    def trial(level: float) -> TrialRecord:
         r = _svc_trial(level)
         for path, mult in (("/v1/a", 1.0), ("/v1/b", 3.0)):
             sid = series_id("metrics.ctl_requests", {"path": path, "service": "control"})
-            r.probe_metrics[sid] = CounterSummary(
+            r.measurement.probe_metrics[sid] = CounterSummary(
                 total=level * mult * 10, rate=level * mult * 0.1, increase=level * mult
             )
         r.metrics["metrics.ctl_requests"] = MetricFamily(

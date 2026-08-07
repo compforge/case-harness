@@ -36,8 +36,10 @@ async def _fire(
     case: Case,
     run_id: str,
     timed: list[tuple[float, Outcome]],
-    stage: str | None = None,
 ) -> None:
+    # Window attribution follows dispatch time. Completion time would move a long
+    # request into a later hold and corrupt both capacity and resource correlation.
+    started_at_s = time.monotonic() - ctx.t0
     ctx.stats.start()
     try:
         outcome = await workload.fire(ctx.target, ctx.client, case, run_id)
@@ -55,10 +57,9 @@ async def _fire(
     outcome.ok = verdict.ok
     outcome.error_kind = verdict.error_kind
     outcome.case_id = case.id
-    outcome.stage = stage  # per-stage attribution (None for single-stage schedules)
     # stamp the fired Case's facets (a Workload may have added runtime-derived ones)
     outcome.facets = {**case.facets, **outcome.facets}
-    timed.append((time.monotonic() - ctx.t0, outcome))
+    timed.append((started_at_s, outcome))
 
 
 def _breaker_snapshot(
@@ -69,7 +70,7 @@ def _breaker_snapshot(
     reaches ``abort_on_error_rate``, else ``None``. Counts the whole run incl. warmup —
     a safety net (stop hammering a failing Subject), not a measurement. Drops aren't
     sent; only completed fires are in ``timed`` (in-flight ones haven't appended yet).
-    The snapshot is the trip view the report shows — not the post-warmup ``overall``."""
+    The snapshot is the trip view the report shows — not the post-warmup measurement."""
     threshold = load.abort_on_error_rate
     if threshold is None:
         return None
@@ -129,7 +130,6 @@ async def drive_open(
     recorded as a ``client_saturated`` drop instead of fired.
     """
     sched = load.schedule
-    multi = sched.is_multi_stage
     deadline = ctx.t0 + sched.total_s
     tick = 0.02
     accum = 0.0
@@ -147,7 +147,6 @@ async def drive_open(
         elapsed = now - ctx.t0
         accum += sched.intensity(elapsed) * (now - last)
         last = now
-        stage = sched.stage_label(elapsed) if multi else None
         while accum >= 1.0:
             accum -= 1.0
             case = _pick(cases, weights)  # pick first so a drop carries the mix's facets
@@ -166,13 +165,12 @@ async def drive_open(
                             case_id=case.id,
                             error_kind="client_saturated",
                             dropped=True,
-                            stage=stage,
                             facets=dict(case.facets),
                         ),
                     )
                 )
             else:
-                tasks.append(asyncio.create_task(_fire(workload, ctx, case, run_id, timed, stage)))
+                tasks.append(asyncio.create_task(_fire(workload, ctx, case, run_id, timed)))
         await asyncio.sleep(tick)
     # ENACT: drain in-flight up to graceful_stop_s, then cancel; census → TrialStop
     inflight_at_stop, interrupted, forced = await _winddown(tasks, ctx, load.graceful_stop_s)
@@ -206,7 +204,6 @@ async def drive_closed(
     """
     sched = load.schedule
     pacing = load.pacing
-    multi = sched.is_multi_stage
     deadline = ctx.t0 + sched.total_s
     tick = 0.1
 
@@ -215,8 +212,7 @@ async def drive_closed(
     async def user_loop() -> None:
         while not stopping.is_set() and time.monotonic() < deadline:
             fired_at = time.monotonic()
-            stage = sched.stage_label(fired_at - ctx.t0) if multi else None
-            await _fire(workload, ctx, _pick(cases, weights), run_id, timed, stage)
+            await _fire(workload, ctx, _pick(cases, weights), run_id, timed)
             wait = pacing.wait_s(time.monotonic() - fired_at)
             if wait > 0:
                 # interruptible think-time: wake promptly when stopping is set

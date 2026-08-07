@@ -1,5 +1,5 @@
 from eval_harness.model.evalset import EvalSet, FacetSchema
-from eval_harness.model.experiment import Env, Experiment, Target
+from eval_harness.model.experiment import Arm, Experiment, Target
 from eval_harness.model.sample import MetricResult
 from eval_harness.report.html import single_report_html
 from eval_harness.report.pivot import by_facet, compare, per_case_deltas
@@ -31,7 +31,7 @@ def _ws():
                 ],
             )
         ],
-        envs=[Env(name="model-alpha"), Env(name="model-beta")],
+        arms=[Arm(id="model-alpha"), Arm(id="model-beta")],
         metrics=["correctness", "latency"],
         weights={"correctness": 1.0},
     )
@@ -56,7 +56,7 @@ def _ws():
 def test_compare_ranking_and_winner():
     ws = _ws()
     cmp = compare(ws, {"correctness": 1.0})
-    assert [s.env for s in cmp.summaries] == ["model-alpha", "model-beta"]
+    assert [s.arm_id for s in cmp.summaries] == ["model-alpha", "model-beta"]
     assert cmp.winner == "model-alpha"
     assert cmp.summaries[0].overall == 0.7 and cmp.summaries[1].overall == 0.5
     # measurement aggregated separately, not in overall
@@ -76,7 +76,7 @@ def test_missing_cell_never_zero():
     ws.rows[("model-beta", "rag", "q2")].scores["correctness"].state = CellState.PENDING
     ws.rows[("model-beta", "rag", "q2")].scores["correctness"].result = None
     cmp = compare(ws, {"correctness": 1.0})
-    model_beta = next(s for s in cmp.summaries if s.env == "model-beta")
+    model_beta = next(s for s in cmp.summaries if s.arm_id == "model-beta")
     assert model_beta.overall == 0.7  # only q1, NOT (0.7+0)/2
     assert model_beta.n_scored == 1 and model_beta.n_cases == 2
     assert cmp.winner_caveat and "coverage" in cmp.winner_caveat
@@ -91,7 +91,7 @@ def test_renderers_smoke():
     assert "Comparison: cmp" in compare_report_md(ws, w, FacetSchema())
     assert "By difficulty" in single_report_md(ws, "model-alpha", w, FacetSchema())
     csv_out = results_csv(ws, w)
-    assert "env,corpus,case_id,difficulty,query" in csv_out
+    assert "arm_id,corpus,case_id,difficulty,query" in csv_out
     assert "model-alpha,rag,q1" in csv_out
 
 
