@@ -2,7 +2,7 @@ import pytest
 
 from perf_harness.cli import main
 from perf_harness.config import load_experiment
-from perf_harness.drive.load import LoadProfile, Schedule
+from perf_harness.drive.load import LoadProfile, Schedule, Stage
 from perf_harness.drive.workload import MockWorkload
 from perf_harness.engine import Engine, Experiment, Subject
 from perf_harness.metric import MetricFamily
@@ -12,6 +12,7 @@ from perf_harness.model import (
     Sample,
     Series,
     SloAssertion,
+    SloCheck,
     Target,
     TrialResult,
     TrialStop,
@@ -131,6 +132,72 @@ def test_slo_aware_capacity_is_highest_passing_level():
     # 20 passes its SLO on the partial sample, but only the complete 10-level trial
     # confirms capacity.
     assert slo_aware_capacity([t10, t20, t40]) == {"w2": 10}
+
+
+def test_slo_aware_capacity_uses_passing_holds_in_multi_stage_trial():
+    t = _trial(40, 5000)
+    t.load = LoadProfile(
+        model="open",
+        schedule=Schedule(
+            stages=(
+                Stage(1, 10, "hold"),
+                Stage(1, 40, "hold"),
+            )
+        ),
+    )
+    t.by_stage = {
+        "hold@10": _trial(10, 100).overall,
+        "hold@40": _trial(40, 5000).overall,
+    }
+    assertions = [
+        SloAssertion('p99_ms{stage="hold@10"}', "lt", 2000),
+        SloAssertion('p99_ms{stage="hold@40"}', "lt", 2000),
+    ]
+    t.slo = evaluate_slo(t, assertions)
+
+    assert slo_aware_capacity([t]) == {"w2": 10}
+
+
+def test_slo_aware_capacity_does_not_treat_multi_stage_peak_as_capacity():
+    t = _trial(40, 100)
+    t.load = LoadProfile(
+        model="open",
+        schedule=Schedule(
+            stages=(
+                Stage(1, 10, "hold"),
+                Stage(1, 40, "hold"),
+            )
+        ),
+    )
+    t.slo = evaluate_slo(t, [SloAssertion("p99_ms", "lt", 2000)])
+
+    assert slo_aware_capacity([t]) == {"w2": None}
+
+
+def test_slo_aware_capacity_applies_global_resource_slo_to_each_hold():
+    t = _trial(40, 100)
+    t.load = LoadProfile(
+        model="open",
+        schedule=Schedule(stages=(Stage(1, 10, "hold"), Stage(1, 40, "hold"))),
+    )
+    t.by_stage = {"hold@10": t.overall, "hold@40": t.overall}
+    t.metrics = {"top.cpu_m": MetricFamily("top.cpu_m", "m", "resource", "gauge", "k8s")}
+    t.slo = evaluate_slo(
+        t,
+        [
+            SloAssertion('error_rate{stage="hold@10"}', "lt", 0.1),
+            SloAssertion('error_rate{stage="hold@40"}', "lt", 0.1),
+        ],
+    )
+    t.slo.append(
+        SloCheck(
+            SloAssertion('top.cpu_m{service="worker"}.peak', "lt", 1000),
+            observed=1200,
+            state="fail",
+        )
+    )
+
+    assert slo_aware_capacity([t]) == {"w2": None}
 
 
 # ---- config parse + fail-fast ----
