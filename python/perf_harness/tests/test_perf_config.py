@@ -161,13 +161,13 @@ def test_slo_facet_label_typo_fails_fast(tmp_path):
         load_experiment(_write(tmp_path, extra))
 
 
-def test_slo_stage_label_typo_fails_fast(tmp_path):
+def test_slo_window_name_typo_fails_fast(tmp_path):
     extra = (
-        "slo: [ { metric: 'p99_ms{stage=\"hold@99\"}', lt: 1 } ]\n"
+        "slo: [ { metric: p99_ms, window: {kind: hold, name: 'hold@99'}, lt: 1 } ]\n"
         "load:\n  model: open\n  stages:\n"
         "    - { hold: 10, for_s: 0.1 }\n    - { hold: 20, for_s: 0.1 }\n"
     )
-    with pytest.raises(ValueError, match="stage 'hold@99' unknown"):
+    with pytest.raises(ValueError, match="matches no configured stage"):
         load_experiment(_write(tmp_path, extra))
 
 
@@ -249,13 +249,13 @@ def test_cooldown_parses_and_rejects_negative(tmp_path):
 
 
 def test_slo_multi_facet_label_rejected(tmp_path):
-    # marginal pivot, not a cube → at most one facet/stage slice label
+    # marginal pivot, not a cube → at most one facet slice label
     extra = (
         "cases:\n  - { id: a, facets: {difficulty: simple, lang: zh} }\n"
         'slo: [ { metric: \'p99_ms{difficulty="simple",lang="zh"}\', lt: 1 } ]\n'
         "load: { model: open, levels: [1], steady_s: 0.1 }\n"
     )
-    with pytest.raises(ValueError, match="at most one facet/stage"):
+    with pytest.raises(ValueError, match="at most one facet slice"):
         load_experiment(_write(tmp_path, extra))
 
 

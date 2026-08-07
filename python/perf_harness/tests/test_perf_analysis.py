@@ -6,12 +6,14 @@ from perf_harness.analysis.base import linfit
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.metric import GaugeSummary, MetricFamily, series_id
 from perf_harness.model import (
+    Arm,
     RequestStats,
     ResourceProfile,
     Run,
     Sample,
     Series,
-    TrialResult,
+    TrialRecord,
+    Window,
 )
 
 _REGISTRY = {
@@ -32,7 +34,7 @@ def _stats(n, rps, p50, p95, p99, caveats=frozenset()) -> RequestStats:
     )  # fmt: skip
 
 
-def _trial(level, stats, cpu_peaks: dict[str, float], breaker=None) -> TrialResult:
+def _trial(level, stats, cpu_peaks: dict[str, float], breaker=None) -> TrialRecord:
     pm = {}
     for svc, peak in cpu_peaks.items():
         pm[series_id("top.cpu_m", {"service": svc})] = GaugeSummary(
@@ -44,19 +46,30 @@ def _trial(level, stats, cpu_peaks: dict[str, float], breaker=None) -> TrialResu
         pm[series_id("limits.cpu_limit", {"service": svc})] = GaugeSummary(
             last=2000, mean=2000, peak=2000
         )
-    return TrialResult(
+    resources = ResourceProfile(workers=2)
+    load = LoadProfile(
+        model="closed",
+        schedule=Schedule.ramp_hold(level, 0.0, 45.0),
+        abort_on_error_rate=breaker,
+        breaker_min_n=10,
+    )
+    return TrialRecord(
         subject="chat",
-        resources=ResourceProfile(workers=2),
-        load=LoadProfile(
-            model="closed",
-            schedule=Schedule.ramp_hold(level, 0.0, 45.0),
-            abort_on_error_rate=breaker,
-            breaker_min_n=10,
-        ),
-        overall=stats,
-        by_facet={"difficulty": {"simple": stats}},  # single observed value → coverage flag
+        arm=Arm(f"{resources.label()}|{load.label()}", resources, load),
+        windows=[
+            Window(
+                "measurement",
+                "measurement",
+                "measurement",
+                0.0,
+                45.0,
+                True,
+                request=stats,
+                by_facet={"difficulty": {"simple": stats}},
+                probe_metrics=pm,
+            )
+        ],
         series={},
-        probe_metrics=pm,
         metrics=dict(_REGISTRY),
     )
 
@@ -117,11 +130,11 @@ def test_resource_headroom_slope_and_extrapolation():
 def test_resource_flags_idle_service():
     run = _sweep()
     for t in run.trials:  # executor pinned at 5m across all levels
-        t.probe_metrics[series_id("top.cpu_m", {"service": "executor"})] = GaugeSummary(
+        t.measurement.probe_metrics[series_id("top.cpu_m", {"service": "executor"})] = GaugeSummary(
             last=5, mean=5, peak=5
         )
-        t.probe_metrics[series_id("limits.cpu_request", {"service": "executor"})] = GaugeSummary(
-            last=1000, mean=1000, peak=1000
+        t.measurement.probe_metrics[series_id("limits.cpu_request", {"service": "executor"})] = (
+            GaugeSummary(last=1000, mean=1000, peak=1000)
         )
     flags = _titles(analyze(run), "resource", "flag")
     assert any("executor" in t and "未被压到" in t for t in flags)

@@ -46,12 +46,12 @@ async def _one_trial():
 
 async def test_per_request_metrics_aggregate_to_distribution():
     r = await _one_trial()
-    assert "ttft_ms" in r.overall.metrics
-    ms = r.overall.metrics["ttft_ms"]
+    assert "ttft_ms" in r.measurement.request.metrics
+    ms = r.measurement.request.metrics["ttft_ms"]
     # constant 5.0 across every sent request → n matches, all percentiles == 5.0
-    assert ms.n == r.overall.n
+    assert ms.n == r.measurement.request.n
     assert ms.mean == ms.p50 == ms.p95 == 5.0
-    assert r.overall.metrics["first_answer_ms"].p95 == 30.0
+    assert r.measurement.request.metrics["first_answer_ms"].p95 == 30.0
 
 
 class _DeclaringWL(Workload):

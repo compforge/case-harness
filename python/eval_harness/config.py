@@ -2,12 +2,12 @@
 
 One entry file describes the whole run: ``evalset`` (corpus + cases, by
 reference to reusable materials or inline), ``facets`` (FacetSchema overrides),
-``business`` (base SUT config), ``envs`` / ``matrix`` (comparison arms),
+``target`` (base SUT config), ``arms`` / ``matrix`` (comparison arms),
 ``metrics`` and ``weights``. Cases referenced by filename are resolved under
 ``<materials_root>/cases/``; corpus/cases stay decoupled and reusable.
 
 String values support ``${VAR}`` / ``${VAR:-default}`` interpolation from the
-environment, so secrets (e.g. ``business.llm.api_key``) stay out of the yaml /
+environment, so secrets (e.g. ``target.llm.api_key``) stay out of the yaml /
 git — an unset var with no default fails loud rather than sending an empty value.
 """
 
@@ -22,7 +22,7 @@ import yaml
 from spec_case.model import Case, case_from_raw
 
 from eval_harness.model.evalset import EvalSet, FacetSpec, SourceRecord
-from eval_harness.model.experiment import Env, Experiment, Target
+from eval_harness.model.experiment import Arm, Experiment, Target
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
@@ -113,7 +113,7 @@ def load_experiment(path: str | Path, materials_root: str | Path | None = None) 
         target=Target(**raw["target"]),
         evalsets=evalsets,
         facets=facets,
-        envs=[Env(**e) for e in (raw.get("envs") or [])],
+        arms=[Arm(**e) for e in (raw.get("arms") or [])],
         matrix=raw.get("matrix") or {},
         metrics=raw.get("metrics") or [],
         weights=raw.get("weights") or {},

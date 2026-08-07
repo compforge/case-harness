@@ -2,6 +2,7 @@
 
 两条路共享一个 pull+memo 的 Ctx：依赖自解，故跑 node 的顺序无所谓（不用 bottom-up）。
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

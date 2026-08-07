@@ -2,7 +2,7 @@
 
 LLM/API rate is the bottom-most concurrency limit, and it differs per endpoint
 (the SUT API the solver hits vs the judge LLM the scorer hits, and different
-SUT endpoints for different Envs). So gates are **per-endpoint**: each owns a
+SUT endpoints for different Arms). So gates are **per-endpoint**: each owns a
 concurrency limit that additively increases on sustained success and
 multiplicatively decreases on error (429 / overload), with a short pause after
 an error — saturate when healthy, back off when not.

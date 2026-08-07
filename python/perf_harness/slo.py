@@ -1,12 +1,12 @@
 """SLO evaluation — the per-run gate (aggregate verdict), distinct from the
 per-request ``Workload.judge``.
 
-Pure functions over already-aggregated ``TrialResult``s: read each metric through
+Pure functions over already-aggregated ``TrialRecord``s: read each metric through
 the ``MetricStore`` (the one addressing face) and compare to a threshold, producing
 THREE-state ``SloCheck``s. Purity means a run's pass/fail can be recomputed offline.
 
 A metric ref is ``<name>{labels}.<stat>`` (or an undotted builtin alias like
-``p99_ms``). service / facet / stage are all LABELS — the store routes on them. A
+``p99_ms``). Service/facet labels select entities; ``WindowSelector`` selects time. A
 ``Missing`` read (the slice/metric was absent on this trial) becomes a *skipped*
 check: NOT a pass. It never lets a trial count as confirmed capacity, and under
 ``strict_slo`` it fails the run (a Prometheus alert may no-fire on empty; a CI gate
@@ -16,9 +16,9 @@ live in ``store.py`` (the metric layer); import them from there.
 
 from __future__ import annotations
 
-from perf_harness.metric import Missing, parse_ref
+from perf_harness.metric import Missing
 from perf_harness.metric.store import MetricStore
-from perf_harness.model import SloAssertion, SloCheck, TrialResult
+from perf_harness.model import SloAssertion, SloCheck, TrialRecord
 
 
 def _compare(observed: float, op: str, threshold: float | tuple[float, float]) -> bool:
@@ -33,74 +33,51 @@ def _compare(observed: float, op: str, threshold: float | tuple[float, float]) -
     }[op]
 
 
-def evaluate_slo(trial: TrialResult, assertions: list[SloAssertion]) -> list[SloCheck]:
-    """Evaluate every assertion that gates this trial (``level`` filter), reading each
-    metric through the MetricStore. A ``Missing`` read (slice/metric absent on this
-    trial) → a *skipped* check (``observed=None``) — never a pass."""
+def evaluate_slo(trial: TrialRecord, assertions: list[SloAssertion]) -> list[SloCheck]:
+    """Evaluate each assertion once per matching Window."""
     store = MetricStore([trial])
     checks: list[SloCheck] = []
-    level = trial.load.schedule.peak_level
     for a in assertions:
-        if a.level is not None and a.level != level:
-            continue  # assertion gates a different load level
-        if a.window == "cooldown":
-            read = (
-                store.query_window(trial, a.metric, start_s=trial.cooldown_start_s)
-                if trial.cooldown_start_s is not None
-                else Missing("no_data")
+        windows = [window for window in trial.windows if a.window.matches(window)]
+        if not windows:
+            checks.append(SloCheck(a, observed=None, state="skipped", window_id=None))
+        for window in windows:
+            read = store.query(trial, a.metric, window)
+            if isinstance(read, Missing):
+                checks.append(SloCheck(a, observed=None, state="skipped", window_id=window.id))
+                continue
+            passed = _compare(read, a.op, a.threshold)
+            checks.append(
+                SloCheck(
+                    a,
+                    observed=read,
+                    state="pass" if passed else "fail",
+                    window_id=window.id,
+                )
             )
-        else:
-            read = store.query(trial, a.metric)
-        if isinstance(read, Missing):
-            checks.append(SloCheck(a, observed=None, state="skipped"))
-            continue
-        passed = _compare(read, a.op, a.threshold)
-        checks.append(SloCheck(a, observed=read, state="pass" if passed else "fail"))
     return checks
 
 
-def slo_aware_capacity(trials: list[TrialResult]) -> dict[str, float | None]:
-    """Per resource profile: the highest *complete* load level confirmed by SLOs.
-
-    A single-level trial must pass every check. A multi-stage trial instead uses
-    explicit ``{stage=...}`` request checks for each hold; trial-global resource
-    checks still gate every hold. This avoids reporting the schedule peak as
-    capacity merely because an across-stage average happened to pass.
-
-    A skipped check or early-stopped partial window cannot confirm capacity.
-    ``None`` means no complete level was verified (including a multi-stage trial
-    with no stage-scoped SLOs).
-    """
+def slo_aware_capacity(trials: list[TrialRecord]) -> dict[str, float | None]:
+    """Highest complete hold Window whose own checks all passed, per resources."""
     best: dict[str, float | None] = {}
-    for t in trials:
-        c = t.resources.label()
+    for trial in trials:
+        c = trial.arm.resources.label()
         best.setdefault(c, None)
-        if t.stop.early or not t.slo:
-            continue
-        if not t.load.schedule.is_multi_stage:
-            levels = [t.load.schedule.peak_level] if t.slo_passed else []
-        else:
-            resource_checks = []
-            stage_checks: dict[str, list[SloCheck]] = {}
-            for check in t.slo:
-                name, labels, _ = parse_ref(check.assertion.metric)
-                stage = labels.get("stage")
-                if stage is not None:
-                    stage_checks.setdefault(stage, []).append(check)
-                    continue
-                family = t.metrics.get(name)
-                if family is not None and family.side == "resource":
-                    resource_checks.append(check)
-            resources_passed = all(check.passed for check in resource_checks)
-            levels = [
-                stage.to_level
-                for stage in t.load.schedule.stages
-                if stage.kind == "hold"
-                and stage_checks.get(stage.label)
-                and resources_passed
-                and all(check.passed for check in stage_checks[stage.label])
-            ]
-        for lvl in levels:
-            if best[c] is None or lvl > best[c]:
-                best[c] = lvl
+        checks_by_window: dict[str, list[SloCheck]] = {}
+        for check in trial.slo:
+            if check.window_id is not None:
+                checks_by_window.setdefault(check.window_id, []).append(check)
+        for window in trial.windows:
+            checks = checks_by_window.get(window.id, [])
+            if (
+                window.kind != "hold"
+                or not window.complete
+                or window.target_level is None
+                or not checks
+                or not all(check.passed for check in checks)
+            ):
+                continue
+            if best[c] is None or window.target_level > best[c]:
+                best[c] = window.target_level
     return best

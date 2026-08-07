@@ -1,4 +1,4 @@
-"""Pure pivots over a Worksheet: env summary, by-facet, cross-env compare, csv.
+"""Pure pivots over a Worksheet: arm_id summary, by-facet, cross-arm_id compare, csv.
 
 All aggregation excludes missing/abstained cells (never 0). Quality metrics
 roll up via ``weighted_overall``; measurement metrics via ``percentiles``;
@@ -33,8 +33,8 @@ def measure_metrics(ws: Worksheet) -> list[str]:
     return [m for m in ws.metric_names if metric_kind(ws, m) == "measure"]
 
 
-def _env_rows(ws: Worksheet, env: str) -> list[Row]:
-    return [r for r in ws.rows.values() if r.env == env]
+def _arm_rows(ws: Worksheet, arm_id: str) -> list[Row]:
+    return [r for r in ws.rows.values() if r.arm_id == arm_id]
 
 
 def row_overall(row: Row, weights: dict[str, float]) -> float | None:
@@ -43,8 +43,8 @@ def row_overall(row: Row, weights: dict[str, float]) -> float | None:
 
 
 @dataclass
-class EnvSummary:
-    env: str
+class ArmSummary:
+    arm_id: str
     overall: float | None  # mean of per-row weighted overall
     per_metric: dict[str, float | None]  # quality metric -> mean score
     per_measure: dict[str, dict[str, float] | None]  # measure metric -> {mean,p50,p95,n}
@@ -53,8 +53,8 @@ class EnvSummary:
     n_failed: int  # rows whose solve failed
 
 
-def env_summary(ws: Worksheet, env: str, weights: dict[str, float]) -> EnvSummary:
-    rows = _env_rows(ws, env)
+def arm_summary(ws: Worksheet, arm_id: str, weights: dict[str, float]) -> ArmSummary:
+    rows = _arm_rows(ws, arm_id)
     overalls = [o for o in (row_overall(r, weights) for r in rows) if o is not None]
     per_metric: dict[str, float | None] = {}
     for m in quality_metrics(ws):
@@ -72,8 +72,8 @@ def env_summary(ws: Worksheet, env: str, weights: dict[str, float]) -> EnvSummar
             if m in r.scores and r.scores[m].result and r.scores[m].result.value is not None
         ]
         per_measure[m] = percentiles(vals)
-    return EnvSummary(
-        env=env,
+    return ArmSummary(
+        arm_id=arm_id,
         overall=round(sum(overalls) / len(overalls), 3) if overalls else None,
         per_metric=per_metric,
         per_measure=per_measure,
@@ -94,14 +94,14 @@ class FacetGroup:
 
 def by_facet(
     ws: Worksheet,
-    env: str,
+    arm_id: str,
     facet: str,
     weights: dict[str, float],
     schema: FacetSchema | None = None,
 ) -> list[FacetGroup]:
-    """Group an env's rows by one facet value → overall + per-metric per group."""
+    """Group an arm_id's rows by one facet value → overall + per-metric per group."""
     groups: dict[str, list[Row]] = {}
-    for r in _env_rows(ws, env):
+    for r in _arm_rows(ws, arm_id):
         if facet in r.dimensions:
             groups.setdefault(r.dimensions[facet], []).append(r)
     out: list[FacetGroup] = []
@@ -128,12 +128,12 @@ def by_facet(
     return sorted(out, key=key)
 
 
-def by_corpus(ws: Worksheet, env: str, weights: dict[str, float]) -> list[FacetGroup]:
-    """Group an env's rows by corpus → overall + per-metric. Corpus is a built-in
+def by_corpus(ws: Worksheet, arm_id: str, weights: dict[str, float]) -> list[FacetGroup]:
+    """Group an arm_id's rows by corpus → overall + per-metric. Corpus is a built-in
     dimension (an experiment may span corpora), so this is the headline cross-dataset
     cut without corpus having to be declared as a facet."""
     groups: dict[str, list[Row]] = {}
-    for r in _env_rows(ws, env):
+    for r in _arm_rows(ws, arm_id):
         groups.setdefault(r.corpus, []).append(r)
     out: list[FacetGroup] = []
     for corpus, rows in sorted(groups.items()):
@@ -160,22 +160,22 @@ def by_corpus(ws: Worksheet, env: str, weights: dict[str, float]) -> list[FacetG
 
 @dataclass
 class Comparison:
-    summaries: list[EnvSummary]  # ranked best-overall first
+    summaries: list[ArmSummary]  # ranked best-overall first
     winner: str | None
     winner_caveat: str | None
     weights: dict[str, float]
 
 
 def compare(ws: Worksheet, weights: dict[str, float], epsilon: float = 0.02) -> Comparison:
-    envs = sorted({r.env for r in ws.rows.values()})
-    # Rank by overall; break ties toward the more-complete env (higher n_scored),
+    arms = sorted({r.arm_id for r in ws.rows.values()})
+    # Rank by overall; break ties toward the more-complete arm_id (higher n_scored),
     # so a tie on fewer cases doesn't quietly win.
     summaries = sorted(
-        (env_summary(ws, e, weights) for e in envs),
+        (arm_summary(ws, e, weights) for e in arms),
         key=lambda s: (s.overall if s.overall is not None else -1.0, s.n_scored),
         reverse=True,
     )
-    winner = summaries[0].env if summaries and summaries[0].overall is not None else None
+    winner = summaries[0].arm_id if summaries and summaries[0].overall is not None else None
     caveats: list[str] = []
     if len(summaries) >= 2 and winner is not None:
         top, second = summaries[0], summaries[1]
@@ -194,17 +194,18 @@ def compare(ws: Worksheet, weights: dict[str, float], epsilon: float = 0.02) -> 
 def per_case_deltas(
     ws: Worksheet, weights: dict[str, float]
 ) -> tuple[list[str], dict[str, dict[str, float | None]]]:
-    """case union × env → per-case weighted overall (None if missing). Never 0.
+    """case union × arm_id → per-case weighted overall (None if missing). Never 0.
 
     Case identity is ``corpus/case_id`` so the union stays collision-safe across corpora.
     """
-    envs = sorted({r.env for r in ws.rows.values()})
+    arms = sorted({r.arm_id for r in ws.rows.values()})
     cases = sorted({(r.corpus, r.case_id) for r in ws.rows.values()})
-    def cell(env: str, corpus: str, cid: str) -> float | None:
-        row = ws.rows.get((env, corpus, cid))
+
+    def cell(arm_id: str, corpus: str, cid: str) -> float | None:
+        row = ws.rows.get((arm_id, corpus, cid))
         return row_overall(row, weights) if row is not None else None
 
     table: dict[str, dict[str, float | None]] = {}
     for corpus, cid in cases:
-        table[f"{corpus}/{cid}"] = {e: cell(e, corpus, cid) for e in envs}
-    return envs, table
+        table[f"{corpus}/{cid}"] = {e: cell(e, corpus, cid) for e in arms}
+    return arms, table

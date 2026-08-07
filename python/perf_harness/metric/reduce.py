@@ -58,8 +58,10 @@ def time_series_summary(samples: list[Sample], value_kind: MetricValueKind) -> M
 
 
 def request_stats(outcomes: list[Outcome], steady_s: float, *, closed: bool) -> RequestStats:
-    """Collapse already-judged Outcomes into request-side stats (whole Trial or one
-    facet/stage slice). ``ok``/``error_kind`` were set by ``judge`` upstream.
+    """Collapse already-judged Outcomes into one Window's request-side stats.
+
+    The input may be the whole Window or one facet slice. ``ok``/``error_kind``
+    were set by ``judge`` upstream.
 
     Never-sent ``client_saturated`` drops are partitioned out FIRST: a drop has no
     real latency, so folding its 0ms into the percentiles would drag p50/p99 down

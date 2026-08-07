@@ -75,7 +75,12 @@ def test_cohort_of_file_single_callstack():
     c = Cohort.of_file(FIXTURE)
     ctx = c.the_context()
     assert sorted(n.kind for n in ctx.nodes) == [
-        "agent", "http", "http", "model-call", "model-call", "tool-call"
+        "agent",
+        "http",
+        "http",
+        "model-call",
+        "model-call",
+        "tool-call",
     ]
 
 

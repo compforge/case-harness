@@ -71,7 +71,7 @@ def test_public_api_surface():
 
     for n in [
         "Experiment",
-        "Env",
+        "Arm",
         "Target",
         "LLMSpec",
         "EvalSet",

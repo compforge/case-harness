@@ -122,7 +122,7 @@ class EvalSet(BaseModel):
     """A corpus (its documents) + the cases that query it — the unified eval unit an
     ``Importer`` produces and a provisioner consumes.
 
-    ``corpus`` is the identity (drives ``Env.key`` / provisioning reuse); ``sources`` are
+    ``corpus`` is the identity (drives ``Arm.key`` / provisioning reuse); ``sources`` are
     the docs the provisioner ingests; ``focus`` / ``domain`` describe the set (e.g. become
     a provisioned resource's description). corpus/cases stay reusable: an experiment may
     reference the same evalset across runs.

@@ -3,7 +3,7 @@
 The Worksheet is the resumable state, so it is checkpointed to disk: a crash is
 recovered by ``load`` + continuing the reconcile. Format is jsonl — first line a
 ``meta`` record (experiment / hash / metric names / provisions), then one
-``row`` record per (env × case). Writes are atomic (temp file + replace) so a
+``row`` record per (arm_id × case). Writes are atomic (temp file + replace) so a
 crash mid-flush never corrupts the checkpoint.
 """
 
@@ -29,8 +29,8 @@ from eval_harness.worksheet.worksheet import (
 def _row_to_dict(r: Row) -> dict:
     return {
         "kind": "row",
-        "env": r.env,
-        "env_key": r.env_key,
+        "arm_id": r.arm_id,
+        "arm_key": r.arm_key,
         "corpus": r.corpus,
         "case_id": r.case_id,
         "run_id": r.run_id,
@@ -75,8 +75,8 @@ def _row_from_dict(d: dict) -> Row:
         result = MetricResult.from_dict(c["result"]) if c.get("result") else None
         scores[name] = ScoreCell(state=CellState(c["state"]), result=result, error=c.get("error"))
     return Row(
-        env=d["env"],
-        env_key=d["env_key"],
+        arm_id=d["arm_id"],
+        arm_key=d["arm_key"],
         corpus=d.get("corpus", ""),
         case_id=d["case_id"],
         query=d["query"],
@@ -128,7 +128,7 @@ def from_jsonl(path: str | Path) -> Worksheet:
                 meta = rec
             else:
                 row = _row_from_dict(rec)
-                rows[(row.env, row.corpus, row.case_id)] = row
+                rows[(row.arm_id, row.corpus, row.case_id)] = row
     if meta is None:
         raise ValueError(f"checkpoint missing meta line: {path}")
     provisions = {

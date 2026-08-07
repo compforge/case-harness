@@ -41,6 +41,7 @@ from perf_harness.metric import MetricFamily as MetricFamily
 from perf_harness.metric import Missing as Missing
 from perf_harness.metric import ScalarSummary as ScalarSummary
 from perf_harness.metric.store import MetricStore as MetricStore
+from perf_harness.model import Arm as Arm
 from perf_harness.model import K8sRef as K8sRef
 from perf_harness.model import Outcome as Outcome
 from perf_harness.model import RequestStats as RequestStats
@@ -52,9 +53,11 @@ from perf_harness.model import SloAssertion as SloAssertion
 from perf_harness.model import SloCheck as SloCheck
 from perf_harness.model import StopSnapshot as StopSnapshot
 from perf_harness.model import Target as Target
-from perf_harness.model import TrialResult as TrialResult
+from perf_harness.model import TrialRecord as TrialRecord
 from perf_harness.model import TrialStop as TrialStop
 from perf_harness.model import Verdict as Verdict
+from perf_harness.model import Window as Window
+from perf_harness.model import WindowSelector as WindowSelector
 from perf_harness.model import make_run_id as make_run_id
 from perf_harness.observe import ClientProbe as ClientProbe
 from perf_harness.observe import FamilySpec as FamilySpec

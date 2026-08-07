@@ -8,10 +8,10 @@ import io
 from eval_harness.model.evalset import FacetSchema
 from eval_harness.report.pivot import (
     MISSING,
+    arm_summary,
     by_corpus,
     by_facet,
     compare,
-    env_summary,
     measure_metrics,
     per_case_deltas,
     quality_metrics,
@@ -40,11 +40,11 @@ CAP_BY_CORPUS = (
     "按数据集拆分——每行一个 corpus,多语料评测的首要切面。点击列头排序可快速找出最弱的数据集。"
 )
 CAP_RANKING = (
-    "各 env 按加权 `overall` 排名,获胜行高亮。带 `*` 的列为测量类指标(仅展示,不计入综合分)。"
+    "各 arm_id 按加权 `overall` 排名,获胜行高亮。带 `*` 的列为测量类指标(仅展示,不计入综合分)。"
 )
 CAP_PER_CASE = (
-    "每个 case 在各 env 下的 `overall`,按 Δ(最优 − 最差)降序排列,凸显 env 间分歧最大的 case。"
-    "`—` 表示该 case 在该 env 未被评分(绝不按 0 计)。"
+    "每个 case 在各 arm_id 下的 `overall`,按 Δ(最优 − 最差)降序排列,凸显 arm_id 间分歧最大的 case。"
+    "`—` 表示该 case 在该 arm_id 未被评分(绝不按 0 计)。"
 )
 
 
@@ -57,15 +57,15 @@ def cap_by_facet(facet: str) -> str:
 
 def single_report_md(
     ws: Worksheet,
-    env: str,
+    arm_id: str,
     weights: dict[str, float],
     schema: FacetSchema | None = None,
     generated_at: str | None = None,
     description: str = "",
 ) -> str:
-    s = env_summary(ws, env, weights)
+    s = arm_summary(ws, arm_id, weights)
     qms, mms = quality_metrics(ws), measure_metrics(ws)
-    out: list[str] = [f"# Eval Report: {ws.experiment} / env={env}\n"]
+    out: list[str] = [f"# Eval Report: {ws.experiment} / arm_id={arm_id}\n"]
     if description:
         out.append(f"> {description}\n")
     if generated_at:
@@ -82,7 +82,7 @@ def single_report_md(
     out.append("")
 
     # By corpus (built-in dimension): the headline cut when an experiment spans corpora.
-    corpus_groups = by_corpus(ws, env, weights)
+    corpus_groups = by_corpus(ws, arm_id, weights)
     if len(corpus_groups) > 1:
         out.append("## By corpus\n")
         out.append(CAP_BY_CORPUS + "\n")
@@ -94,10 +94,10 @@ def single_report_md(
             out.append("| " + " | ".join(row) + " |")
         out.append("")
 
-    # By-facet: every facet present on the env's rows, uniformly (type/difficulty/… all facets).
-    facets = sorted({k for r in ws.rows.values() if r.env == env for k in r.dimensions})
+    # By-facet: every facet present on the arm_id's rows, uniformly (type/difficulty/… all facets).
+    facets = sorted({k for r in ws.rows.values() if r.arm_id == arm_id for k in r.dimensions})
     for facet in facets:
-        groups = by_facet(ws, env, facet, weights, schema)
+        groups = by_facet(ws, arm_id, facet, weights, schema)
         if not groups:
             continue
         out.append(f"## By {facet}\n")
@@ -130,12 +130,12 @@ def compare_report_md(
     # Ranking
     out.append("## Ranking (by weighted overall)\n")
     out.append(CAP_RANKING + "\n")
-    header = ["rank", "env", "overall", "n_scored/n_cases"] + qms + [f"{m}*" for m in mms]
+    header = ["rank", "arm_id", "overall", "n_scored/n_cases"] + qms + [f"{m}*" for m in mms]
     out.append("| " + " | ".join(header) + " |")
     out.append("| " + " | ".join(["---"] * len(header)) + " |")
     for i, s in enumerate(cmp.summaries, 1):
-        mark = " 🏆" if s.env == cmp.winner else ""
-        row = [str(i), s.env + mark, _f(s.overall), f"{s.n_scored}/{s.n_cases}"]
+        mark = " 🏆" if s.arm_id == cmp.winner else ""
+        row = [str(i), s.arm_id + mark, _f(s.overall), f"{s.n_scored}/{s.n_cases}"]
         row += [_f(s.per_metric.get(m)) for m in qms]
         row += [_measure_cell(s.per_measure.get(m)) for m in mms]
         out.append("| " + " | ".join(row) + " |")
@@ -147,14 +147,14 @@ def compare_report_md(
         out.append(line + "\n")
 
     # Per-case deltas (case_id union; missing = —, never 0)
-    envs, table = per_case_deltas(ws, weights)
+    arms, table = per_case_deltas(ws, weights)
     out.append("## Per-case overall (Δ = best − worst)\n")
     out.append(CAP_PER_CASE + "\n")
-    header = ["case_id"] + envs + ["Δ"]
+    header = ["case_id"] + arms + ["Δ"]
     out.append("| " + " | ".join(header) + " |")
     out.append("| " + " | ".join(["---"] * len(header)) + " |")
-    for case_id, per_env in table.items():
-        vals = [per_env[e] for e in envs]
+    for case_id, per_arm in table.items():
+        vals = [per_arm[e] for e in arms]
         present = [v for v in vals if v is not None]
         delta = _f(max(present) - min(present)) if len(present) >= 2 else MISSING
         out.append("| " + " | ".join([case_id] + [_f(v) for v in vals] + [delta]) + " |")
@@ -165,7 +165,7 @@ def compare_report_md(
 def results_csv(ws: Worksheet, weights: dict[str, float]) -> str:
     """Flat scalar projection of the table for human / spreadsheet review.
 
-    One row per (env × case) — ``env`` is the comparison variant, so a reviewer
+    One row per (arm_id × case) — ``arm_id`` is the comparison variant, so a reviewer
     pivots/filters by it in Excel. Columns are laid out in review order: the
     classification facets (``difficulty`` / ``type`` / …) + ``query`` + ``answer``
     (``response``) + ``ground_truth`` up front, then each quality metric as a
@@ -184,9 +184,9 @@ def results_csv(ws: Worksheet, weights: dict[str, float]) -> str:
         metric_cols += [m, f"{m}__judgement"]
     buf = io.StringIO()
     cols = (
-        # NOTE: keep `env,corpus,case_id,<facets>,query` as the contiguous leading block
+        # NOTE: keep `arm_id,corpus,case_id,<facets>,query` as the contiguous leading block
         # — review tooling/tests key off this prefix.
-        ["env", "corpus", "case_id", *facet_keys, "query", "answer", "ground_truth"]
+        ["arm_id", "corpus", "case_id", *facet_keys, "query", "answer", "ground_truth"]
         + metric_cols
         + ["weighted_overall"]
         + [f"{m}" for m in mms]
@@ -196,7 +196,7 @@ def results_csv(ws: Worksheet, weights: dict[str, float]) -> str:
     w.writeheader()
     for r in ws.rows.values():
         rec: dict = {
-            "env": r.env,
+            "arm_id": r.arm_id,
             "corpus": r.corpus,
             "case_id": r.case_id,
             "query": r.query,
@@ -223,7 +223,7 @@ def results_csv(ws: Worksheet, weights: dict[str, float]) -> str:
 
 def digest_csv(ws: Worksheet, weights: dict[str, float]) -> str:
     """Slim, eyeball-friendly projection: query + answer + each quality metric score +
-    weighted_overall, one row per (env × case).
+    weighted_overall, one row per (arm_id × case).
 
     The readable middle ground between ``results.csv`` (wide: facets, ``__judgement``
     rationales, measures, provenance ids) and ``report.md`` (aggregated pivots, no
@@ -233,12 +233,12 @@ def digest_csv(ws: Worksheet, weights: dict[str, float]) -> str:
     """
     qms = quality_metrics(ws)
     buf = io.StringIO()
-    cols = ["env", "corpus", "case_id", "query", "answer", "weighted_overall", *qms]
+    cols = ["arm_id", "corpus", "case_id", "query", "answer", "weighted_overall", *qms]
     w = csv.DictWriter(buf, fieldnames=cols)
     w.writeheader()
     for r in ws.rows.values():
         rec: dict = {
-            "env": r.env,
+            "arm_id": r.arm_id,
             "corpus": r.corpus,
             "case_id": r.case_id,
             "query": r.query,
@@ -263,7 +263,7 @@ def failures_csv(ws: Worksheet, weights: dict[str, float]) -> str:
     metric_cols: list[str] = []
     for m in qms:
         metric_cols += [m, f"{m}__judgement"]
-    cols = ["env", "corpus", "case_id", "query", "answer", "weighted_overall", "no_answer"]
+    cols = ["arm_id", "corpus", "case_id", "query", "answer", "weighted_overall", "no_answer"]
     cols += metric_cols
     w = csv.DictWriter(buf, fieldnames=cols)
     w.writeheader()
@@ -274,7 +274,7 @@ def failures_csv(ws: Worksheet, weights: dict[str, float]) -> str:
         if not (no_answer or zero):
             continue  # passed (no answer-less row, no 0-score) → not a triage case
         rec: dict = {
-            "env": r.env,
+            "arm_id": r.arm_id,
             "corpus": r.corpus,
             "case_id": r.case_id,
             "query": r.query,

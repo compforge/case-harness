@@ -93,18 +93,18 @@ def write_reports(
     (exp_dir / "results_digest.csv").write_text(digest_csv(ws, weights), encoding="utf-8")
     # triage companion: only the no-answer / any-0-score rows, with judgements (the why)
     (exp_dir / "results_failures.csv").write_text(failures_csv(ws, weights), encoding="utf-8")
-    envs = sorted({r.env for r in ws.rows.values()})
-    # Single env → a flat report.md. Multiple envs → a report/ folder (the folder earns
-    # its keep only when there's a comparison + one file per env).
-    if len(envs) <= 1:
-        env = envs[0] if envs else "default"
+    arms = sorted({r.arm_id for r in ws.rows.values()})
+    # Single arm_id → a flat report.md. Multiple arms → a report/ folder (the folder earns
+    # its keep only when there's a comparison + one file per arm_id).
+    if len(arms) <= 1:
+        arm_id = arms[0] if arms else "default"
         out = exp_dir / "report.md"
         out.write_text(
-            single_report_md(ws, env, weights, schema, generated_at, desc), encoding="utf-8"
+            single_report_md(ws, arm_id, weights, schema, generated_at, desc), encoding="utf-8"
         )
         # HTML twin (sortable tables + score heat + metric-header tooltips); fully offline.
         (exp_dir / "report.html").write_text(
-            single_report_html(ws, env, weights, schema, generated_at, desc, mdesc),
+            single_report_html(ws, arm_id, weights, schema, generated_at, desc, mdesc),
             encoding="utf-8",
         )
         return out
@@ -116,12 +116,12 @@ def write_reports(
     (report_dir / "comparison.html").write_text(
         compare_report_html(ws, weights, schema, generated_at, desc, mdesc), encoding="utf-8"
     )
-    for env in envs:
-        (report_dir / f"{env}.md").write_text(
-            single_report_md(ws, env, weights, schema, generated_at, desc), encoding="utf-8"
+    for arm_id in arms:
+        (report_dir / f"{arm_id}.md").write_text(
+            single_report_md(ws, arm_id, weights, schema, generated_at, desc), encoding="utf-8"
         )
-        (report_dir / f"{env}.html").write_text(
-            single_report_html(ws, env, weights, schema, generated_at, desc, mdesc),
+        (report_dir / f"{arm_id}.html").write_text(
+            single_report_html(ws, arm_id, weights, schema, generated_at, desc, mdesc),
             encoding="utf-8",
         )
     return report_dir

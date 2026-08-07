@@ -47,9 +47,7 @@ class DiscoverConfig:
 @dataclass(frozen=True)
 class DiscoveredCase:
     case: Case
-    handler_qualname: (
-        str  # for traceability ("api.rest.v1.endpoints.note.create_note")
-    )
+    handler_qualname: str  # for traceability ("api.rest.v1.endpoints.note.create_note")
     spec_text: str | None
     case_hash: str  # joint hash of case content + @spec text
     target_script_path: Path

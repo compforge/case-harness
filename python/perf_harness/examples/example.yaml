@@ -80,7 +80,7 @@ observe:                          # 资源观测：self + 下游同一形状；�
   #     - top
 
 observe_interval_s: 5
-# cooldown_s: 300                 # deactivate 后继续采样；默认不进汇总/SLO，window: cooldown 可门禁
+# cooldown_s: 300                 # deactivate 后继续采样；window: {kind: cooldown} 可门禁
 runs_dir: ./runs                  # each run → runs/example-sizing/<run_id>/
 
 # slo:                            # run 级门（三态，skip≠pass）→ CI 退出码 + SLO-aware 容量

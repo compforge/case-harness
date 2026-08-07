@@ -68,36 +68,6 @@ class Schedule:
     def peak_level(self) -> float:
         return max([self.start_level, *(s.to_level for s in self.stages)])
 
-    @property
-    def is_multi_stage(self) -> bool:
-        """True for stepped/spike shapes (>1 hold) — the trial's ``overall`` then
-        mixes load levels, so the report should pivot per-stage instead."""
-        return sum(1 for s in self.stages if s.kind == "hold") > 1
-
-    def stage_label(self, t: float) -> str:
-        """Label of the stage active at elapsed ``t`` (for per-stage attribution)."""
-        clock = 0.0
-        for s in self.stages:
-            if t < clock + s.over_s:
-                return s.label
-            clock += s.over_s
-        return self.stages[-1].label if self.stages else "?"
-
-    def stage_durations(self, after_s: float = 0.0) -> dict[str, float]:
-        """Seconds spent at each stage label, counting only time past ``after_s``
-        (same-label stages sum, e.g. a spike's two baseline holds). This is the
-        per-stage throughput denominator: a stage covered (wholly or partly) by
-        the warmup window contributes only its post-warmup portion, so its RPS
-        isn't underestimated by dividing post-warmup outcomes over the full span."""
-        out: dict[str, float] = {}
-        clock = 0.0
-        for s in self.stages:
-            start, end = clock, clock + s.over_s
-            eff = max(0.0, end - max(start, after_s))
-            out[s.label] = out.get(s.label, 0.0) + eff
-            clock = end
-        return out
-
     def intensity(self, t: float) -> float:
         """Target intensity at elapsed ``t`` seconds into the trial.
 
@@ -189,7 +159,7 @@ class LoadProfile:
     ``breaker_min_n`` requests have been sent and their cumulative error rate
     (judged failures ÷ sent, INCLUDING the warmup window — it's a safety net, not a
     measurement) reaches this fraction, the driver stops issuing new load, lets
-    in-flight requests drain, and ends the trial early (``TrialResult.aborted``).
+    in-flight requests drain, and ends the trial early (``TrialRecord.stop.early``).
     Use it to avoid hammering a struggling Subject (e.g. a dev pod) for the full
     steady window once it's clearly failing. Applies to both open and closed.
 

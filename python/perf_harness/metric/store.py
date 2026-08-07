@@ -1,6 +1,6 @@
 """MetricStore — the one addressable read face over a run's trials.
 
-A run is a response surface: ``metric = f(resources, load, slice)``. The store IS
+A run is a response surface: ``metric = f(Arm, Window, slice)``. The store IS
 that surface as an index — every report/SLO-visible number is addressable
 ``<family>{labels}.<stat>`` and resolved here, regardless of which side
 (``request`` / ``resource``) it lives on or how it was produced.
@@ -16,9 +16,9 @@ TSDB vs PromQL), so the boundary is:
     indirection, no divergence to prevent).
 
 ``query`` returns ``Read`` = ``float | Missing`` — absence is a value, not a bare
-``None``, so an SLO maps it to *skipped* (never silently to pass). service / facet /
-stage are all just labels; the resolver routes on them (``{service=…}`` → the
-trial-global resource metric; a facet/stage label → that request slice; none → overall).
+``None``, so an SLO maps it to *skipped* (never silently to pass). Entity dimensions
+such as service and facet remain metric labels; time is selected separately with a
+``Window`` rather than hidden in a label.
 
 The builtin descriptors + the request-slice projection live here too (they ARE the
 metric layer); ``slo.py`` and ``config.py`` import them from here.
@@ -35,10 +35,8 @@ from perf_harness.metric import (
     ScalarSummary,
     parse_ref,
     resolve,
-    series_id,
 )
-from perf_harness.metric.reduce import time_series_summary
-from perf_harness.model import RequestStats, TrialResult
+from perf_harness.model import RequestStats, TrialRecord, Window
 
 # builtin request-side metric families (aggregated from judged Outcomes) — always
 # present, registered so an SLO may gate them and the report can describe them.
@@ -124,15 +122,15 @@ def slice_summaries(sl: RequestStats) -> dict[str, MetricSummary]:
 
 
 class MetricStore:
-    """Addressable read face over a run's trials (see module docstring)."""
+    """Addressable read face over Trial Windows (see module docstring)."""
 
-    def __init__(self, trials: list[TrialResult]) -> None:
+    def __init__(self, trials: list[TrialRecord]) -> None:
         self._trials = trials
         self._families: dict[str, MetricFamily] = {}
-        for t in trials:
-            self._families.update(t.metrics)
+        for trial in trials:
+            self._families.update(trial.metrics)
 
-    def rows(self) -> list[TrialResult]:
+    def rows(self) -> list[TrialRecord]:
         return self._trials
 
     def families(self) -> dict[str, MetricFamily]:
@@ -141,112 +139,63 @@ class MetricStore:
     def family(self, name: str) -> MetricFamily | None:
         return self._families.get(name)
 
-    def query(self, trial: TrialResult, ref: str) -> Read:
-        """Resolve a metric ref on one trial → its value, or a ``Missing`` (with reason).
-
-        ``service`` label → the trial-global resource metric; ``stage`` / a facet
-        label → that request slice; no labels → overall (which also exposes the
-        unlabeled resource metrics). An undotted ``name`` is a builtin RequestStats
-        alias (``p99_ms`` / ``error_rate`` / …)."""
+    def query(self, trial: TrialRecord, ref: str, window: Window | None = None) -> Read:
+        """Resolve a metric ref inside one Window; measurement is the default."""
+        window = window or trial.measurement
         name, labels, stat = parse_ref(ref)
         family = trial.metrics.get(name) or self._families.get(name)
         if family is not None and family.side == "resource":
             if stat is None:
                 return Missing("no_data")
-            val = resolve(trial.probe_metrics, ref)
-            if val is not None:
-                return val
+            value = resolve(window.probe_metrics, ref)
+            if value is not None:
+                return value
             return self._resource_missing(trial, name, labels)
-        sl = self._request_slice(trial, labels)
-        if sl is None:
+        request = self._request_slice(window, labels)
+        if request is None:
             return Missing("no_slice")
-        if stat is None:  # undotted builtin RequestStats field
-            v = getattr(sl, name, None)
-            return float(v) if v is not None else Missing("no_data")
-        summaries = slice_summaries(sl)
-        if not labels:  # overall also exposes the trial-global (unlabeled) resource metrics
-            summaries = {**trial.probe_metrics, **summaries}
-        v = resolve(summaries, f"{name}.{stat}")
-        return v if v is not None else Missing("no_data")
-
-    def query_window(self, trial: TrialResult, ref: str, *, start_s: float) -> Read:
-        """Resolve a resource metric from raw samples at/after ``start_s``.
-
-        This is the same address and reducer used by the measurement summary, but
-        against a different time window. Request distributions and derived scalars
-        have no raw time-sampled series and are rejected at config time.
-        """
-        name, labels, stat = parse_ref(ref)
-        family = trial.metrics.get(name) or self._families.get(name)
-        if family is None or family.side != "resource" or stat is None:
-            return Missing("no_data")
-        health_labels = {"service": labels["service"]} if "service" in labels else {}
-        health_sid = series_id(f"{name.split('.', 1)[0]}.up", health_labels)
-        health = trial.series.get(health_sid)
-        health_samples = (
-            [sample for sample in health.samples if sample.t >= start_s] if health else []
-        )
-        if not health_samples or any(sample.value <= 0 for sample in health_samples):
-            return Missing("probe_error")
-        raw = trial.series.get(series_id(name, labels))
-        if raw is None:
-            return self._resource_missing(trial, name, labels)
-        samples = [sample for sample in raw.samples if sample.t >= start_s]
-        # A labeled series may disappear while its probe still succeeds. Requiring
-        # a value on the probe's final cooldown tick prevents `.last` from reading a
-        # stale pre-scale-down sample as a successful final state.
-        if not samples or samples[-1].t < health_samples[-1].t:
-            return Missing("probe_error")
-        summary = time_series_summary(samples, family.value_kind)
-        if summary is None:
-            return Missing("no_data")
-        value = resolve({series_id(name, labels): summary}, ref)
+        if stat is None:
+            value = getattr(request, name, None)
+            return float(value) if value is not None else Missing("no_data")
+        summaries = slice_summaries(request)
+        if not labels:
+            summaries = {**window.probe_metrics, **summaries}
+        value = resolve(summaries, f"{name}.{stat}")
         return value if value is not None else Missing("no_data")
 
-    def summary(self, trial: TrialResult, sid: str) -> MetricSummary | None:
-        """The typed summary for a concrete series id (no stat) on a trial, or None —
-        e.g. ``top.cpu_m{service="chat"}`` → that GaugeSummary (with its caveats)."""
+    def summary(
+        self, trial: TrialRecord, sid: str, window: Window | None = None
+    ) -> MetricSummary | None:
+        window = window or trial.measurement
         name, labels, _ = parse_ref(sid)
         if "service" in labels:
-            return trial.probe_metrics.get(sid)
-        sl = self._request_slice(trial, labels)
-        if sl is None:
-            return None
-        return slice_summaries(sl).get(name)
+            return window.probe_metrics.get(sid)
+        request = self._request_slice(window, labels)
+        return slice_summaries(request).get(name) if request is not None else None
 
-    def pivot(self, trial: TrialResult, family: str, by: str) -> dict[str, MetricSummary]:
-        """Group a family's series by the single label ``by`` → ``{label_value: summary}``.
-
-        Today used for the resource ``by="service"`` pivot — the request side pivots
-        by_facet/by_stage on ``RequestStats`` directly. Same "group by label" idea
-        either way."""
+    def pivot(
+        self, trial: TrialRecord, family: str, by: str, window: Window | None = None
+    ) -> dict[str, MetricSummary]:
+        """Group one Window's resource series by a label."""
+        window = window or trial.measurement
         out: dict[str, MetricSummary] = {}
-        for sid, summ in trial.probe_metrics.items():
+        for sid, summary in window.probe_metrics.items():
             name, labels, _ = parse_ref(sid)
             if name != family or by not in labels:
                 continue
-            # the common case has exactly the `by` label (one series per service). A
-            # fan-out probe adds more labels (per-pod → {service, pod}); key the column by
-            # `by` plus the remaining label values so the pods stay distinct, e.g.
-            # "chat/chat-abc". Single-label series are unchanged ("chat").
-            extra = [v for k, v in sorted(labels.items()) if k != by]
-            out["/".join([labels[by], *extra])] = summ
+            extra = [value for key, value in sorted(labels.items()) if key != by]
+            out["/".join([labels[by], *extra])] = summary
         return out
 
-    def _request_slice(self, trial: TrialResult, labels: dict[str, str]) -> RequestStats | None:
-        """The request-side slice a ref's labels point at: no labels → overall;
-        ``{stage:…}`` → a schedule stage; a single facet ``{key:val}`` → that facet
-        slice. None if absent on this trial (→ a Missing/no_slice)."""
+    @staticmethod
+    def _request_slice(window: Window, labels: dict[str, str]) -> RequestStats | None:
         if not labels:
-            return trial.overall
-        if "stage" in labels:
-            return trial.by_stage.get(labels["stage"])
-        ((key, val),) = labels.items()  # a single facet key=value
-        return trial.by_facet.get(key, {}).get(val)
+            return window.request
+        ((key, value),) = labels.items()
+        return window.by_facet.get(key, {}).get(value)
 
     @staticmethod
-    def _resource_missing(trial: TrialResult, name: str, labels: dict[str, str]) -> Missing:
-        """Distinguish a broken producing probe from an absent resource series."""
+    def _resource_missing(trial: TrialRecord, name: str, labels: dict[str, str]) -> Missing:
         service = labels.get("service")
         if service is not None:
             probe_id = f"{name.split('.', 1)[0]}.{service}"

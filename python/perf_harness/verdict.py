@@ -13,21 +13,24 @@ from pathlib import Path
 
 from harness_common import verdict as _v
 
-from perf_harness.model import Run, SloCheck, TrialResult
+from perf_harness.model import Run, SloCheck, TrialRecord
 
 
-def _check_verdict(c: SloCheck) -> _v.CheckVerdict:
+def _check_verdict(c: SloCheck, arm_id: str) -> _v.CheckVerdict:
     """One SLO check → a CheckVerdict. ``skipped`` iff the metric's slice had no value
     (``observed is None``) — a skip is not a pass; otherwise the check's own state."""
     a = c.assertion
     name = f"{a.metric} {a.op} {a.threshold}"
-    window = getattr(a, "window", "measurement")
-    if window != "measurement":
-        name += f" [{window}]"
-    if a.level is not None:
-        name += f" @level={a.level}"
+    name += f" [window={c.window_id or a.window.kind}]"
     status = "skipped" if c.observed is None else c.state
-    return _v.CheckVerdict(name=name, status=status, metric=a.metric, observed=c.observed)
+    return _v.CheckVerdict(
+        name=name,
+        status=status,
+        metric=a.metric,
+        observed=c.observed,
+        arm_id=arm_id,
+        window_id=c.window_id,
+    )
 
 
 def _build(run: Run) -> _v.RunVerdict:
@@ -40,10 +43,13 @@ def _build(run: Run) -> _v.RunVerdict:
     early = [t for t in run.trials if t.stop.early]
     n_pass = sum(1 for c in raw if c.state == "pass")
     n_fail = sum(1 for c in raw if c.state == "fail" and c.observed is not None)
+    cooldown_skips = [
+        c for c in raw if c.state == "skipped" and c.assertion.window.kind == "cooldown"
+    ]
 
     if not run.trials:
         status = "skipped"
-    elif early or n_fail:
+    elif early or n_fail or cooldown_skips:
         status = "fail"
     elif n_pass:
         status = "pass"
@@ -53,6 +59,8 @@ def _build(run: Run) -> _v.RunVerdict:
         reason = _early_stop_reason(early)
     elif n_fail:
         reason = _fail_reason([c for c in raw if c.state == "fail" and c.observed is not None])
+    elif cooldown_skips:
+        reason = f"{len(cooldown_skips)} cooldown SLO skipped; recovery was not observed"
     else:
         reason = None
 
@@ -61,7 +69,7 @@ def _build(run: Run) -> _v.RunVerdict:
         run.experiment,
         run.run_id,
         [],
-        checks=[_check_verdict(c) for c in raw],
+        checks=[_check_verdict(c, trial.arm.id) for trial in run.trials for c in trial.slo],
         status=status,
         reason=reason,
         artifact_paths={"run": "run.json", "report": "report.md"},
@@ -72,13 +80,12 @@ def _build(run: Run) -> _v.RunVerdict:
 def _fail_reason(failed: list[SloCheck]) -> str:
     first = failed[0]
     a = first.assertion
-    slo_window = getattr(a, "window", "measurement")
-    window = f" [{slo_window}]" if slo_window != "measurement" else ""
+    window = f" [{first.window_id or a.window.kind}]"
     detail = f"{a.metric}{window} {a.op} {a.threshold} (observed {first.observed})"
     return f"{len(failed)} SLO failed; first — {detail}"
 
 
-def _early_stop_reason(trials: list[TrialResult]) -> str:
+def _early_stop_reason(trials: list[TrialRecord]) -> str:
     stop = trials[0].stop
     detail = stop.reason
     if stop.snapshot is not None:

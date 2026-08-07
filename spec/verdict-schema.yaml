@@ -93,6 +93,9 @@ properties:
         case_id:
           type: string
           description: 对齐 canonical case 的 id（与 case-schema.yaml 同义）
+        arm_id:
+          type: string
+          description: 可选，该 case 所属实验 Arm 的跨产物对齐键
         status:
           type: string
           enum: [pass, fail, error, skipped]
@@ -130,6 +133,12 @@ properties:
         name:
           type: string
           description: 该断言的稳定标识，如 "p99_ms lte 800" / "duration_ms{difficulty=hard}.p99 lte 800"
+        arm_id:
+          type: string
+          description: 可选，该 check 所属实验 Arm 的跨产物对齐键
+        window_id:
+          type: string
+          description: 可选，perf check 所属 Trial Window 的唯一标识
         status:
           type: string
           enum: [pass, fail, error, skipped]

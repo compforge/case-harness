@@ -25,12 +25,12 @@ async def test_facets_pivot_and_weighting():
     )
     r = (await Engine(experiment).run()).trials[0]
 
-    assert r.overall.n > 0
-    assert "difficulty" in r.by_facet
-    by = r.by_facet["difficulty"]
+    assert r.measurement.request.n > 0
+    assert "difficulty" in r.measurement.by_facet
+    by = r.measurement.by_facet["difficulty"]
     assert set(by) <= {"simple", "complex"}
     # every outcome is tagged → the pivot partitions the whole trial
-    assert sum(s.n for s in by.values()) == r.overall.n
+    assert sum(s.n for s in by.values()) == r.measurement.request.n
     # both present with enough fires; weight 80/20 → more simple; ms 20 > 2 → higher p50
     assert "simple" in by and "complex" in by
     assert by["simple"].n > by["complex"].n
@@ -61,17 +61,22 @@ async def test_open_loop_drops_are_separate_not_latency_samples():
         cases=[Case(id="x", input={}, facets={"difficulty": "simple"})],
     )
     r = (await Engine(experiment).run()).trials[0]
-    assert r.overall.n_dropped > 0  # saturation happened
-    assert r.overall.n > 0  # some requests were actually sent
+    assert r.measurement.request.n_dropped > 0  # saturation happened
+    assert r.measurement.request.n > 0  # some requests were actually sent
     # drops are out of the latency histogram → fired ~50ms requests set the
     # percentile, not the 0ms drops (the coordinated-omission bug this fixes)
-    assert r.overall.p50_ms >= 40
+    assert r.measurement.request.p50_ms >= 40
     # client_saturated is a drop, not a server error
-    assert "client_saturated" not in r.overall.error_breakdown
+    assert "client_saturated" not in r.measurement.request.error_breakdown
     # drops attributed to the Case's facet → per-facet sent + dropped both reconcile
-    assert "difficulty" in r.by_facet
-    assert sum(s.n for s in r.by_facet["difficulty"].values()) == r.overall.n
-    assert sum(s.n_dropped for s in r.by_facet["difficulty"].values()) == r.overall.n_dropped
+    assert "difficulty" in r.measurement.by_facet
+    assert (
+        sum(s.n for s in r.measurement.by_facet["difficulty"].values()) == r.measurement.request.n
+    )
+    assert (
+        sum(s.n_dropped for s in r.measurement.by_facet["difficulty"].values())
+        == r.measurement.request.n_dropped
+    )
 
 
 async def test_no_cases_is_anonymous_no_facets():
@@ -82,5 +87,5 @@ async def test_no_cases_is_anonymous_no_facets():
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],
     )
     r = (await Engine(experiment).run()).trials[0]
-    assert r.overall.n > 0
-    assert r.by_facet == {}
+    assert r.measurement.request.n > 0
+    assert r.measurement.by_facet == {}

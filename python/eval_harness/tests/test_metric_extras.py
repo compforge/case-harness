@@ -81,7 +81,7 @@ class _Judge(LLMJudge):
 
 
 def _score(client):
-    return asyncio.run(_Judge(client=client).score(Sample(case_id="q", env="e", query="x")))
+    return asyncio.run(_Judge(client=client).score(Sample(case_id="q", arm_id="e", query="x")))
 
 
 def test_llm_judge_parses_score():

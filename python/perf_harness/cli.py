@@ -81,9 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"  → {paths['run_dir']}")
     for r in run_result.trials:
-        o = r.overall
+        o = r.measurement.request
         print(
-            f"  {r.resources.label():<14} {r.load.label():<8} "
+            f"  {r.arm.resources.label():<14} {r.arm.load.label():<8} "
             f"rps={o.throughput_rps:6.1f} err={o.error_rate * 100:5.1f}% "
             f"p99={o.p99_ms:6.0f}ms"
         )

@@ -1,10 +1,12 @@
-"""Report — overall summary (front) + per-facet breakdown + raw series (detail).
+"""Report — measurement summary, Window/facet breakdown, and raw series.
 
-Artifacts (two layers, three slices):
-  - ``summary.csv`` + report.md §1: one row per Trial — overall request-side
+Artifacts:
+  - ``summary.csv`` + report.md §1: one row per Trial — measurement request-side
     stats (from Outcomes) beside resource-side stats (from Probes).
   - ``by_facet.csv`` + report.md §2: per Trial, the marginal pivot by each facet
     (slice p50/95/99 / err% / throughput by difficulty, by kb, …).
+  - ``windows.csv`` + report.md §2b: request and resource summaries reduced on the
+    same observed Window boundaries.
   - ``timeseries.csv``: long ``(trial, series, t, value)`` for plotting.
 
 The md leads with the overall summary and flags the knee — the first Load level
@@ -46,7 +48,7 @@ from perf_harness.metric import (
     series_id,
     split_series,
 )
-from perf_harness.model import RequestStats, Run, Series, TrialResult
+from perf_harness.model import RequestStats, Run, Series, SloCheck, TrialRecord
 from perf_harness.report.palette import family_color as _family_color
 from perf_harness.runio import write_run_data
 from perf_harness.slo import slo_aware_capacity
@@ -75,8 +77,17 @@ _STAT_TIPS = {
 _SATURATION_FLAG = 0.01
 
 
-def _trial_id(r: TrialResult) -> str:
+def _trial_id(r: TrialRecord) -> str:
     return r.label()  # the model's stable trial id — keys the raw artifacts too
+
+
+def _slo_window_suffix(check: SloCheck) -> str:
+    window = check.window_id or check.assertion.window.kind
+    return "" if window == "measurement" else f" [window={window}]"
+
+
+def _blocking_slo_skip(check: SloCheck) -> bool:
+    return check.skipped and check.assertion.window.kind == "cooldown"
 
 
 def _err_top(s: RequestStats) -> str:
@@ -86,9 +97,9 @@ def _err_top(s: RequestStats) -> str:
     return f"{kind}({cnt})"
 
 
-def _stop_brief(r: TrialResult) -> str:
+def _stop_brief(r: TrialRecord) -> str:
     """One-line 'why it stopped early' from the TrialStop — reason + the trip SNAPSHOT
-    (not post-warmup ``overall``) + the interrupted census. Used by md and html."""
+    (not the measurement aggregate) + the interrupted census. Used by md and html."""
     s = r.stop
     if s.snapshot:
         snap = s.snapshot
@@ -99,8 +110,8 @@ def _stop_brief(r: TrialResult) -> str:
     return f"{_trial_id(r)} [{s.reason}]: {detail}{cut}"
 
 
-def _key_cells(r: TrialResult) -> list[str]:
-    return [r.resources.label(), r.load.model, f"{r.load.schedule.peak_level:g}"]
+def _key_cells(r: TrialRecord) -> list[str]:
+    return [r.arm.resources.label(), r.arm.load.model, f"{r.arm.load.schedule.peak_level:g}"]
 
 
 def _stat_cells(s: RequestStats) -> list[str]:
@@ -117,8 +128,8 @@ def _stat_cells(s: RequestStats) -> list[str]:
     ]
 
 
-def _probe_columns(results: list[TrialResult], *, labeled: bool | None = None) -> list[str]:
-    """Flat ``<series>.<stat>`` columns for the trial-global resource metrics,
+def _probe_columns(results: list[TrialRecord], *, labeled: bool | None = None) -> list[str]:
+    """Flat ``<series>.<stat>`` columns for measurement resource metrics,
     expanded from each trial's typed ``probe_metrics``. ``labeled`` filters by
     whether the series carries labels: ``False`` → only unlabeled (e.g. ``client.*``,
     for the §1 table); ``None`` → all (the CSV). Service-labeled metrics
@@ -126,7 +137,7 @@ def _probe_columns(results: list[TrialResult], *, labeled: bool | None = None) -
     as flat columns."""
     cols: list[str] = []
     for r in results:
-        for k in flatten(r.probe_metrics):
+        for k in flatten(r.measurement.probe_metrics):
             if labeled is not None and ("{" in k) != labeled:
                 continue
             if k not in cols:
@@ -134,16 +145,26 @@ def _probe_columns(results: list[TrialResult], *, labeled: bool | None = None) -
     return cols
 
 
-def _probe_cells(r: TrialResult, probe_cols: list[str]) -> list[str]:
-    flat = flatten(r.probe_metrics)
+def _probe_cells(r: TrialRecord, probe_cols: list[str]) -> list[str]:
+    flat = flatten(r.measurement.probe_metrics)
     return [_fmt(flat.get(c)) for c in probe_cols]
 
 
-def _metric_keys(results: list[TrialResult]) -> list[str]:
+def _window_probe_columns(results: list[TrialRecord]) -> list[str]:
+    columns: list[str] = []
+    for trial in results:
+        for window in trial.windows:
+            for column in flatten(window.probe_metrics):
+                if column not in columns:
+                    columns.append(column)
+    return columns
+
+
+def _metric_keys(results: list[TrialRecord]) -> list[str]:
     """Ordered union of per_request metric keys across trials (ttft_ms / first_…)."""
     keys: list[str] = []
     for r in results:
-        for k in r.overall.metrics:
+        for k in r.measurement.request.metrics:
             if k not in keys:
                 keys.append(k)
     return keys
@@ -166,7 +187,7 @@ def _metric_cells(stats: RequestStats, keys: list[str]) -> list[str]:
     return cells
 
 
-def _metric_registry(results: list[TrialResult]) -> dict[str, MetricFamily]:
+def _metric_registry(results: list[TrialRecord]) -> dict[str, MetricFamily]:
     """Union of every trial's unified metric registry (families, all kinds), keyed by
     family name."""
     reg: dict[str, MetricFamily] = {}
@@ -217,7 +238,7 @@ def _display_metric_cells(stats: RequestStats, keys: list[str]) -> list[str]:
     return out
 
 
-def _display_probe_cols(results: list[TrialResult]) -> list[str]:
+def _display_probe_cols(results: list[TrialRecord]) -> list[str]:
     """One column per UNLABELED probe series (labeled/service ones live in the
     §3/§4 per-service charts), not the
     flat ``<series>.<stat>`` explosion — e.g. one ``client.inflight`` col, not three.
@@ -225,7 +246,7 @@ def _display_probe_cols(results: list[TrialResult]) -> list[str]:
     silent; outages surface via §4/validity) — the CSV keeps them."""
     cols: list[str] = []
     for r in results:
-        for sid in r.probe_metrics:
+        for sid in r.measurement.probe_metrics:
             if "{" in sid or sid in cols:  # unlabeled only, dedup
                 continue
             if _series_family(sid).endswith(".up"):
@@ -234,10 +255,10 @@ def _display_probe_cols(results: list[TrialResult]) -> list[str]:
     return cols
 
 
-def _display_probe_cells(r: TrialResult, cols: list[str]) -> list[str]:
+def _display_probe_cells(r: TrialRecord, cols: list[str]) -> list[str]:
     out: list[str] = []
     for sid in cols:
-        summ = r.probe_metrics.get(sid)
+        summ = r.measurement.probe_metrics.get(sid)
         if summ is None:
             out.append("-")
             continue
@@ -246,10 +267,10 @@ def _display_probe_cells(r: TrialResult, cols: list[str]) -> list[str]:
     return out
 
 
-def _key_layout(results: list[TrialResult]) -> tuple[list[tuple[str, str]], list[str]]:
+def _key_layout(results: list[TrialRecord]) -> tuple[list[tuple[str, str]], list[str]]:
     """Hoist key columns CONSTANT across all rows into a caption; the rest stay table
     columns. A single-constraint sweep then shows just ``level`` (the swept axis)."""
-    getters = {"constraint": lambda r: r.resources.label(), "model": lambda r: r.load.model}
+    getters = {"constraint": lambda r: r.arm.resources.label(), "model": lambda r: r.arm.load.model}
     consts: list[tuple[str, str]] = []
     var_cols: list[str] = []
     for col, g in getters.items():
@@ -262,17 +283,17 @@ def _key_layout(results: list[TrialResult]) -> tuple[list[tuple[str, str]], list
     return consts, var_cols
 
 
-def _key_cells_var(r: TrialResult, var_cols: list[str]) -> list[str]:
+def _key_cells_var(r: TrialRecord, var_cols: list[str]) -> list[str]:
     m = {
-        "constraint": r.resources.label(),
-        "model": r.load.model,
-        "level": f"{r.load.schedule.peak_level:g}",
+        "constraint": r.arm.resources.label(),
+        "model": r.arm.load.model,
+        "level": f"{r.arm.load.schedule.peak_level:g}",
     }
     return [m[c] for c in var_cols]
 
 
 def _display_col_tips(
-    results: list[TrialResult], metric_keys: list[str], probe_cols: list[str]
+    results: list[TrialRecord], metric_keys: list[str], probe_cols: list[str]
 ) -> dict[str, str]:
     """Header tooltips for the merged display columns (which stats the cell stacks)."""
     reg = _metric_registry(results)
@@ -383,7 +404,7 @@ def write_run(
 
 
 def write_report(
-    results: list[TrialResult],
+    results: list[TrialRecord],
     outdir: str,
     *,
     knee_err_rate: float = 0.05,
@@ -393,6 +414,7 @@ def write_report(
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)
     probe_cols = _probe_columns(results)  # CSV (flat, all series×stats); md/html merge per metric
+    window_probe_cols = _window_probe_columns(results)
     metric_keys = _metric_keys(results)  # per_request metrics (ttft / first_…)
     mcols = _metric_columns(metric_keys)
 
@@ -403,8 +425,8 @@ def write_report(
         for r in results:
             w.writerow(
                 _key_cells(r)
-                + _stat_cells(r.overall)
-                + _metric_cells(r.overall, metric_keys)
+                + _stat_cells(r.measurement.request)
+                + _metric_cells(r.measurement.request, metric_keys)
                 + _probe_cells(r, probe_cols)
             )
 
@@ -414,14 +436,57 @@ def write_report(
         w.writerow(["trial", "facet", "value", *_STAT_COLS, *mcols])
         for r in results:
             tid = _trial_id(r)
-            for key in sorted(r.by_facet):
-                for val in _sorted_values(key, list(r.by_facet[key]), facet_order):
-                    sl = r.by_facet[key][val]
+            for key in sorted(r.measurement.by_facet):
+                for val in _sorted_values(key, list(r.measurement.by_facet[key]), facet_order):
+                    sl = r.measurement.by_facet[key][val]
                     w.writerow([tid, key, val, *_stat_cells(sl), *_metric_cells(sl, metric_keys)])
-            # per-stage breakdown shares this long-format table under facet="stage"
-            for label in r.by_stage:
-                sl = r.by_stage[label]
-                w.writerow([tid, "stage", label, *_stat_cells(sl), *_metric_cells(sl, metric_keys)])
+
+    window_path = out / "windows.csv"
+    with window_path.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "trial",
+                "window_id",
+                "name",
+                "kind",
+                "start_s",
+                "end_s",
+                "complete",
+                "target_level",
+                *_STAT_COLS,
+                *mcols,
+                *window_probe_cols,
+            ]
+        )
+        for r in results:
+            for window in r.windows:
+                request_cells = (
+                    _stat_cells(window.request)
+                    if window.request is not None
+                    else [""] * len(_STAT_COLS)
+                )
+                metric_cells = (
+                    _metric_cells(window.request, metric_keys)
+                    if window.request is not None
+                    else [""] * len(mcols)
+                )
+                probe_values = flatten(window.probe_metrics)
+                w.writerow(
+                    [
+                        r.label(),
+                        window.id,
+                        window.name,
+                        window.kind,
+                        window.start_s,
+                        window.end_s,
+                        window.complete,
+                        window.target_level,
+                        *request_cells,
+                        *metric_cells,
+                        *(_fmt(probe_values.get(column)) for column in window_probe_cols),
+                    ]
+                )
 
     ts_path = out / "timeseries.csv"
     with ts_path.open("w", newline="") as f:
@@ -449,18 +514,19 @@ def write_report(
     return {
         "summary": str(summary_path),
         "by_facet": str(facet_path),
+        "windows": str(window_path),
         "timeseries": str(ts_path),
         "report": str(md_path),
         "report_html": str(html_path),
     }
 
 
-def _render_slo(lines: list[str], results: list[TrialResult]) -> None:
+def _render_slo(lines: list[str], results: list[TrialRecord]) -> None:
     """Run gate: trial completeness, SLO checks, and confirmed capacity."""
     early = [r for r in results if r.stop.early]
     if not any(r.slo for r in results) and not early:
         return
-    has_fail = bool(early) or any(c.failed for r in results for c in r.slo)
+    has_fail = bool(early) or any(c.failed or _blocking_slo_skip(c) for r in results for c in r.slo)
     has_skip = any(c.skipped for r in results for c in r.slo)
     lines.append("## Run 判定（trial 完整性 + SLO）")
     lines.append("")
@@ -481,16 +547,9 @@ def _render_slo(lines: list[str], results: list[TrialResult]) -> None:
             a = c.assertion
             thr = f"{a.threshold[0]}..{a.threshold[1]}" if a.op == "between" else a.threshold
             obs = "—" if c.observed is None else f"{c.observed:.2f}"
-            window = f" [{a.window}]" if a.window != "measurement" else ""
-            lines.append(f"  - {a.metric}{window} = {obs}（需 {a.op} {thr}）")
+            lines.append(f"  - {a.metric}{_slo_window_suffix(c)} = {obs}（需 {a.op} {thr}）")
     skipped = sorted(
-        {
-            c.assertion.metric
-            + (f" [{c.assertion.window}]" if c.assertion.window != "measurement" else "")
-            for r in results
-            for c in r.slo
-            if c.skipped
-        }
+        {c.assertion.metric + _slo_window_suffix(c) for r in results for c in r.slo if c.skipped}
     )
     if skipped:
         lines.append("")
@@ -501,21 +560,19 @@ def _render_slo(lines: list[str], results: list[TrialResult]) -> None:
     if any(r.slo for r in results):
         cap = slo_aware_capacity(results)
         lines.append("")
-        lines.append(
-            "**SLO-aware 容量**（单档满足全部 SLO；多 stage 满足对应 hold SLO + 全局资源 SLO）："
-        )
+        lines.append("**SLO-aware 容量**（完整 hold Window 内的全部匹配 SLO 均通过）：")
         for label, lvl in cap.items():
             lines.append(f"- `{label}`: {f'{lvl:g}' if lvl is not None else '—（无档达标）'}")
     lines.append("")
 
 
 def _build_doc(
-    results: list[TrialResult],
+    results: list[TrialRecord],
     metric_keys: list[str],
     knee_err_rate: float,
     facet_order: dict[str, list[str]] | None,
 ) -> Report:
-    """Map TrialResults into the neutral report IR — same content/order as ``_render_md``,
+    """Map TrialRecords into the neutral report IR — same content/order as ``_render_md``,
     but §3 carries plotted Probe series instead of a pointer to timeseries.csv."""
     subject = results[0].subject if results else "?"
     report = Report(title=f"perf report — {subject}", meta=[("subject", subject)])
@@ -523,7 +580,9 @@ def _build_doc(
     # Run gate: a partial trial fails before the three-state SLO rollup.
     early = [r for r in results if r.stop.early]
     if any(r.slo for r in results) or early:
-        has_fail = bool(early) or any(c.failed for r in results for c in r.slo)
+        has_fail = bool(early) or any(
+            c.failed or _blocking_slo_skip(c) for r in results for c in r.slo
+        )
         has_skip = any(c.skipped for r in results for c in r.slo)
         verdict = "FAIL ❌" if has_fail else ("PASS ✅（含 skipped）" if has_skip else "PASS ✅")
         sec = Section("Run 判定（trial 完整性 + SLO）", [Prose(verdict)])
@@ -542,14 +601,13 @@ def _build_doc(
                     f"{a.threshold[0]}..{a.threshold[1]}" if a.op == "between" else str(a.threshold)
                 )
                 obs = "—" if c.observed is None else f"{c.observed:.2f}"
-                metric = a.metric + (f" [{a.window}]" if a.window != "measurement" else "")
+                metric = a.metric + _slo_window_suffix(c)
                 fail_rows.append([_trial_id(r), metric, obs, a.op, thr])
         if fail_rows:
             sec.blocks.append(Table(["trial", "metric", "observed", "op", "threshold"], fail_rows))
         skipped = sorted(
             {
-                c.assertion.metric
-                + (f" [{c.assertion.window}]" if c.assertion.window != "measurement" else "")
+                c.assertion.metric + _slo_window_suffix(c)
                 for r in results
                 for c in r.slo
                 if c.skipped
@@ -578,8 +636,8 @@ def _build_doc(
     cols = var_cols + _DISPLAY_STAT_COLS + metric_keys + dprobe
     rows = [
         _key_cells_var(r, var_cols)
-        + _display_stat_cells(r.overall)
-        + _display_metric_cells(r.overall, metric_keys)
+        + _display_stat_cells(r.measurement.request)
+        + _display_metric_cells(r.measurement.request, metric_keys)
         + _display_probe_cells(r, dprobe)
         for r in results
     ]
@@ -592,7 +650,7 @@ def _build_doc(
     if consts:
         sec1.blocks.append(Prose("固定：" + " · ".join(f"`{k}={v}`" for k, v in consts)))
     sec1.blocks.append(Table(cols, rows, highlight=highlight, col_tips=tips))
-    if any(r.load.model == "closed" for r in results):
+    if any(r.arm.load.model == "closed" for r in results):
         sec1.blocks.append(
             Prose(
                 "闭环（closed）trial 的延迟百分位是 CO-biased"
@@ -602,15 +660,16 @@ def _build_doc(
         )
     if knees:
         knee_txt = "；".join(
-            f"{c}: 约 {r.load.label()} (err {r.overall.error_rate * 100:.1f}%, "
-            f"rps {r.overall.throughput_rps:.1f})"
+            f"{c}: 约 {r.arm.load.label()} (err {r.measurement.request.error_rate * 100:.1f}%, "
+            f"rps {r.measurement.request.throughput_rps:.1f})"
             for c, r in knees.items()
         )
         sec1.blocks.append(Prose(f"拐点（首个错误率越过阈值的档位）：{knee_txt}"))
-    saturated = [r for r in results if r.overall.drop_rate >= _SATURATION_FLAG]
+    saturated = [r for r in results if r.measurement.request.drop_rate >= _SATURATION_FLAG]
     if saturated:
         sat_txt = "；".join(
-            f"{_trial_id(r)}: drop {r.overall.drop_rate * 100:.1f}% ({r.overall.n_dropped} 未发出)"
+            f"{_trial_id(r)}: drop {r.measurement.request.drop_rate * 100:.1f}% "
+            f"({r.measurement.request.n_dropped} 未发出)"
             for r in saturated
         )
         sec1.blocks.append(
@@ -619,7 +678,7 @@ def _build_doc(
                 f"压力机蹭到 max_inflight）：{sat_txt}"
             )
         )
-    broke = [r for r in results if r.aborted]
+    broke = [r for r in results if r.stop.early]
     if broke:
         broke_txt = "；".join(_stop_brief(r) for r in broke)
         sec1.blocks.append(
@@ -632,46 +691,55 @@ def _build_doc(
 
     # §2 per-dimension breakdown ("facet" = a request dimension like difficulty / lang)
     sec2 = Section("2. 按维度拆（如 difficulty/lang）")
-    if not any(r.by_facet for r in results):
+    if not any(r.measurement.by_facet for r in results):
         sec2.blocks.append(Prose("（无分组维度；所有请求同质，无需拆）"))
     else:
         for r in results:
-            if not r.by_facet:
+            if not r.measurement.by_facet:
                 continue
-            for key in sorted(r.by_facet):
+            for key in sorted(r.measurement.by_facet):
                 facet_rows = [
                     [
                         val,
-                        *_display_stat_cells(r.by_facet[key][val]),
-                        *_display_metric_cells(r.by_facet[key][val], metric_keys),
+                        *_display_stat_cells(r.measurement.by_facet[key][val]),
+                        *_display_metric_cells(r.measurement.by_facet[key][val], metric_keys),
                     ]
-                    for val in _sorted_values(key, list(r.by_facet[key]), facet_order)
+                    for val in _sorted_values(key, list(r.measurement.by_facet[key]), facet_order)
                 ]
                 sec2.blocks.append(Prose(f"{_trial_id(r)} · {key}"))
                 sec2.blocks.append(Table(["value", *_DISPLAY_STAT_COLS, *metric_keys], facet_rows))
     report.sections.append(sec2)
 
-    # §2b per-stage breakdown
-    staged = [r for r in results if r.by_stage]
-    if staged:
-        sec2b = Section("2b. 按 stage 拆（多阶段 schedule 的容量曲线）")
+    # §2b observed Window breakdown
+    windowed = [r for r in results if any(w.kind in ("ramp", "hold") for w in r.windows)]
+    if windowed:
+        sec2b = Section("2b. 按 Window 拆（schedule 的实际观测边界）")
         sec2b.blocks.append(
             Prose(
-                "多阶段 trial 的 overall 是跨 stage 的 post-warmup 平均（混了不同负载档）；"
-                "容量结论看各 hold@ 桶，ramp→ 桶是过渡段。"
+                "Stage 是负载计划，Window 是请求与资源指标共同使用的实际时间切片；"
+                "容量只读取 complete 的 hold Window。"
             )
         )
-        for r in staged:
-            stage_rows = [
+        for r in windowed:
+            window_rows = [
                 [
-                    label,
-                    *_display_stat_cells(r.by_stage[label]),
-                    *_display_metric_cells(r.by_stage[label], metric_keys),
+                    window.id,
+                    window.name,
+                    window.kind,
+                    "yes" if window.complete else "no",
+                    *_display_stat_cells(window.request),
+                    *_display_metric_cells(window.request, metric_keys),
                 ]
-                for label in r.by_stage
+                for window in r.windows
+                if window.kind in ("ramp", "hold") and window.request is not None
             ]
             sec2b.blocks.append(Prose(_trial_id(r)))
-            sec2b.blocks.append(Table(["stage", *_DISPLAY_STAT_COLS, *metric_keys], stage_rows))
+            sec2b.blocks.append(
+                Table(
+                    ["window_id", "name", "kind", "complete", *_DISPLAY_STAT_COLS, *metric_keys],
+                    window_rows,
+                )
+            )
         report.sections.append(sec2b)
 
     # §3 response curves — metric vs LOAD LEVEL (the response surface's x axis), one
@@ -690,20 +758,20 @@ def _build_doc(
     return report
 
 
-def _curve_groups(results: list[TrialResult]) -> list[tuple[str, list[TrialResult]]]:
+def _curve_groups(results: list[TrialRecord]) -> list[tuple[str, list[TrialRecord]]]:
     """Resource-profile groups with ≥2 levels, each sorted by level — the sweeps that can
     be drawn as a curve (x = level)."""
-    groups: dict[str, list[TrialResult]] = {}
+    groups: dict[str, list[TrialRecord]] = {}
     for r in results:
-        groups.setdefault(r.resources.label(), []).append(r)
+        groups.setdefault(r.arm.resources.label(), []).append(r)
     return [
-        (label, sorted(rs, key=lambda r: r.load.schedule.peak_level))
+        (label, sorted(rs, key=lambda r: r.arm.load.schedule.peak_level))
         for label, rs in groups.items()
-        if len({r.load.schedule.peak_level for r in rs}) >= 2
+        if len({r.arm.load.schedule.peak_level for r in rs}) >= 2
     ]
 
 
-def _response_section(results: list[TrialResult]) -> Section | None:
+def _response_section(results: list[TrialRecord]) -> Section | None:
     groups = _curve_groups(results)
     if not groups:
         return None
@@ -719,9 +787,9 @@ def _response_section(results: list[TrialResult]) -> Section | None:
     # 请求侧（入口）— error/drop + latency vs level; these are measured AT the entry
     sec.blocks.append(Heading("请求侧（入口）"))
     for clabel, rs in groups:
-        pts = [(r.load.schedule.peak_level, r) for r in rs]
-        err = [(lv, round(r.overall.error_rate * 100, 2)) for lv, r in pts]
-        drop = [(lv, round(r.overall.drop_rate * 100, 2)) for lv, r in pts]
+        pts = [(r.arm.load.schedule.peak_level, r) for r in rs]
+        err = [(lv, round(r.measurement.request.error_rate * 100, 2)) for lv, r in pts]
+        drop = [(lv, round(r.measurement.request.drop_rate * 100, 2)) for lv, r in pts]
         sec.blocks.append(
             Chart(
                 f"错误率与丢弃 — {clabel}",
@@ -731,13 +799,13 @@ def _response_section(results: list[TrialResult]) -> Section | None:
             )
         )
         lat = [
-            LineSeries(name, [(lv, getattr(r.overall, attr)) for lv, r in pts])
+            LineSeries(name, [(lv, getattr(r.measurement.request, attr)) for lv, r in pts])
             for name, attr in (("p50", "p50_ms"), ("p95", "p95_ms"), ("p99", "p99_ms"))
         ]
         ttft = [
-            (lv, r.overall.metrics["ttft_ms"].p95)
+            (lv, r.measurement.request.metrics["ttft_ms"].p95)
             for lv, r in pts
-            if "ttft_ms" in r.overall.metrics
+            if "ttft_ms" in r.measurement.request.metrics
         ]
         if ttft:
             lat.append(LineSeries("ttft p95", ttft))
@@ -753,7 +821,7 @@ def _response_section(results: list[TrialResult]) -> Section | None:
     curves: dict[str, dict[tuple[str, str, str], dict[str, list[tuple[float, float]]]]] = {}
     for clabel, rs in groups:
         for r in rs:
-            lv = r.load.schedule.peak_level
+            lv = r.arm.load.schedule.peak_level
             for family, fam in r.metrics.items():
                 if fam.side != "resource":
                     continue
@@ -766,7 +834,7 @@ def _response_section(results: list[TrialResult]) -> Section | None:
                 # fan-out, e.g. {path=…} / {pod=…}) stay in the LINE identity — one
                 # chart per (service, unit, kind) with one line per label value,
                 # not one sub-section per label value.
-                for sid, summary in r.probe_metrics.items():
+                for sid, summary in r.measurement.probe_metrics.items():
                     name, labels, _ = parse_ref(sid)
                     if name != family or "service" not in labels:
                         continue
@@ -831,7 +899,7 @@ def _tick_rate(series: Series) -> list[tuple[float, float]]:
     return pts
 
 
-def _timeseries_section(results: list[TrialResult]) -> Section:
+def _timeseries_section(results: list[TrialRecord]) -> Section:
     sec = Section("4. 时间序列（Probe 采样）")
     sec.blocks.append(
         Prose(
@@ -846,7 +914,7 @@ def _timeseries_section(results: list[TrialResult]) -> Section:
     # count-unit counters → per-tick rate lines (a service's own activity rhythm,
     # e.g. server-observed streams/errors per second as the press climbs)
     has = False
-    svc_buckets: dict[str, list[tuple[TrialResult, str, str, list[LineSeries]]]] = {}
+    svc_buckets: dict[str, list[tuple[TrialRecord, str, str, list[LineSeries]]]] = {}
     pressure: dict[tuple[int, str | None], list[LineSeries]] = {}
     for i, r in enumerate(results):
         buckets: dict[tuple[str, str, str], list[LineSeries]] = {}
@@ -934,7 +1002,7 @@ def _timeseries_section(results: list[TrialResult]) -> Section:
 
 
 def _render_md(
-    results: list[TrialResult],
+    results: list[TrialRecord],
     metric_keys: list[str],
     knee_err_rate: float,
     facet_order: dict[str, list[str]] | None,
@@ -960,13 +1028,13 @@ def _render_md(
     for r in results:
         cells = (
             _key_cells_var(r, var_cols)
-            + _display_stat_cells(r.overall)
-            + _display_metric_cells(r.overall, metric_keys)
+            + _display_stat_cells(r.measurement.request)
+            + _display_metric_cells(r.measurement.request, metric_keys)
             + _display_probe_cells(r, dprobe)
         )
         lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
-    if any(r.load.model == "closed" for r in results):
+    if any(r.arm.load.model == "closed" for r in results):
         lines.append(
             "> 闭环（closed）trial 的延迟百分位是 **CO-biased**（响应变慢时会少采高延迟样本，"
             "尾延迟偏乐观）——勿当严格 SLO 尾延迟；要 CO-correct 的尾延迟用 open 模型。"
@@ -978,12 +1046,13 @@ def _render_md(
         lines.append("**拐点**（首个错误率越过阈值的档位）：")
         for res_label, r in knees.items():
             lines.append(
-                f"- `{res_label}`: 约在 {r.load.label()} 处 "
-                f"(err {r.overall.error_rate * 100:.1f}%, rps {r.overall.throughput_rps:.1f})"
+                f"- `{res_label}`: 约在 {r.arm.load.label()} 处 "
+                f"(err {r.measurement.request.error_rate * 100:.1f}%, "
+                f"rps {r.measurement.request.throughput_rps:.1f})"
             )
         lines.append("")
 
-    saturated = [r for r in results if r.overall.drop_rate >= _SATURATION_FLAG]
+    saturated = [r for r in results if r.measurement.request.drop_rate >= _SATURATION_FLAG]
     if saturated:
         lines.append(
             f"**⚠ 客户端饱和**（drop ≥ {_SATURATION_FLAG * 100:.0f}%，该档延迟/吞吐**不可信**——"
@@ -991,12 +1060,12 @@ def _render_md(
         )
         for r in saturated:
             lines.append(
-                f"- `{_trial_id(r)}`: drop {r.overall.drop_rate * 100:.1f}% "
-                f"({r.overall.n_dropped} 个未发出)"
+                f"- `{_trial_id(r)}`: drop {r.measurement.request.drop_rate * 100:.1f}% "
+                f"({r.measurement.request.n_dropped} 个未发出)"
             )
         lines.append("")
 
-    broke = [r for r in results if r.aborted]
+    broke = [r for r in results if r.stop.early]
     if broke:
         lines.append(
             "**⚠ 提前停止**（trial 在计划窗口前停了——见 reason 与触发快照；数字为**部分窗口**，"
@@ -1011,46 +1080,54 @@ def _render_md(
     # §2 per-dimension breakdown ("facet" = a request dimension like difficulty / lang)
     lines.append("## 2. 按维度拆（如 difficulty/lang）")
     lines.append("")
-    if not any(r.by_facet for r in results):
+    if not any(r.measurement.by_facet for r in results):
         lines.append("- （无分组维度；所有请求同质，无需拆）")
         lines.append("")
     else:
         for r in results:
-            if not r.by_facet:
+            if not r.measurement.by_facet:
                 continue
             lines.append(f"### {_trial_id(r)}")
             lines.append("")
-            for key in sorted(r.by_facet):
+            for key in sorted(r.measurement.by_facet):
                 lines.append(f"**{key}**")
                 lines.append("")
                 hdr = ["value", *_DISPLAY_STAT_COLS, *metric_keys]
                 lines.append("| " + " | ".join(hdr) + " |")
                 lines.append("|" + "|".join(["---"] * len(hdr)) + "|")
-                for val in _sorted_values(key, list(r.by_facet[key]), facet_order):
-                    sl = r.by_facet[key][val]
+                for val in _sorted_values(key, list(r.measurement.by_facet[key]), facet_order):
+                    sl = r.measurement.by_facet[key][val]
                     cells = [val, *_display_stat_cells(sl), *_display_metric_cells(sl, metric_keys)]
                     lines.append("| " + " | ".join(cells) + " |")
                 lines.append("")
 
-    # §2b per-stage breakdown (multi-stage schedules: the capacity curve)
-    staged = [r for r in results if r.by_stage]
-    if staged:
-        lines.append("## 2b. 按 stage 拆（多阶段 schedule 的容量曲线）")
+    # §2b observed Window breakdown
+    windowed = [r for r in results if any(w.kind in ("ramp", "hold") for w in r.windows)]
+    if windowed:
+        lines.append("## 2b. 按 Window 拆（schedule 的实际观测边界）")
         lines.append("")
         lines.append(
-            "> 多阶段 trial 的 `overall` 是**跨 stage 的 post-warmup 平均**（混了不同负载档），"
-            "容量结论看下面各 `hold@` 桶；`ramp→` 桶是过渡段。"
+            "> Stage 是负载计划，Window 是请求与资源指标共同使用的实际时间切片；"
+            "容量只读取 complete 的 hold Window。"
         )
         lines.append("")
-        for r in staged:
+        for r in windowed:
             lines.append(f"### {_trial_id(r)}")
             lines.append("")
-            hdr = ["stage", *_DISPLAY_STAT_COLS, *metric_keys]
+            hdr = ["window_id", "name", "kind", "complete", *_DISPLAY_STAT_COLS, *metric_keys]
             lines.append("| " + " | ".join(hdr) + " |")
             lines.append("|" + "|".join(["---"] * len(hdr)) + "|")
-            for label in r.by_stage:
-                sl = r.by_stage[label]
-                cells = [label, *_display_stat_cells(sl), *_display_metric_cells(sl, metric_keys)]
+            for window in r.windows:
+                if window.kind not in ("ramp", "hold") or window.request is None:
+                    continue
+                cells = [
+                    window.id,
+                    window.name,
+                    window.kind,
+                    "yes" if window.complete else "no",
+                    *_display_stat_cells(window.request),
+                    *_display_metric_cells(window.request, metric_keys),
+                ]
                 lines.append("| " + " | ".join(cells) + " |")
             lines.append("")
 
@@ -1067,15 +1144,15 @@ def _render_md(
     return "\n".join(lines)
 
 
-def _knees(results: list[TrialResult], thr: float) -> dict[str, TrialResult]:
+def _knees(results: list[TrialRecord], thr: float) -> dict[str, TrialRecord]:
     """First Trial per resource profile (by ascending level) whose overall error rate ≥ thr."""
-    knees: dict[str, TrialResult] = {}
-    by_profile: dict[str, list[TrialResult]] = {}
+    knees: dict[str, TrialRecord] = {}
+    by_profile: dict[str, list[TrialRecord]] = {}
     for r in results:
-        by_profile.setdefault(r.resources.label(), []).append(r)
+        by_profile.setdefault(r.arm.resources.label(), []).append(r)
     for label, rs in by_profile.items():
-        for r in sorted(rs, key=lambda x: x.load.schedule.peak_level):
-            if r.overall.error_rate >= thr:
+        for r in sorted(rs, key=lambda x: x.arm.load.schedule.peak_level):
+            if r.measurement.request.error_rate >= thr:
                 knees[label] = r
                 break
     return knees

@@ -16,7 +16,7 @@
 
 1. **三类测试实现思路迥异，但 case 应该是一致的**。case 只描述"如何给系统发请求"，不绑定怎么判定；同一份 case，e2e 拿去看对错，eval 拿去看 agent 效果，perf 拿去看压力下的表现。canonical Case/CaseSet 格式与模型由 [`spec-case`](https://github.com/compforge/spec-case) 持有；本仓 [`spec/case-schema.yaml`](spec/case-schema.yaml) 只是运行时兼容投影，harness 约定见 [`spec/conventions.md`](spec/conventions.md)「Case 规范」。
 2. **case 是可积累的资产**。case 与判定解耦后就能持续积累；case 攒得越多，发版前全量跑一遍没问题，就越有底气相对地相信系统没问题——把"慌张修完不敢保证"换成"跑完一遍心里有数"。
-3. **一个 experiment 一份 config yaml，产物按 run 落盘**。experiment 每 run 一次，结果落在 `runs/<experiment>/<run-id>/`，目录下有一份统一的记录文件（如 `result.csv`），report 由记录文件生成——记录与渲染分离，历次 run 累积不覆盖，未来可跨 run / 跨 experiment 汇出一份总 report。
+3. **实验词汇统一为 Experiment → Arm → Trial**。Experiment 回答一个问题，Arm 是参与比较的命名配置，Trial 是某 Arm 的一次真实执行；各 harness 保留强类型的本地 Arm，不抽一个 `dict` 配置的通用基类。产物按 run 落盘，记录与渲染分离。
 4. **一次执行，多面观测**。case 统一之后，跑一遍 case 不必只服务一类测试：同一次请求的产出，可以同时服务对错（e2e）、效果（eval）、延迟/资源（perf）、链路内部归因（trace）和行动轨迹（trajectory）——这些 harness 是不同视角，而不是多次独立发压。
 
 **边界**：跨语言（Go + Python + TypeScript）测试框架聚合仓库，各语言目录是独立工程。框架不 import 被测服务的 internal 代码，纯黑盒（HTTP / SSE / DB-query 由服务侧自己包装）。
@@ -28,7 +28,7 @@
 1. **融入 devloop——成为 agent 开发循环的判定基础设施**。各 harness 统一从 `runs/<scope>/<run-id>/verdict.json` 出判定（schema 见 [`spec/verdict-schema.yaml`](spec/verdict-schema.yaml)），devloop 等开发循环"读 verdict 自纠偏"：改完代码跑 case → 读 verdict 定位挂点 → 再改再跑。harness 的角色因此不止"人跑的测试工具"，而是 agent 开发循环里的反馈节点。
 2. **跑 case（driver）→ 汇总产出 → 数据挖掘**。一个执行波次（如 100 个 case 主动驱动 / 跑一夜）落下四个数据平面：verdict（对错）/ metrics（延迟资源）/ traces（链路）/ findings（判读）。单平面的数字不可行动；按对齐键 join 后跑**模式注册表**才出可行动假设（"fail 的 23 个 case 里 18 个命中 tool_churn → 改该 tool 的 desc"），再用 eval A/B 验证改进——详见 [`docs/trace-harness.md`](docs/trace-harness.md) §3.7。
 
-两条线押在同一处地基上：**case（输入）与 verdict（输出）的统一**。`case_id` / `trace_id` / `runs/<scope>/<run-id>` 布局是跨平面 join 键——**各 harness 迭代时必须守住对齐键**（约定见 [`spec/conventions.md`](spec/conventions.md)「对齐键」）；破坏对齐键 = 同时砍断 devloop 消费与数据挖掘。
+两条线押在同一处地基上：**case（输入）与 verdict（输出）的统一**。`case_id` / `arm_id` / `trace_id` / `runs/<scope>/<run-id>` 布局是跨平面 join 键——**各 harness 迭代时必须守住对齐键**（约定见 [`spec/conventions.md`](spec/conventions.md)「对齐键」）；破坏对齐键 = 同时砍断 devloop 消费与数据挖掘。
 
 ## 代码地图与核心模块
 

@@ -57,12 +57,12 @@ Schedule.intensity(t) -> float   # t 秒时的目标强度；单位由 Model 决
 `Engine._run_trial` 按 `model` 选 driver，两个 driver 都消费同一条 Schedule：
 
 ```
-_run_trial(target, profile, load):
+_run_trial(target, arm):
   client = AsyncClient(max_connections ~ peak_level)
   observer = _observe(probes...)                       # 周期采 Probe
   drive = _drive_open if load.model=="open" else _drive_closed
   await drive(workload, ctx, load, cases, weights, run_id, timed)
-  _aggregate(...)                                      # 丢 warmup → overall + by_facet
+  _aggregate(...)                                      # 实际边界 → measurement/stage/cooldown Windows
 ```
 
 ### `_drive_open`（开环）
@@ -82,7 +82,7 @@ _run_trial(target, profile, load):
 
 ### warmup 与 ramp 解耦
 
-`warmup_s` 是**统计丢弃窗口**，独立于 Schedule 的 ramp。`_aggregate` 丢掉 `t < warmup_s` 的 outcome 和 Probe 采样，吞吐分母用 `steady_s = duration_s - warmup_s`。两者常重合，但概念分离——可以 ramp 30s 却丢弃 45s（ramp + 稳定窗）。
+`warmup_s` 是**统计丢弃边界**，独立于 Schedule 的 ramp。`_aggregate` 让 measurement 与各 stage Window 都从 `warmup_s` 之后开始，请求与 Probe 采样使用同一组 Window 边界。两者常重合，但概念分离——可以 ramp 30s 却丢弃 45s（ramp + 稳定窗）。
 
 ---
 
@@ -124,11 +124,11 @@ load:
 
 时变速率下，按"当前瞬时速率算下一个间隔"会在陡峭 ramp 段系统性滞后（λ≈0 时算出超长间隔）。按真实 dt 积分 λ 是正确做法：累加 `λ·dt`、攒满即发，既 drift-free 又对任意 Schedule 形状通用。
 
-### 报告维度（by_facet + by_stage）
+### 报告维度（facet + Window）
 
 `Outcome` 带 `facets`，报告对每个 facet 做 marginal pivot（见 `report.py`）。混合流量按 `difficulty` 等 Case facet 拆分。
 
-**多 stage schedule（spike/阶梯）按 stage 拆**：`fire` 时盖上活跃 stage 标签（`hold@X`/`ramp→X`，可在配置给 `name`），`_aggregate` 出 `by_stage`（仅当 `is_multi_stage`，即 >1 个 hold）。每个 hold 桶用自己的时长做吞吐分母 → 单个阶梯 trial 直接出每档容量曲线。ramp 段单独成桶（过渡），容量结论只读 hold 桶；多 stage trial 的 `overall` 是跨 stage 的 post-warmup 平均，报告会注明。详见 [`result-semantics.md`](result-semantics.md)。
+**Stage 规划，Window 观测**：Engine 按 Stage 的实际时间边界建立唯一 `window_id`，请求按发射时间归窗，Probe series 用同一边界归约。每个 hold Window 用自己的实际时长做吞吐分母；ramp 是过渡 Window。spike 中即使两段都叫 `hold@base`，也保持为两个 Window，不按展示名合并。capacity 只读 complete hold Window。详见 [`result-semantics.md`](result-semantics.md)。
 
 ---
 

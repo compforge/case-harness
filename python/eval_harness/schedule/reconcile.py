@@ -44,8 +44,8 @@ class Provisioner(Protocol):
     ``provision_attempts > 1``, within a run. Critically, a *partial* prepare
     (e.g. resource created, then ingest fails) leaves side effects behind, so a
     later call must **reuse** the existing resource rather than erroring on a
-    name/uniqueness clash. Provisioning is keyed by ``key`` (not the env), so
-    same-key envs share one resource — prepare once, not per arm.
+    name/uniqueness clash. Provisioning is keyed by ``key`` (not the arm_id), so
+    same-key arms share one resource — prepare once, not per arm.
 
     ``prepare`` receives the corpus's ``EvalSet`` (``corpus`` name + ``sources`` to ingest
     + ``focus`` / ``domain``), so the provisioner needs no separate manifest of its own.
@@ -61,7 +61,7 @@ class Solver(ABC):
 
     Optionally override ``fetch`` to return an already-stored SUT result for this cell
     (keyed by the run's ``row.run_id`` — a user-controlled reuse namespace — plus the row
-    fields env / corpus / case_id; how that maps to a SUT key is the solver's business).
+    fields arm_id / corpus / case_id; how that maps to a SUT key is the solver's business).
     The engine calls ``fetch`` first (ungated) and only ``solve`` (rate-gated) on a miss,
     so re-runs reuse what the SUT already produced. The default returns None (no reuse →
     always trigger).
@@ -116,17 +116,17 @@ class ReconcileEngine:
         # retry that clashes with the partial resource). Retries still happen on resume.
         self.provision_attempts = provision_attempts
         self.backoff_base = backoff_base
-        # env name → resolved target; provision key → resolved target + its EvalSet.
-        # An experiment may span corpora, so a key is (env-heavy × corpus); each key
+        # Arm id → resolved target; provision key → resolved target + its EvalSet.
+        # An experiment may span corpora, so a key is (Arm-heavy × corpus); each key
         # provisions its own corpus's resource.
-        self._target_by_env: dict[str, Target] = {}
+        self._target_by_arm: dict[str, Target] = {}
         self._target_by_key: dict[str, Target] = {}
         self._evalset_by_key: dict[str, EvalSet] = {}
-        for env in exp.resolved_envs():
-            rt = env.resolve(exp.target)
-            self._target_by_env[env.name] = rt
+        for arm in exp.resolved_arms():
+            rt = arm.resolve(exp.target)
+            self._target_by_arm[arm.id] = rt
             for es in exp.evalsets:
-                key = env.key(es.corpus, exp.target, exp.heavy_fields)
+                key = arm.key(es.corpus, exp.target, exp.heavy_fields)
                 self._target_by_key.setdefault(key, rt)
                 self._evalset_by_key.setdefault(key, es)
 
@@ -159,11 +159,11 @@ class ReconcileEngine:
             self.ws.set_provision_failed(key, str(exc))
 
     async def _row_chain(self, row: Row) -> None:
-        prov = self.ws.provisions.get(row.env_key)
+        prov = self.ws.provisions.get(row.arm_key)
         if not prov or prov.state is not CellState.OK:
             return  # provision unavailable → cannot solve this row (left PENDING/whatever)
         if row.solve.state is not CellState.OK:
-            target = self._target_by_env[row.env]
+            target = self._target_by_arm[row.arm_id]
             try:
                 res = await self._fetch_or_solve(row, target, prov.subject_id)
                 row.solve = SolveCell(

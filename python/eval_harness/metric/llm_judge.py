@@ -3,7 +3,7 @@
 Generic across consumers: correctness / faithfulness / coverage / relevance are all
 "render a prompt, ask a model for ``{score, judgement}``". Subclass, set ``NAME`` +
 ``SYSTEM_PROMPT``, implement ``build_prompt``; this base owns the model call
-(``eval_harness.llm.LLMClient``, configured via ``EVAL_JUDGE_*`` env) and JSON parse.
+(``eval_harness.llm.LLMClient``, configured via ``EVAL_JUDGE_*`` env vars) and JSON parse.
 
 Degrades to abstain (``score=None``), never a fake 0: not-applicable,
 judge-not-configured, and call/parse errors all return ``na`` so one bad sample or a

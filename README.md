@@ -20,7 +20,7 @@ This repo ships SDKs, not tests: the system under test (SUT) integrates the SDK 
 
 1. **Different judgments, one case format.** A case only describes "how to exercise the system once" — never how to judge it. The same case drives e2e (correctness), eval (quality) and perf (capacity). `spec-case` owns the canonical asset format and model; this repo keeps only runtime conventions and a compatibility projection under `spec/`.
 2. **Cases are accumulating assets.** Decoupled from judgment, cases keep piling up; the more you have, the more a full pre-release run actually means something.
-3. **One experiment = one config yaml; artifacts land per run.** Results go to `runs/<scope>/<run-id>/`; recording is separated from rendering, runs accumulate instead of overwriting, and reports can aggregate across runs.
+3. **Experiments compare Arms through Trials.** An Experiment asks one question, an Arm is one named configuration in the comparison, and a Trial is one real execution of an Arm. Results go to `runs/<scope>/<run-id>/`; `arm_id` stays an explicit alignment key across artifacts.
 4. **One execution, many observations.** A single request can feed correctness (e2e), quality (eval), latency/resources (perf), in-chain attribution (trace), and decision-path evaluation (trajectory). The harnesses are viewpoints, not separate load generators.
 
 The unified output is `verdict.json` (schema: [`spec/verdict-schema.yaml`](spec/verdict-schema.yaml)): humans read it, CI reads it, and agentic dev loops read it to self-correct.
@@ -36,7 +36,7 @@ case-harness/
 ├── spec/                # runtime conventions: case compatibility projection / verdict / config
 ├── python/              # Python workspace (uv), five sibling SDKs + shared harness_common
 │   ├── e2e_harness/     # API testing: deterministic contract tests, judgment-as-data, pytest-driven
-│   ├── eval_harness/    # quality evaluation: experiment/Env arms + Worksheet + reconciler
+│   ├── eval_harness/    # quality evaluation: Experiment/Arm comparison + Worksheet + reconciler
 │   ├── perf_harness/    # load testing: capacity/resource profiling under constraints
 │   ├── trace_harness/   # trace analysis: OTel/Jaeger span attribution, call stacks + findings + corpus
 │   ├── trajectory_harness/ # agent trajectory normalization + evaluation

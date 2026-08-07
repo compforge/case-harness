@@ -33,5 +33,5 @@ class EchoSolver(Solver):
             response=resp,
             retrieved=["mock-chunk"],
             observations={"total_ms": 900, "ttft_ms": 80, "tokens": 256},
-            meta={"message_id": f"mock-{row.env}-{row.case_id}"},
+            meta={"message_id": f"mock-{row.arm_id}-{row.case_id}"},
         )

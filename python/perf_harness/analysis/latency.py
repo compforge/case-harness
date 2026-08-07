@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from perf_harness.analysis.base import Observation, by_resources
 from perf_harness.metric.store import MetricStore
-from perf_harness.model import Run, TrialResult
+from perf_harness.model import Run, TrialRecord
 
 #: below this many sent requests a p99 is an observed-max, not a percentile
 MIN_N_FOR_TAIL = 100
@@ -34,15 +34,15 @@ def analyze(run: Run, store: MetricStore) -> list[Observation]:
     return out
 
 
-def _degradation(label: str, rs: list[TrialResult]) -> list[Observation]:
+def _degradation(label: str, rs: list[TrialRecord]) -> list[Observation]:
     rows = [
         {
-            "level": r.load.schedule.peak_level,
-            "p50_ms": round(r.overall.p50_ms),
-            "p95_ms": round(r.overall.p95_ms),
-            "p99_ms": round(r.overall.p99_ms),
-            "tail_ratio": round(r.overall.p99_ms / r.overall.p50_ms, 2)
-            if r.overall.p50_ms
+            "level": r.arm.load.schedule.peak_level,
+            "p50_ms": round(r.measurement.request.p50_ms),
+            "p95_ms": round(r.measurement.request.p95_ms),
+            "p99_ms": round(r.measurement.request.p99_ms),
+            "tail_ratio": round(r.measurement.request.p99_ms / r.measurement.request.p50_ms, 2)
+            if r.measurement.request.p50_ms
             else None,
         }
         for r in rs
@@ -76,18 +76,22 @@ def _degradation(label: str, rs: list[TrialResult]) -> list[Observation]:
     return out
 
 
-def _ttft(label: str, rs: list[TrialResult], store: MetricStore) -> list[Observation]:
+def _ttft(label: str, rs: list[TrialRecord], store: MetricStore) -> list[Observation]:
     vals = []
     for r in rs:
         v = store.query(r, "ttft_ms.p50")
         if isinstance(v, float):
-            vals.append((r.load.schedule.peak_level, v))
+            vals.append((r.arm.load.schedule.peak_level, v))
     if len(vals) < 2:
         return []
     mean = sum(v for _, v in vals) / len(vals)
     spread = (max(v for _, v in vals) - min(v for _, v in vals)) / mean if mean else 0
     top = rs[-1]
-    share = vals[-1][1] / top.overall.p50_ms * 100 if top.overall.p50_ms else None
+    share = (
+        vals[-1][1] / top.measurement.request.p50_ms * 100
+        if top.measurement.request.p50_ms
+        else None
+    )
     ev = {
         "ttft_p50_by_level": [(lv, round(v, 1)) for lv, v in vals],
         "spread_pct": round(spread * 100, 1),
@@ -113,11 +117,11 @@ def _ttft(label: str, rs: list[TrialResult], store: MetricStore) -> list[Observa
     ]
 
 
-def _adequacy(label: str, rs: list[TrialResult]) -> list[Observation]:
+def _adequacy(label: str, rs: list[TrialRecord]) -> list[Observation]:
     out: list[Observation] = []
     for r in rs:
-        o = r.overall
-        lv = r.load.schedule.peak_level
+        o = r.measurement.request
+        lv = r.arm.load.schedule.peak_level
         if o.n and o.n < MIN_N_FOR_TAIL:
             out.append(
                 Observation(
