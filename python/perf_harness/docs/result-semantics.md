@@ -89,6 +89,9 @@ class SloCheck:                     # 求值结果（三态）
 - `slo_passed`（capacity 用）要求**全部 pass**——skip 的档不算确认容量（保守）。
 - `TrialStop.early` 表示只得到部分测量窗口——即使已求值的 SLO 都通过，run 仍失败，且该档不计
   SLO-aware 容量；熔断保护被压服务，不能反过来成为容量达标证据。
+- 多 stage trial 的 `overall` 混合了不同负载，不拿 `peak_level` 冒充容量。容量只读显式
+  `{stage="..."}` SLO 通过的 hold 桶；trial 全局的资源 SLO 仍约束每个 hold。未配置 stage SLO
+  时只展示分桶数据，不给容量结论。
 - typo 进不了 skip：结构非法在解析期就 `ValueError`（见 metric-model.md §3.5）。
 
 **🔶 开放问题 1：sweep 下哪些 trial 受门？** 容量扫描 `levels:[10,20,40]` 故意压到打挂，对全部 trial 施加同一 SLO 必然在高档失败。三个候选默认：
@@ -96,7 +99,8 @@ class SloCheck:                     # 求值结果（三态）
 - (B) **scope 加 `level:<n>` 限定**——只门你真正承诺的档位，其余信息性展示。**（我倾向 B）**
 - (C) 单档 run 才门、多档 sweep 只报告 SLO-aware 拐点（"满足 p99<2s 的最高档"）。
 
-> 注：(C) 其实是个很有用的副产物——**SLO-aware 容量** = 所有 SLO 都过的最高 level。无论选哪个默认，报告都应输出这条。
+> 注：(C) 其实是个很有用的副产物——单档 sweep 的 **SLO-aware 容量** = 所有 SLO 都过的最高
+> level；多 stage trial 则按上面的 hold 桶规则计算。无论选哪个默认，报告都应输出这条。
 
 **🔶 开放问题 2：fail-fast？** 借 k6 `abortOnFail`+`delayAbortEval`：某 trial 越线即停 sweep，并留一个 warmup 宽限避免早期抖动误判。建议作为 `slo` 块的可选开关 `abort_on_fail: true`，默认关。
 

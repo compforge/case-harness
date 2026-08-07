@@ -16,7 +16,7 @@ live in ``store.py`` (the metric layer); import them from there.
 
 from __future__ import annotations
 
-from perf_harness.metric import Missing
+from perf_harness.metric import Missing, parse_ref
 from perf_harness.metric.store import MetricStore
 from perf_harness.model import SloAssertion, SloCheck, TrialResult
 
@@ -60,15 +60,47 @@ def evaluate_slo(trial: TrialResult, assertions: list[SloAssertion]) -> list[Slo
 
 
 def slo_aware_capacity(trials: list[TrialResult]) -> dict[str, float | None]:
-    """Per resource profile: the highest *complete* load level whose trial met ALL
-    its SLOs. A skipped check or early-stopped partial window cannot confirm
-    capacity. ``None`` if no complete level passed / no SLOs."""
+    """Per resource profile: the highest *complete* load level confirmed by SLOs.
+
+    A single-level trial must pass every check. A multi-stage trial instead uses
+    explicit ``{stage=...}`` request checks for each hold; trial-global resource
+    checks still gate every hold. This avoids reporting the schedule peak as
+    capacity merely because an across-stage average happened to pass.
+
+    A skipped check or early-stopped partial window cannot confirm capacity.
+    ``None`` means no complete level was verified (including a multi-stage trial
+    with no stage-scoped SLOs).
+    """
     best: dict[str, float | None] = {}
     for t in trials:
         c = t.resources.label()
         best.setdefault(c, None)
-        if not t.stop.early and t.slo and t.slo_passed:
-            lvl = t.load.schedule.peak_level
+        if t.stop.early or not t.slo:
+            continue
+        if not t.load.schedule.is_multi_stage:
+            levels = [t.load.schedule.peak_level] if t.slo_passed else []
+        else:
+            resource_checks = []
+            stage_checks: dict[str, list[SloCheck]] = {}
+            for check in t.slo:
+                name, labels, _ = parse_ref(check.assertion.metric)
+                stage = labels.get("stage")
+                if stage is not None:
+                    stage_checks.setdefault(stage, []).append(check)
+                    continue
+                family = t.metrics.get(name)
+                if family is not None and family.side == "resource":
+                    resource_checks.append(check)
+            resources_passed = all(check.passed for check in resource_checks)
+            levels = [
+                stage.to_level
+                for stage in t.load.schedule.stages
+                if stage.kind == "hold"
+                and stage_checks.get(stage.label)
+                and resources_passed
+                and all(check.passed for check in stage_checks[stage.label])
+            ]
+        for lvl in levels:
             if best[c] is None or lvl > best[c]:
                 best[c] = lvl
     return best

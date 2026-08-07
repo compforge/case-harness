@@ -501,7 +501,9 @@ def _render_slo(lines: list[str], results: list[TrialResult]) -> None:
     if any(r.slo for r in results):
         cap = slo_aware_capacity(results)
         lines.append("")
-        lines.append("**SLO-aware 容量**（完整运行且满足全部 SLO 的最高档）：")
+        lines.append(
+            "**SLO-aware 容量**（单档满足全部 SLO；多 stage 满足对应 hold SLO + 全局资源 SLO）："
+        )
         for label, lvl in cap.items():
             lines.append(f"- `{label}`: {f'{lvl:g}' if lvl is not None else '—（无档达标）'}")
     lines.append("")
