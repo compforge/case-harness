@@ -60,15 +60,14 @@ def evaluate_slo(trial: TrialResult, assertions: list[SloAssertion]) -> list[Slo
 
 
 def slo_aware_capacity(trials: list[TrialResult]) -> dict[str, float | None]:
-    """Per resource profile: the highest load level whose trial met ALL its SLOs —
-    every check definitively PASSED (a skip doesn't count, so capacity is
-    conservative: we never claim a level we couldn't verify). ``None`` if none did
-    / no SLOs."""
+    """Per resource profile: the highest *complete* load level whose trial met ALL
+    its SLOs. A skipped check or early-stopped partial window cannot confirm
+    capacity. ``None`` if no complete level passed / no SLOs."""
     best: dict[str, float | None] = {}
     for t in trials:
         c = t.resources.label()
         best.setdefault(c, None)
-        if t.slo and t.slo_passed:
+        if not t.stop.early and t.slo and t.slo_passed:
             lvl = t.load.schedule.peak_level
             if best[c] is None or lvl > best[c]:
                 best[c] = lvl

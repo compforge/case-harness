@@ -14,6 +14,7 @@ from perf_harness.model import (
     SloAssertion,
     Target,
     TrialResult,
+    TrialStop,
 )
 from perf_harness.slo import evaluate_slo, slo_aware_capacity
 
@@ -122,10 +123,14 @@ def test_slo_facet_label_reads_the_facet_slice():
 
 def test_slo_aware_capacity_is_highest_passing_level():
     a = SloAssertion("p99_ms", "lt", 2000)
-    t10, t40 = _trial(10, 100), _trial(40, 5000)
+    t10, t20, t40 = _trial(10, 100), _trial(20, 100), _trial(40, 5000)
     t10.slo = evaluate_slo(t10, [a])
+    t20.slo = evaluate_slo(t20, [a])
+    t20.stop = TrialStop(reason="error_rate")
     t40.slo = evaluate_slo(t40, [a])
-    assert slo_aware_capacity([t10, t40]) == {"w2": 10}
+    # 20 passes its SLO on the partial sample, but only the complete 10-level trial
+    # confirms capacity.
+    assert slo_aware_capacity([t10, t20, t40]) == {"w2": 10}
 
 
 # ---- config parse + fail-fast ----

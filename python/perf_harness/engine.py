@@ -108,20 +108,27 @@ class Engine:
                     await exp.subject.provisioner.apply(profile)
                 for load in exp.loads:
                     trial = await self._run_trial(exp.subject.target, profile, load)
-                    failed = False
+                    # A breaker-ended trial only observed a partial load window. Even
+                    # if every evaluated SLO happens to pass, it cannot prove this
+                    # load level was sustained.
+                    failed = trial.stop.early
                     if exp.slo:
                         trial.slo = evaluate_slo(trial, exp.slo)
                         # the run gate is lenient on skip by default: a skipped check
                         # (slice absent) is surfaced but doesn't flip the exit code;
                         # strict_slo treats an unverifiable SLO as a failure.
-                        failed = any(c.failed for c in trial.slo) or any(
-                            c.skipped and (exp.strict_slo or c.assertion.window == "cooldown")
-                            for c in trial.slo
+                        failed = (
+                            failed
+                            or any(c.failed for c in trial.slo)
+                            or any(
+                                c.skipped and (exp.strict_slo or c.assertion.window == "cooldown")
+                                for c in trial.slo
+                            )
                         )
-                        passed = passed and not failed
+                    passed = passed and not failed
                     trials.append(trial)
                     if exp.abort_on_fail and failed:
-                        aborted = True  # stop the sweep early on first SLO failure
+                        aborted = True  # stop the sweep on the first invalid/failing trial
                         break
                 if aborted:
                     break

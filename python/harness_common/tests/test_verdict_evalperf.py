@@ -93,10 +93,11 @@ def test_perf_verdict_fail():
         passed=False,
         trials=[
             NS(
+                stop=NS(early=False),
                 slo=[
                     _chk("p99_ms", "lte", 100, 150, "fail"),
                     _chk("err", "lte", 0.01, 0.0, "pass"),
-                ]
+                ],
             )
         ],
     )
@@ -130,7 +131,9 @@ def test_perf_verdict_skipped_check_not_pass():
         run_id="r",
         created_at="t",
         passed=True,
-        trials=[NS(slo=[_chk("p99_ms", "lte", 100, None, "skip")])],
+        trials=[
+            NS(stop=NS(early=False), slo=[_chk("p99_ms", "lte", 100, None, "skip")])
+        ],
     )
     doc = PV.build_verdict_doc(run)
     assert doc["status"] == "skipped"
@@ -141,7 +144,11 @@ def test_perf_verdict_skipped_check_not_pass():
 def test_perf_verdict_no_slo_is_skipped_not_pass():
     # trials ran but no SLO declared → nothing judged → skipped, not a vacuous pass.
     run = NS(
-        experiment="e", run_id="r", created_at="t", passed=True, trials=[NS(slo=[])]
+        experiment="e",
+        run_id="r",
+        created_at="t",
+        passed=True,
+        trials=[NS(stop=NS(early=False), slo=[])],
     )
     doc = PV.build_verdict_doc(run)
     assert (
@@ -163,7 +170,7 @@ def test_perf_verdict_pass():
         run_id="r",
         created_at="t",
         passed=True,
-        trials=[NS(slo=[_chk("p99_ms", "lte", 100, 80, "pass")])],
+        trials=[NS(stop=NS(early=False), slo=[_chk("p99_ms", "lte", 100, 80, "pass")])],
     )
     doc = PV.build_verdict_doc(run)
     assert doc["status"] == "pass" and "reason" not in doc
@@ -183,6 +190,7 @@ def test_perf_verdict_names_cooldown_window():
         passed=True,
         trials=[
             NS(
+                stop=NS(early=False),
                 slo=[
                     _chk(
                         "metrics.task_count.last",
@@ -192,9 +200,31 @@ def test_perf_verdict_names_cooldown_window():
                         "pass",
                         window="cooldown",
                     )
-                ]
+                ],
             )
         ],
     )
     doc = PV.build_verdict_doc(run)
     assert doc["checks"][0]["name"].endswith("[cooldown]")
+
+
+def test_perf_verdict_early_stop_fails_even_when_slo_passes():
+    run = NS(
+        experiment="e",
+        run_id="r",
+        created_at="t",
+        passed=False,
+        trials=[
+            NS(
+                stop=NS(
+                    early=True,
+                    reason="error_rate",
+                    snapshot=NS(at_s=34.0, errors=7, sent=50),
+                ),
+                slo=[_chk("p99_ms", "lte", 100, 80, "pass")],
+            )
+        ],
+    )
+    doc = PV.build_verdict_doc(run)
+    assert doc["status"] == "fail"
+    assert "stopped early" in doc["reason"] and "7/50 errors" in doc["reason"]
