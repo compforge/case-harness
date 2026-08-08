@@ -1,6 +1,6 @@
 import type { Node } from "../model/node";
 import type { FeatureContext } from "./context";
-import { registerFeature } from "./registry";
+import type { Feature } from "./feature";
 
 function intervalUnion(intervals: Array<[number, number]>): number {
   if (intervals.length === 0) return 0;
@@ -35,10 +35,13 @@ function httpStatus(node: Node, context: FeatureContext): Record<string, unknown
   return { http_status: statuses.find((status) => status !== 200) ?? statuses[0] };
 }
 
-registerFeature({ produces: ["self_ms"], applies: () => true, compute: selfMs, bake: true });
-registerFeature({
+const FEATURES = [{ produces: ["self_ms"], applies: () => true, compute: selfMs, bake: true }, {
   produces: ["http_status"],
   applies: (node) => node.kind === "model-call",
   compute: httpStatus,
   bake: true,
-});
+}] satisfies Feature[];
+
+export function builtinFeatures(): Feature[] {
+  return [...FEATURES];
+}

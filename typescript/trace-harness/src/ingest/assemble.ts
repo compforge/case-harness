@@ -1,4 +1,5 @@
 import { bakeFeatures } from "../feature";
+import type { FeatureRegistry } from "../feature/registry";
 import { SERVICE_KIND, serviceSpec } from "../kinds/base";
 import { TraceContext } from "../model/context";
 import { Node } from "../model/node";
@@ -11,7 +12,11 @@ function round(value: number, digits: number): number {
   return Math.round(value * factor) / factor;
 }
 
-export function assemble(spans: Map<string, NormSpan>, specset: SpecSet): TraceContext {
+export function assemble(
+  spans: Map<string, NormSpan>,
+  specset: SpecSet,
+  featureRegistry?: FeatureRegistry,
+): TraceContext {
   const kindOf = new Map<string, KindSpec | undefined>();
   for (const [spanId, span] of spans) kindOf.set(spanId, specset.classify(span));
   const primaries = new Set([...kindOf].filter(([, spec]) => spec).map(([spanId]) => spanId));
@@ -129,7 +134,7 @@ export function assemble(spans: Map<string, NormSpan>, specset: SpecSet): TraceC
   const realized = new Map<string, KindSpec>([[SERVICE_KIND, serviceSpec()]]);
   for (const spec of specset) if (!realized.has(spec.kind)) realized.set(spec.kind, spec);
 
-  bakeFeatures(nodes, (spanId) => spans.get(spanId)?.attrs ?? {});
+  bakeFeatures(nodes, (spanId) => spans.get(spanId)?.attrs ?? {}, featureRegistry);
   for (const node of nodes) {
     node.brief = realized.get(node.kind)?.project?.(node) ?? [];
     if (node.has_error) node.error_text = spanErrorText(spans.get(node.error_anchor));

@@ -1,17 +1,23 @@
 import type { Node } from "../model/node";
 import type { Feature } from "./feature";
 
-const FEATURES: Feature[] = [];
+export class FeatureRegistry {
+  readonly #features: Feature[];
 
-export function registerFeature(feature: Feature): Feature {
-  FEATURES.push(feature);
-  return feature;
-}
+  constructor(features: Iterable<Feature> = []) {
+    this.#features = [...features];
+  }
 
-export function registeredFeatures(): Feature[] {
-  return [...FEATURES];
-}
+  register(feature: Feature): Feature {
+    this.#features.push(feature);
+    return feature;
+  }
 
-export function producing(name: string, node: Node): Feature | undefined {
-  return FEATURES.find((feature) => feature.produces.includes(name) && feature.applies(node));
+  registered(): Feature[] {
+    return [...this.#features];
+  }
+
+  producing(name: string, node: Node): Feature | undefined {
+    return this.#features.find((feature) => feature.produces.includes(name) && feature.applies(node));
+  }
 }

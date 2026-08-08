@@ -1,21 +1,21 @@
 """Facet —— 某类 Node 的渲染策略（view 层）。
 
-机制 vs biz：本模块只定义机制（Facet 协议、ChildOp、默认兜底 facet），**零 biz**——按
-`agent_type` 之类 match 的具体 facet 由 skill（trace-as / trace-note）注册。
+机制 vs biz：本模块定义机制（Facet 协议、ChildOp、默认兜底 facet）。业务 Facet 只声明
+节点摘要与子节点布局意图；递归、DisplayNode 组装和输出格式始终由 harness engine 负责。
 
 约束（与 IR 解耦的关键）：facet 只决定"本层怎么显示、孩子怎么摆"，**绝不改 Node 父子**；
 能折叠 / 同父兄弟聚合 ×N / 子树摘要，不能 re-parent。match 只读 `node.facts`（kind、将来的
 agent_type、cost…），不抠原生 span——facts 是 model↔view 唯一契约。
 
-三档覆盖力度：
+两档覆盖力度：
 - 只覆盖 `brief`：换本行内容（多数 facet）。
 - 再覆盖 `layout`：折叠 / 聚合 / 摘要孩子（结构型）。
-- 覆盖 `render`：整片重画（如 workflow plan 的 group/step），少数。
+
+Facet 不提供自定义递归或整片 render 的逃生口，避免每个业务形成一套互不兼容的 renderer。
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -23,7 +23,6 @@ from trace_harness.model.node import Field, Finding, Node
 
 if TYPE_CHECKING:
     from trace_harness.model.viewtree import ViewTree
-    from trace_harness.view.display import DisplayNode
 
 
 # —— ChildOp：facet 对每个孩子声明的处置意图，由 engine 执行（facet 不自己递归）——
@@ -123,17 +122,6 @@ class Facet:
     def layout(self, node: Node, children: list[Node], rctx: RenderCtx) -> list[ChildOp]:
         """孩子布局。默认全展开。"""
         return [Expand(c) for c in children]
-
-    def render(
-        self,
-        node: Node,
-        children: list[Node],
-        rctx: RenderCtx,
-        recurse: Callable[[Node], DisplayNode],
-    ) -> DisplayNode | None:
-        """整片重画。默认返回 None → engine 用 brief+layout 标准组装。
-        要自定义整片结构（合成分组头等）的 facet 才覆盖，并自行调 recurse 渲染想展开的子。"""
-        return None
 
 
 class DefaultFacet(Facet):

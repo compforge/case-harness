@@ -1,7 +1,7 @@
 """渲染引擎 —— 走原生 ViewTree，每 node 分派 facet，执行 ChildOp，产出 DisplayNode 树。
 
 职责分工：**facet 只声明意图（brief + layout 的 ChildOp），递归与执行在 engine**。这样
-facet 不持有遍历逻辑、不自己 recurse（除非覆盖 render 整片重画），机制集中、可换序列化器。
+facet 不持有遍历逻辑、不自己 recurse，机制集中、可换序列化器。
 
 finding 按 node_id 绑到对应 DisplayNode（node 是 IR）；若该 node 被折叠（不可见），上浮到
 最近的可见祖先 node。剪枝保护（含 finding/error 的子树不折）沿用 callstack 口径，故默认配方下
@@ -17,9 +17,6 @@ from trace_harness.kinds.base import _fmt_ms
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Field, Finding, Node
 from trace_harness.model.viewtree import ViewTree
-from trace_harness.view import (
-    facets as _facets,  # noqa: F401 —— import 即把通用 facet 登记进 DEFAULT_REGISTRY
-)
 from trace_harness.view.callstack import (
     _SEV_FLAG,
     _SEV_ORDER,
@@ -39,7 +36,8 @@ from trace_harness.view.facet import (
     RenderCtx,
     Summarize,
 )
-from trace_harness.view.registry import DEFAULT_REGISTRY, FacetRegistry
+from trace_harness.view.facets import builtin_facets
+from trace_harness.view.registry import FacetRegistry
 
 # —— 剪枝/折叠辅助（与 callstack._subtree_flagged / _subtree_size 同口径）——
 
@@ -155,24 +153,21 @@ def render(
     view: ViewTree,
     findings: dict[str, list[Finding]] | None = None,
     *,
-    registry: FacetRegistry = DEFAULT_REGISTRY,
+    registry: FacetRegistry | None = None,
     config: RenderConfig | None = None,
 ) -> list[DisplayNode]:
     """渲染整棵 ViewTree 为 DisplayNode（每个 root 一棵）。"""
     findings = findings or {}
+    registry = registry or FacetRegistry(builtin_facets())
     config = config or RenderConfig()
-    flagged = _flagged(view, findings) if config.prune_below_ms is not None else {}
+    # engine 统一计算 error/finding 可见信号；facet 只声明布局意图，不各自实现可见性策略。
+    flagged = _flagged(view, findings)
     rctx = RenderCtx(view=view, findings=findings, flagged=flagged, config=config)
     visible: dict[str, DisplayNode] = {}
 
     def render_node(node: Node) -> DisplayNode:
         facet = registry.dispatch(node)
         children = view.children(node)
-        custom = facet.render(node, children, rctx, render_node)
-        if custom is not None:
-            for nid in custom.node_ids:
-                visible.setdefault(nid, custom)
-            return custom
         ops = _fold_iso_groups(facet.layout(node, children, rctx))  # 相邻同构 collapsed Group → ×N
         disp_children: list[DisplayNode] = []
         folded: list[Node] = []
@@ -180,27 +175,33 @@ def render(
             if isinstance(op, Expand):
                 disp_children.append(render_node(op.node))
             elif isinstance(op, Fold):
-                folded.append(op.node)
+                if flagged.get(op.node.node_id):
+                    disp_children.append(render_node(op.node))
+                else:
+                    folded.append(op.node)
             elif isinstance(op, Aggregate):
                 line = _aggregate_line(op)
                 # 成员渲进 children：虚拟节点可展开；静态 md 按 folded 门控不下降
                 line.children = [render_node(n) for n in op.nodes]
                 disp_children.append(line)
             elif isinstance(op, Summarize):
-                disp_children.append(
-                    DisplayNode(
-                        kind=op.node.kind,
-                        name=op.node.name,
-                        brief=op.line,
-                        node_ids=[op.node.node_id],
+                if flagged.get(op.node.node_id):
+                    disp_children.append(render_node(op.node))
+                else:
+                    disp_children.append(
+                        DisplayNode(
+                            kind=op.node.kind,
+                            name=op.node.name,
+                            brief=op.line,
+                            node_ids=[op.node.node_id],
+                        )
                     )
-                )
             elif isinstance(op, Group):
                 line = _group_line(view, op)
                 line.children = [render_node(n) for n in op.nodes]
                 disp_children.append(line)
-            elif isinstance(op, Hide):
-                pass  # 不渲染、不计入折叠摘要；其子树未进 visible，finding 经 _bind_findings 上浮
+            elif isinstance(op, Hide) and flagged.get(op.node.node_id):
+                disp_children.append(render_node(op.node))
         if folded:
             disp_children.append(_collapse_line(view, folded, config.prune_below_ms))  # type: ignore[arg-type]
         d = DisplayNode(
@@ -290,7 +291,7 @@ def render_md(
     findings: dict[str, list[Finding]] | None = None,
     *,
     prune_below_ms: float | None = None,
-    registry: FacetRegistry = DEFAULT_REGISTRY,
+    registry: FacetRegistry | None = None,
 ) -> str:
     """facet-engine 版 markdown 全树（默认）/剪枝树（给 prune_below_ms），对齐旧
     `callstack.render_md`（`# trace` 头 + 缩进树），但经 facet 折叠（http/代理链等）。"""
@@ -312,7 +313,7 @@ def render_callstack(
     *,
     node_threshold: int = 120,
     service_kind: str = "service",
-    registry: FacetRegistry = DEFAULT_REGISTRY,
+    registry: FacetRegistry | None = None,
 ) -> str:
     """facet-engine 版调用栈，对齐旧 `callstack.render_callstack`：head + 树 + findings 块。"""
     skel = [n for n in ctx.nodes if n.kind != service_kind]

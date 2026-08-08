@@ -31,7 +31,7 @@ from trace_harness.model.viewtree import build_view
 from trace_harness.view.series import render_series
 from trace_harness.view.text import render_text
 
-FIXTURE = Path(__file__).parent / "fixtures" / "trace_genai_sample.jsonl"
+FIXTURE = Path(__file__).parents[3] / "conformance" / "trace" / "fixtures" / "genai-basic.jsonl"
 
 
 @pytest.fixture

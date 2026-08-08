@@ -12,9 +12,14 @@
 
 from __future__ import annotations
 
+from trace_harness.harness import TraceContributions as TraceContributions
+from trace_harness.harness import TraceHarness as TraceHarness
+from trace_harness.harness import contributions_from_specs as contributions_from_specs
+from trace_harness.harness import merge_trace_contributions as merge_trace_contributions
 from trace_harness.ingest.assemble import assemble as assemble
 from trace_harness.ingest.load import build_context as build_context
 from trace_harness.ingest.sources.jaeger_file import load_jaeger_file as load_jaeger_file
+from trace_harness.model.analysis import analysis_snapshot as analysis_snapshot
 from trace_harness.model.context import TraceContext as TraceContext
 from trace_harness.model.ir import TraceView as TraceView
 from trace_harness.model.ir import dump_view as dump_view

@@ -5,13 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from trace_harness.feature import Feature, bake_features, lazy_features
-from trace_harness.feature.registry import _REGISTRY, register_feature
+from trace_harness.feature.builtins import BUILTIN_FEATURES
+from trace_harness.feature.registry import FeatureRegistry
 from trace_harness.ingest.load import build_context
 from trace_harness.model.intervals import interval_union
 from trace_harness.model.node import Node
 from trace_harness.model.viewtree import build_view
 
-FIXTURE = Path(__file__).parent / "fixtures" / "trace_genai_sample.jsonl"
+FIXTURE = Path(__file__).parents[3] / "conformance" / "trace" / "fixtures" / "genai-basic.jsonl"
 
 
 def _node(nid: str, start: float, dur: float, parent: str | None = None) -> Node:
@@ -54,7 +55,6 @@ def test_self_ms_on_fixture():
 
 def test_pull_memo_resolves_dependency():
     # B 依赖 A：bake 时 pull 自解，不靠注册/遍历顺序；memo 保证 A 只算一次
-    orig = list(_REGISTRY)
     calls = {"a": 0}
 
     def fa(node: Node, ctx: object) -> dict:
@@ -64,28 +64,34 @@ def test_pull_memo_resolves_dependency():
     def fb(node: Node, ctx) -> dict:
         return {"b": ctx.get(node, "a") + 1}  # B 拉 A
 
-    register_feature(Feature(("b",), lambda n: True, fb))  # 故意先注册依赖方 B
-    register_feature(Feature(("a",), lambda n: True, fa))
-    try:
-        nodes = [_node("n", 0, 10)]
-        bake_features(nodes)
-        assert nodes[0].facts["a"] == 20 and nodes[0].facts["b"] == 21  # 依赖解对
-        assert calls["a"] == 1  # memo：A 只算一次（B 拉一次 + bake 再拉 → 命中缓存）
-    finally:
-        _REGISTRY[:] = orig
+    registry = FeatureRegistry(
+        (
+            *BUILTIN_FEATURES,
+            Feature(("b",), lambda n: True, fb),  # 故意先放依赖方 B
+            Feature(("a",), lambda n: True, fa),
+        )
+    )
+    nodes = [_node("n", 0, 10)]
+    bake_features(nodes, registry=registry)
+    assert nodes[0].facts["a"] == 20 and nodes[0].facts["b"] == 21  # 依赖解对
+    assert calls["a"] == 1  # memo：A 只算一次（B 拉一次 + bake 再拉 → 命中缓存）
 
 
 def test_lazy_feature_not_baked_but_on_demand():
     # bake=False 的不进 facts，经 lazy_features 现取
-    orig = list(_REGISTRY)
-    register_feature(
-        Feature(("greeting",), lambda n: True, lambda node, ctx: {"greeting": "hi"}, bake=False)
+    registry = FeatureRegistry(
+        (
+            *BUILTIN_FEATURES,
+            Feature(
+                ("greeting",),
+                lambda n: True,
+                lambda node, ctx: {"greeting": "hi"},
+                bake=False,
+            ),
+        )
     )
-    try:
-        nodes = [_node("n", 0, 10)]
-        bake_features(nodes)
-        assert "greeting" not in nodes[0].facts  # lazy 不烤
-        out = lazy_features(nodes[0], build_view(nodes))
-        assert out["greeting"] == "hi"
-    finally:
-        _REGISTRY[:] = orig
+    nodes = [_node("n", 0, 10)]
+    bake_features(nodes, registry=registry)
+    assert "greeting" not in nodes[0].facts  # lazy 不烤
+    out = lazy_features(nodes[0], build_view(nodes), registry=registry)
+    assert out["greeting"] == "hi"

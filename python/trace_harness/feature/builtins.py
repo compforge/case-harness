@@ -1,4 +1,4 @@
-"""harness 自带 Feature —— import 即登记。零 biz；biz（按 agent_type、curl 等）由 skill 自行登记。
+"""harness 自带 Feature。零 biz；scoped TraceHarness 显式复制这组内置项。
 
 都是 eager（bake=True）+ 读 facts/结构（不读 raw），故 IR-portable。
 """
@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from trace_harness.feature.ctx import Ctx
 from trace_harness.feature.feature import Feature
-from trace_harness.feature.registry import register_feature
 from trace_harness.model.intervals import interval_union
 from trace_harness.model.node import Node
 
@@ -30,7 +29,7 @@ def _http_status(node: Node, ctx: Ctx) -> dict:
     return {"http_status": next((s for s in stats if s != 200), stats[0])}
 
 
-register_feature(Feature(("self_ms",), lambda n: True, _self_ms, bake=True))
-register_feature(
-    Feature(("http_status",), lambda n: n.kind == "model-call", _http_status, bake=True)
+BUILTIN_FEATURES = (
+    Feature(("self_ms",), lambda n: True, _self_ms, bake=True),
+    Feature(("http_status",), lambda n: n.kind == "model-call", _http_status, bake=True),
 )

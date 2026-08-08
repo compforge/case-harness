@@ -1,6 +1,5 @@
 import type { Field, Finding, Node } from "../model/node";
 import type { ViewTree } from "../model/viewtree";
-import type { DisplayNode } from "./display";
 
 export type ChildOp =
   | { type: "expand"; node: Node }
@@ -40,14 +39,6 @@ export abstract class Facet {
     );
   }
 
-  render(
-    _node: Node,
-    _children: Node[],
-    _context: RenderContext,
-    _recurse: (node: Node) => DisplayNode,
-  ): DisplayNode | undefined {
-    return undefined;
-  }
 }
 
 export class DefaultFacet extends Facet {

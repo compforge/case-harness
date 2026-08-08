@@ -25,21 +25,30 @@ import html as html_mod
 import json
 
 from trace_harness.feature import lazy_features
+from trace_harness.feature.builtins import BUILTIN_FEATURES
+from trace_harness.feature.registry import FeatureRegistry
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Finding, Node
 from trace_harness.view.display import DisplayNode
 from trace_harness.view.engine import render as _engine_render
+from trace_harness.view.facets import builtin_facets
+from trace_harness.view.registry import FacetRegistry
 
 ATTR_TRUNCATE = 4000  # 单 attr 值超过即截断；完整原文按 span_id 走 dump-io
 
 
-def _disp_payload(ctx: TraceContext, d: DisplayNode, byid: dict[str, Node]) -> dict:
+def _disp_payload(
+    ctx: TraceContext,
+    d: DisplayNode,
+    byid: dict[str, Node],
+    feature_registry: FeatureRegistry,
+) -> dict:
     """DisplayNode（facet 折叠后的显示树）→ 交互页 payload。timing/原文/facts 用 `node_ids`
     回查底层 Node（duration 优先 wall_ms = 含子孙的 wall-clock duration）；折叠/聚合合成行（kind 空）无底层 node，
     时间用所聚合 node 的包络。findings 由 engine 绑在 DisplayNode 上（折叠则已上浮）。"""
     brief = "  ".join(f"{f.label}={f.value}" for f in d.brief)
     fnd = [{"severity": f.severity, "source": f.source, "note": f.note} for f in d.findings]
-    kids = [_disp_payload(ctx, c, byid) for c in d.children]
+    kids = [_disp_payload(ctx, c, byid, feature_registry) for c in d.children]
     node = byid.get(d.node_ids[0]) if (d.kind and d.node_ids) else None
     if node is not None:
         return {
@@ -56,7 +65,14 @@ def _disp_payload(ctx: TraceContext, d: DisplayNode, byid: dict[str, Node]) -> d
             "facts": {k: str(v) for k, v in (node.facts or {}).items() if not k.startswith("_")},
             # lazy Feature（curl/bash…）：渲染期算好嵌入（静态页无后端，按需算不了）；非适用节点为空
             "features": {
-                k: v for k, v in lazy_features(node, ctx.view(), ctx.raw_attr).items() if v
+                k: v
+                for k, v in lazy_features(
+                    node,
+                    ctx.view(),
+                    ctx.raw_attr,
+                    registry=feature_registry,
+                ).items()
+                if v
             },
             "span_ids": node.span_ids,
             "primary_span_id": node.primary_span_id,
@@ -307,13 +323,21 @@ select((want&&byId[want]&&want)||firstError(TREE.roots)||(TREE.roots[0]&&TREE.ro
 """
 
 
-def render_interactive(ctx: TraceContext, findings: dict[str, list[Finding]] | None = None) -> str:
+def render_interactive(
+    ctx: TraceContext,
+    findings: dict[str, list[Finding]] | None = None,
+    *,
+    facet_registry: FacetRegistry | None = None,
+    feature_registry: FeatureRegistry | None = None,
+) -> str:
     """渲染为单文件交互 HTML（菜单：调用栈=左树右详情 / 火焰图）。findings 为 diagnose 输出，可省。"""
     findings = findings or {}
+    facet_registry = facet_registry or FacetRegistry(builtin_facets())
+    feature_registry = feature_registry or FeatureRegistry(BUILTIN_FEATURES)
     byid = {n.node_id: n for n in ctx.nodes}
     # 走 facet 引擎：DisplayNode 树（folded）→ payload；交互页因此与 show/静态一致地聚焦
-    roots = _engine_render(ctx.view(), findings)
-    tree_payload = {"roots": [_disp_payload(ctx, d, byid) for d in roots]}
+    roots = _engine_render(ctx.view(), findings, registry=facet_registry)
+    tree_payload = {"roots": [_disp_payload(ctx, d, byid, feature_registry) for d in roots]}
     referenced = {sid for n in ctx.nodes for sid in n.span_ids}
     spans_payload = {sid: _span_payload(ctx, sid) for sid in referenced if sid in ctx.spans}
 

@@ -1,0 +1,179 @@
+{
+  "schema": "trace-harness/analysis@1",
+  "trace_id": "abc123fixturetrace0000000000000001",
+  "span_count": 6,
+  "nodes": [
+    {
+      "node_id": "1111111111111111",
+      "parent_node_id": null,
+      "kind": "agent",
+      "name": "invoke_agent main",
+      "start_ms": 1700000000000,
+      "duration_ms": 8000,
+      "service": "planit-server",
+      "primary_span_id": "1111111111111111",
+      "span_ids": ["1111111111111111"],
+      "error_span_ids": [],
+      "error_text": "",
+      "facts": {
+        "duration_ms": 8000,
+        "agent": "main-agent",
+        "self_ms": 900
+      },
+      "brief": [
+        {"label": "agent", "value": "main-agent", "emphasis": "strong"},
+        {"label": "dur", "value": "8.00s", "emphasis": "dim"}
+      ]
+    },
+    {
+      "node_id": "2222222222222222",
+      "parent_node_id": "1111111111111111",
+      "kind": "model-call",
+      "name": "chat planner",
+      "start_ms": 1700000000100,
+      "duration_ms": 3400,
+      "service": "planit-server",
+      "primary_span_id": "2222222222222222",
+      "span_ids": ["2222222222222222"],
+      "error_span_ids": [],
+      "error_text": "",
+      "facts": {
+        "duration_ms": 3400,
+        "model": "model-alpha-seed-2",
+        "in_tokens": 1820,
+        "out_tokens": 640,
+        "io_span": "2222222222222222",
+        "self_ms": 100,
+        "http_status": 200
+      },
+      "brief": [
+        {"label": "model", "value": "model-alpha-seed-2", "emphasis": "strong"},
+        {"label": "tok", "value": "in 1820 / out 640", "emphasis": "normal"},
+        {"label": "dur", "value": "3.40s", "emphasis": "dim"},
+        {"label": "http", "value": "200", "emphasis": "normal"}
+      ]
+    },
+    {
+      "node_id": "3333333333333333",
+      "parent_node_id": "2222222222222222",
+      "kind": "http",
+      "name": "POST /chat/completions",
+      "start_ms": 1700000000150,
+      "duration_ms": 3300,
+      "service": "planit-server",
+      "primary_span_id": "3333333333333333",
+      "span_ids": ["3333333333333333"],
+      "error_span_ids": [],
+      "error_text": "",
+      "facts": {
+        "duration_ms": 3300,
+        "status": 200,
+        "method": "POST",
+        "url": "http://aigw/v1/chat/completions"
+      },
+      "brief": [
+        {"label": "method", "value": "POST", "emphasis": "dim"},
+        {"label": "http", "value": "200", "emphasis": "normal"},
+        {"label": "dur", "value": "3.30s", "emphasis": "dim"}
+      ]
+    },
+    {
+      "node_id": "4444444444444444",
+      "parent_node_id": "1111111111111111",
+      "kind": "tool-call",
+      "name": "execute_tool web_search",
+      "start_ms": 1700000003600,
+      "duration_ms": 1200,
+      "service": "agent-executor",
+      "primary_span_id": "4444444444444444",
+      "span_ids": ["4444444444444444"],
+      "error_span_ids": [],
+      "error_text": "",
+      "facts": {
+        "duration_ms": 1200,
+        "tool": "web_search",
+        "result_bytes": 10,
+        "io_span": "4444444444444444"
+      },
+      "brief": [
+        {"label": "tool", "value": "web_search", "emphasis": "strong"},
+        {"label": "dur", "value": "1.20s", "emphasis": "dim"},
+        {"label": "result", "value": "10B", "emphasis": "dim"}
+      ]
+    },
+    {
+      "node_id": "5555555555555555",
+      "parent_node_id": "1111111111111111",
+      "kind": "model-call",
+      "name": "chat synth",
+      "start_ms": 1700000004900,
+      "duration_ms": 2500,
+      "service": "planit-server",
+      "primary_span_id": "5555555555555555",
+      "span_ids": ["5555555555555555"],
+      "error_span_ids": ["5555555555555555"],
+      "error_text": "ModelTPOTTimeoutError: aigw 504 gateway timeout",
+      "facts": {
+        "duration_ms": 2500,
+        "model": "model-alpha-seed-2",
+        "in_tokens": 2100,
+        "self_ms": 100,
+        "http_status": 504
+      },
+      "brief": [
+        {"label": "model", "value": "model-alpha-seed-2", "emphasis": "strong"},
+        {"label": "tok", "value": "in 2100", "emphasis": "normal"},
+        {"label": "dur", "value": "2.50s", "emphasis": "dim"},
+        {"label": "http", "value": "504", "emphasis": "normal"}
+      ]
+    },
+    {
+      "node_id": "6666666666666666",
+      "parent_node_id": "5555555555555555",
+      "kind": "http",
+      "name": "POST /chat/completions",
+      "start_ms": 1700000004950,
+      "duration_ms": 2400,
+      "service": "planit-server",
+      "primary_span_id": "6666666666666666",
+      "span_ids": ["6666666666666666"],
+      "error_span_ids": ["6666666666666666"],
+      "error_text": "",
+      "facts": {
+        "duration_ms": 2400,
+        "status": 504,
+        "method": "POST",
+        "url": "http://aigw/v1/chat/completions"
+      },
+      "brief": [
+        {"label": "method", "value": "POST", "emphasis": "dim"},
+        {"label": "http", "value": "504", "emphasis": "strong"},
+        {"label": "dur", "value": "2.40s", "emphasis": "dim"}
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "ref": "5555555555555555",
+      "source": "error",
+      "severity": "error",
+      "scope": "node",
+      "rank": null,
+      "note": "ModelTPOTTimeoutError: aigw 504 gateway timeout",
+      "data": {},
+      "symptoms": [],
+      "causes": []
+    },
+    {
+      "ref": "6666666666666666",
+      "source": "error",
+      "severity": "error",
+      "scope": "node",
+      "rank": null,
+      "note": "",
+      "data": {},
+      "symptoms": [],
+      "causes": []
+    }
+  ]
+}

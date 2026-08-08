@@ -58,7 +58,10 @@ case-harness/
 - 五个 Python SDK 共享同一个 uv 工程与 `spec/` 约定，**互不 import**；公共能力集中在 `common`（case / verdict / llm / facets + report_kit 报告 IR）这一中立共享层，而不是 SDK 之间互相复用。各 SDK 仍自带一小撮协议原语（Outcome 形状、runner、SSEParser；perf 自带 httpx 发压栈、trace 自带薄 driver）——**先复制后收敛**，确属公共再收进 `common`。trace 的 parquet 持久化走可选 extra `[trace-corpus]`，不给其它 SDK 增重。
 - 新增能力先想清楚归哪类问题（对错 / 效果 / 容量 / 归因），落到对应 SDK；跨 SDK 的"公共抽象"冲动默认抑制，先复制后收敛，确属公共再进 `common`。
 - Go SDK 短期不跟进 Python 侧新增，等形状稳定后批量同步。
-- TypeScript trace-harness 以 Python 实现作为 canonical implementation，公开 IR 字段保持同名；通用包不承载业务域知识，业务 spec、Feature 和 Facet 由消费方注册。
+- Trace Harness 的 canonical 定义是 [`spec/trace-harness.md`](spec/trace-harness.md) 与
+  `schema/trace/v1/`；Python 和 TypeScript 是对等实现，共用 `conformance/trace/`
+  fixtures。通用包不承载业务域知识，业务能力通过 scoped
+  `TraceContributions` 显式组合。
 
 ## 开发与测试
 
@@ -76,7 +79,7 @@ cd python && uv run python -m eval_harness.cli eval_harness/materials/experiment
 cd python && uv run python -m perf_harness.cli run perf_harness/examples/mock.yaml --out /tmp/ph
 
 # trace_harness 端到端（离线 jaeger 文件 → 调用栈 + 判读；批量 corpus 用 trace batch <exp.yaml>）
-cd python && uv run trace single trace_harness/tests/fixtures/trace_genai_sample.jsonl --diagnose
+cd python && uv run trace single ../conformance/trace/fixtures/genai-basic.jsonl --diagnose
 
 # Go（参考实现）
 cd go && go test ./...

@@ -1,10 +1,10 @@
-"""KindSpec —— 横切两条流水线的语义包；物理上一 kind 一文件，逻辑上按 facet 分层。
+"""KindSpec —— 横切两条流水线的语义包；物理上一 kind 一文件，逻辑上按契约分层。
 
 每个消费者只声明自己的 facet（接口隔离）：
 
-    AssemblyFacet   matches / claims / build   → assemble 消费（识别 + 卫星认领 + facts 抽列）
-    RuleFacet       metrics / rules            → diagnose 消费（离群/趋势 + per-kind 判读）
-    ViewFacet       project / actions          → render / cli 消费（投影 + 动作）
+    Assembly contract   matches / claims / build   → assemble 消费（识别 + 卫星认领 + facts 抽列）
+    Detection contract  metrics / rules            → diagnose 消费（离群/趋势 + per-kind 判读）
+    IR projection       project                    → assemble 烤入 Node.brief
 
 `build` 是**业务字段隔离边界**（= Canopy feature lambda）：raw 的业务 specific 字段
 （gen_ai.* 之类）抽成命名 facts 列后即止，下游 report/diagnose/corpus 只见列名、零业务知识。
@@ -36,11 +36,11 @@ Rule = Callable[["Node", "TraceContext"], list]
 @dataclass
 class KindSpec:
     kind: str
-    # —— AssemblyFacet ——
+    # —— Assembly contract ——
     matches: Matcher
     claims: Claimer | None = None
     build: Builder | None = None
-    # —— RuleFacet ——
+    # —— Detection contract ——
     metrics: dict[str, Callable[[Node], float | None]] = field(default_factory=dict)
     # per-metric 离群策略："ratio"（≥N× 同类中位，默认）| "topn"（永远标最大的 N 个——
     # 适合 result_bytes/in_chars 这类无自然基线、看最反常几个的规模度量）
@@ -49,7 +49,7 @@ class KindSpec:
     # 该 kind 的节点是否参与 obs_hole 检测（默认参与）。跨服务的「聚合容器」kind（如 AS 的
     # agent）应关掉：断链时子树天然不在它下面，空洞是拓扑事实不是缺埋点，报了全是误报。
     obs_hole: bool = True
-    # —— ViewFacet —— per-kind 一行投影（assemble bake 期烤进 node.brief）
+    # —— IR projection —— per-kind 一行投影（assemble bake 期烤进 node.brief）
     project: Callable[[Node], list[Field]] | None = None
 
 
