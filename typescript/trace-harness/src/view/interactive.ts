@@ -1,8 +1,12 @@
 import { lazyFeatures } from "../feature";
+import { builtinFeatures } from "../feature/builtins";
+import { FeatureRegistry } from "../feature/registry";
 import type { TraceContext } from "../model/context";
 import type { Finding, Node } from "../model/node";
 import type { DisplayNode } from "./display";
 import { renderDisplay } from "./engine";
+import { builtinFacets } from "./facets";
+import { FacetRegistry } from "./registry";
 
 const ATTR_TRUNCATE = 4000;
 
@@ -12,8 +16,15 @@ function htmlEscape(value: unknown): string {
   })[char]!);
 }
 
-function displayPayload(context: TraceContext, display: DisplayNode, byId: Map<string, Node>): Record<string, unknown> {
-  const children = display.children.map((child) => displayPayload(context, child, byId));
+function displayPayload(
+  context: TraceContext,
+  display: DisplayNode,
+  byId: Map<string, Node>,
+  featureRegistry: FeatureRegistry,
+): Record<string, unknown> {
+  const children = display.children.map((child) => (
+    displayPayload(context, child, byId, featureRegistry)
+  ));
   const findings = display.findings.map((finding) => ({
     severity: finding.severity,
     source: finding.source,
@@ -22,7 +33,12 @@ function displayPayload(context: TraceContext, display: DisplayNode, byId: Map<s
   const node = display.kind && display.node_ids.length ? byId.get(display.node_ids[0]!) : undefined;
   if (node) {
     const features = Object.fromEntries(
-      Object.entries(lazyFeatures(node, context.view(), (spanId) => context.raw_attr(spanId)))
+      Object.entries(lazyFeatures(
+        node,
+        context.view(),
+        (spanId) => context.raw_attr(spanId),
+        featureRegistry,
+      ))
         .filter(([, value]) => value !== undefined && value !== null && value !== "")
         .map(([key, value]) => [key, typeof value === "string" ? value : JSON.stringify(value)]),
     );
@@ -139,10 +155,18 @@ function firstError(ns){for(const n of ns){if(n.has_error)return n.node_id;const
 export function renderInteractive(
   context: TraceContext,
   findings: Record<string, Finding[]> = {},
+  options: {
+    featureRegistry?: FeatureRegistry;
+    facetRegistry?: FacetRegistry;
+  } = {},
 ): string {
+  const featureRegistry = options.featureRegistry ?? new FeatureRegistry(builtinFeatures());
+  const facetRegistry = options.facetRegistry ?? new FacetRegistry(builtinFacets());
   const byId = new Map(context.nodes.map((node) => [node.node_id, node]));
-  const roots = renderDisplay(context.view(), findings);
-  const tree = { roots: roots.map((root) => displayPayload(context, root, byId)) };
+  const roots = renderDisplay(context.view(), findings, facetRegistry);
+  const tree = {
+    roots: roots.map((root) => displayPayload(context, root, byId, featureRegistry)),
+  };
   const referenced = new Set(context.nodes.flatMap((node) => node.span_ids));
   const spans = Object.fromEntries(
     [...referenced].filter((spanId) => context.spans.has(spanId)).map((spanId) => [spanId, spanPayload(context, spanId)]),

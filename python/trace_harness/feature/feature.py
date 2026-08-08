@@ -24,4 +24,3 @@ class Feature:
     applies: Callable[[Node], bool]
     compute: Callable[[Node, object], dict]  # (node, Ctx) -> {名: 值}；Ctx 见 ctx.py
     bake: bool = True
-    bake: bool = True

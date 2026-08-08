@@ -15,7 +15,7 @@ from trace_harness.analyze.budget import (
 from trace_harness.ingest.load import build_context
 from trace_harness.model.node import Node
 
-FIXTURE = Path(__file__).parent / "fixtures" / "trace_genai_sample.jsonl"
+FIXTURE = Path(__file__).parents[3] / "conformance" / "trace" / "fixtures" / "genai-basic.jsonl"
 
 
 def _mk(kind, name, start, dur, nid, parent=None):

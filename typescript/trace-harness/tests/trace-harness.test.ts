@@ -2,15 +2,20 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  analysisSnapshot,
   assemble,
+  DefaultFacet,
   diagnose,
+  type FeatureContext,
   genAiSpecs,
+  Node,
   normalizeJaegerSpans,
   renderInteractive,
+  TraceHarness,
 } from "../src";
 
 function fixtureDocuments(): Array<Record<string, unknown>> {
-  const path = resolve(import.meta.dir, "../../../python/trace_harness/tests/fixtures/trace_genai_sample.jsonl");
+  const path = resolve(import.meta.dir, "../../../conformance/trace/fixtures/genai-basic.jsonl");
   return readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line));
 }
 
@@ -49,5 +54,84 @@ describe("Python trace_harness parity fixture", () => {
     expect(html).toContain("chat planner");
     expect(html).toContain("http_status");
     expect(html).toContain("errors 2");
+  });
+});
+
+describe("shared conformance", () => {
+  test("matches the canonical Analysis IR", async () => {
+    const expected = await Bun.file(new URL(
+      "../../../conformance/trace/cases/genai-basic.analysis.json",
+      import.meta.url,
+    )).json();
+    const harness = new TraceHarness({ specs: genAiSpecs() });
+    const context = harness.assemble(normalizeJaegerSpans(fixtureDocuments()));
+
+    expect(analysisSnapshot(context, harness.diagnose(context))).toEqual(expected);
+  });
+});
+
+describe("scoped TraceHarness", () => {
+  test("does not leak Plugin contributions between harnesses", () => {
+    class AlphaModelFacet extends DefaultFacet {
+      override priority = 100;
+      match(node: Node): boolean {
+        return node.kind === "model-call";
+      }
+    }
+
+    const alpha = new TraceHarness({
+      specs: genAiSpecs(),
+      features: [{
+        produces: ["scope_marker"],
+        applies: (node) => node.kind === "agent",
+        compute: () => ({ scope_marker: "alpha" }),
+        bake: true,
+      }, {
+        produces: ["scope_action"],
+        applies: (node) => node.kind === "agent",
+        compute: (_node: Node, _context: FeatureContext) => ({ scope_action: "alpha-action" }),
+        bake: false,
+      }],
+      detectors: [(node) => node.facts.scope_marker === "alpha" ? [{
+        ref: node.node_id,
+        source: "scope:alpha",
+        severity: "info",
+      }] : []],
+      facets: [new AlphaModelFacet()],
+    });
+    const plain = new TraceHarness({ specs: genAiSpecs() });
+
+    const alphaContext = alpha.assemble(normalizeJaegerSpans(fixtureDocuments()));
+    const plainContext = plain.assemble(normalizeJaegerSpans(fixtureDocuments()));
+    const alphaAgent = alphaContext.nodes.find((node) => node.kind === "agent")!;
+    const plainAgent = plainContext.nodes.find((node) => node.kind === "agent")!;
+
+    expect(alphaAgent.facts.scope_marker).toBe("alpha");
+    expect(plainAgent.facts.scope_marker).toBeUndefined();
+    expect(alpha.lazyFeatures(alphaAgent, alphaContext)).toEqual({ scope_action: "alpha-action" });
+    expect(plain.lazyFeatures(plainAgent, plainContext)).toEqual({});
+    const alphaFindings = alpha.diagnose(alphaContext);
+    const plainFindings = plain.diagnose(plainContext);
+    expect(alphaFindings[alphaAgent.node_id]?.map((finding) => finding.source))
+      .toContain("scope:alpha");
+    expect(Object.values(plainFindings).flat().map((finding) => finding.source))
+      .not.toContain("scope:alpha");
+    const displayedIds = (roots: ReturnType<TraceHarness["renderDisplay"]>): Set<string> => {
+      const ids = new Set<string>();
+      const stack = [...roots];
+      while (stack.length) {
+        const display = stack.pop()!;
+        if (display.kind) for (const nodeId of display.node_ids) ids.add(nodeId);
+        stack.push(...display.children);
+      }
+      return ids;
+    };
+    const successHttp = alphaContext.nodes.find((node) => (
+      node.kind === "http" && node.facts.status === 200
+    ))!;
+    expect(displayedIds(alpha.renderDisplay(alphaContext, alphaFindings))).toContain(successHttp.node_id);
+    expect(displayedIds(plain.renderDisplay(plainContext, plainFindings))).not.toContain(successHttp.node_id);
+    expect(alpha.renderInteractive(alphaContext, alphaFindings)).toContain("alpha-action");
+    expect(plain.renderInteractive(plainContext, plainFindings)).not.toContain("alpha-action");
   });
 });

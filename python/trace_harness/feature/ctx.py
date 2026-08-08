@@ -10,14 +10,20 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from trace_harness.feature.registry import producing
+from trace_harness.feature.registry import FeatureRegistry
 from trace_harness.model.node import Node
 
 
 class Ctx:
-    def __init__(self, view: Any, raw_fn: Callable[[str], dict] | None = None) -> None:
+    def __init__(
+        self,
+        view: Any,
+        raw_fn: Callable[[str], dict] | None,
+        registry: FeatureRegistry,
+    ) -> None:
         self._view = view
         self._raw_fn = raw_fn
+        self._registry = registry
         self._memo: dict[tuple[str, str], Any] = {}
 
     def children(self, node: Node) -> list[Node]:
@@ -35,7 +41,7 @@ class Ctx:
             self._memo[key] = node.facts[name]
             return self._memo[key]
         self._memo[key] = None  # 先占位防环：compute 递归里再入同 key → 拿到 None、断环
-        f = producing(name, node)  # 找产 name 的 Feature 现算
+        f = self._registry.producing(name, node)  # 找产 name 的 Feature 现算
         if f is not None:
             for k, v in (f.compute(node, self) or {}).items():
                 self._memo[(node.node_id, k)] = v

@@ -20,7 +20,7 @@ from trace_harness.kinds import genai
 from trace_harness.model.node import Finding
 from trace_harness.model.span import NormSpan
 
-FIXTURE = Path(__file__).parent / "fixtures" / "trace_genai_sample.jsonl"
+FIXTURE = Path(__file__).parents[3] / "conformance" / "trace" / "fixtures" / "genai-basic.jsonl"
 
 
 def _span(sid, parent, name, attrs, *, err=False, etype="", dur=1000, start=0.0, trace="t1"):

@@ -1,16 +1,15 @@
-"""内置通用拓扑 detector —— 纯结构判读，注册进全局 detector 注册表，对每个 node 跑一遍。
+"""内置通用拓扑 detector —— 纯结构判读，每个 TraceHarness 独立持有。
 
 - detached：节点的 primary span 的父 span 不在本 trace —— 跨服务断链 / 采样丢失。
 - obs_hole：有子节点的容器节点，wall-clock time 里未被子节点覆盖的空隙 —— 疑似未埋点的耗时。
 - propagated：错误沿父链向上重复记的副本（源头在更深 node）—— 标出副本、留源头那一跳。
 
-都不依赖业务知识（纯 Node 字段 + 父子边），故走 register_detector 而非 per-kind rules；与 domain
-detector 同一套机制。import 本模块即注册（diagnose/__init__ 引它触发）。
+都不依赖业务知识（纯 Node 字段 + 父子边），故作为内置 contribution；
+domain detector 与它们走同一套机制。
 """
 
 from __future__ import annotations
 
-from trace_harness.analyze.diagnose.registry import register_detector
 from trace_harness.model.context import TraceContext
 from trace_harness.model.intervals import interval_union
 from trace_harness.model.node import Finding, Node
@@ -30,7 +29,6 @@ def _error_sig(ctx: TraceContext, n: Node) -> str:
     return ctx.error_text(n.error_anchor)[:60]
 
 
-@register_detector
 def detached(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
     psid = ctx.spans[node.primary_span_id].parent_span_id
     if psid and psid not in ctx.spans:
@@ -45,7 +43,6 @@ def detached(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
     return []
 
 
-@register_detector
 def obs_hole(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
     spec = ctx.specs.get(node.kind)
     if spec is not None and not spec.obs_hole:
@@ -73,7 +70,6 @@ def obs_hole(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
     return []
 
 
-@register_detector
 def propagated(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
     """本节点若有 error 且子树里有同签名 error 后代 → 它是传播副本（源头在更深 node）。
     naive 计数会把一份错误沿 model-call→node→agent 重复算 N 倍，标出副本、留最深源头那一跳。"""
@@ -95,3 +91,6 @@ def propagated(node: Node, ctx: TraceContext, found: dict) -> list[Finding]:
             ]
         stack.extend(view.children(d))
     return []
+
+
+BUILTIN_DETECTORS = (detached, obs_hole, propagated)

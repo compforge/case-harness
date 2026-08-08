@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from trace_harness.analyze.diagnose import diagnose, register_detector
-from trace_harness.analyze.diagnose.registry import _DETECTORS
+from trace_harness.analyze.diagnose import diagnose
+from trace_harness.analyze.diagnose.detectors import BUILTIN_DETECTORS
+from trace_harness.analyze.diagnose.registry import DetectorRegistry
 from trace_harness.ingest.load import build_context
 from trace_harness.model.node import Finding
 
-FIXTURE = Path(__file__).parent / "fixtures" / "trace_genai_sample.jsonl"
+FIXTURE = Path(__file__).parents[3] / "conformance" / "trace" / "fixtures" / "genai-basic.jsonl"
 
 
 def test_finding_symptoms_causes_default_empty():
@@ -20,7 +21,6 @@ def test_finding_symptoms_causes_default_empty():
 
 
 def test_registered_detector_runs_with_found_accumulator():
-    orig = list(_DETECTORS)
     saw_base = {"yes": False}
 
     def det(node, ctx, found):
@@ -40,14 +40,11 @@ def test_registered_detector_runs_with_found_accumulator():
             ]
         return []
 
-    register_detector(det)
-    try:
-        ctx = build_context(FIXTURE)
-        grouped = diagnose(ctx)
-        agent = next(n for n in ctx.nodes if n.kind == "agent")
-        mine = [x for x in grouped.get(agent.node_id, []) if x.source == "test:symptom"]
-        assert mine, "注册的 detector 没产出 finding"
-        assert mine[0].symptoms == ("慢",) and mine[0].causes == (agent.node_id,)
-        assert saw_base["yes"], "found 累加器没把 base findings 传给注册 detector"
-    finally:
-        _DETECTORS[:] = orig  # 不污染其它测试
+    registry = DetectorRegistry((*BUILTIN_DETECTORS, det))
+    ctx = build_context(FIXTURE)
+    grouped = diagnose(ctx, detector_registry=registry)
+    agent = next(n for n in ctx.nodes if n.kind == "agent")
+    mine = [x for x in grouped.get(agent.node_id, []) if x.source == "test:symptom"]
+    assert mine, "scoped detector 没产出 finding"
+    assert mine[0].symptoms == ("慢",) and mine[0].causes == (agent.node_id,)
+    assert saw_base["yes"], "found 累加器没把 base findings 传给 detector"

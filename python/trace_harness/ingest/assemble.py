@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from trace_harness.feature import bake_features
+from trace_harness.feature.registry import FeatureRegistry
 from trace_harness.kinds.base import SERVICE_KIND, service_spec
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Node
@@ -25,7 +26,12 @@ from trace_harness.model.span import error_text as span_error_text
 from trace_harness.model.spec import KindSpec, SpecSet
 
 
-def assemble(spans: dict[str, NormSpan], specset: SpecSet) -> TraceContext:
+def assemble(
+    spans: dict[str, NormSpan],
+    specset: SpecSet,
+    *,
+    feature_registry: FeatureRegistry | None = None,
+) -> TraceContext:
     # 1 route：span → 命中的 spec（None = 未分类）
     kind_of: dict[str, KindSpec | None] = {sid: specset.classify(s) for sid, s in spans.items()}
     primaries = {sid for sid, spec in kind_of.items() if spec is not None}
@@ -137,7 +143,11 @@ def assemble(spans: dict[str, NormSpan], specset: SpecSet) -> TraceContext:
     # 7.5 feature：树已建好，拉所有 eager Feature 烤进 node.facts（结构不变）。须在 bake 前，
     #   好让 bake 的 project(brief) 读到派生 facts（如 model-call 卷上的 http_status）。
     #   raw_fn 给将来 eager+raw 的 Feature（build 类）用；现 builtins 只读 facts/结构。
-    bake_features(nodes, raw_fn=lambda sid: spans[sid].attrs if sid in spans else {})
+    bake_features(
+        nodes,
+        raw_fn=lambda sid: spans[sid].attrs if sid in spans else {},
+        registry=feature_registry,
+    )
 
     # 8 bake：per-kind 投影 + 错误原文烤进 node（投影只此一处，下游渲染器/treecli 零 kind 依赖、
     #   可脱离 ctx 从 nodes.json 渲染）。急性投影对全树是微秒级，换单投影 + 单遍历核。

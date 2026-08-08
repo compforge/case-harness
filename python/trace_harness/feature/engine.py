@@ -7,16 +7,22 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from trace_harness.feature.builtins import BUILTIN_FEATURES
 from trace_harness.feature.ctx import Ctx
-from trace_harness.feature.registry import registered_features
+from trace_harness.feature.registry import FeatureRegistry
 from trace_harness.model.node import Node
 from trace_harness.model.viewtree import build_view
 
 
-def bake_features(nodes: list[Node], raw_fn: Callable[[str], dict] | None = None) -> None:
+def bake_features(
+    nodes: list[Node],
+    raw_fn: Callable[[str], dict] | None = None,
+    registry: FeatureRegistry | None = None,
+) -> None:
     """assemble 末尾：拉所有 `bake=True` 的 Feature，写进 `node.facts`（取代旧 run_derive）。"""
-    ctx = Ctx(build_view(nodes), raw_fn)
-    eager = [f for f in registered_features() if f.bake]
+    registry = registry or FeatureRegistry(BUILTIN_FEATURES)
+    ctx = Ctx(build_view(nodes), raw_fn, registry)
+    eager = [f for f in registry.registered() if f.bake]
     for n in nodes:
         for f in eager:
             if f.applies(n):
@@ -26,11 +32,17 @@ def bake_features(nodes: list[Node], raw_fn: Callable[[str], dict] | None = None
                         n.facts[k] = v
 
 
-def lazy_features(node: Node, view: object, raw_fn: Callable[[str], dict] | None = None) -> dict:
+def lazy_features(
+    node: Node,
+    view: object,
+    raw_fn: Callable[[str], dict] | None = None,
+    registry: FeatureRegistry | None = None,
+) -> dict:
     """consumer 按需：拉这个 node 上所有 `bake=False` 的 Feature（curl/bash…），返回 {名: 值}。"""
-    ctx = Ctx(view, raw_fn)
+    registry = registry or FeatureRegistry(BUILTIN_FEATURES)
+    ctx = Ctx(view, raw_fn, registry)
     out: dict = {}
-    for f in registered_features():
+    for f in registry.registered():
         if not f.bake and f.applies(node):
             for k in f.produces:
                 out[k] = ctx.get(node, k)

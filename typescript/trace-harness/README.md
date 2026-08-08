@@ -6,17 +6,18 @@ a self-contained interactive node-tree HTML report.
 
 ```ts
 import {
-  assemble,
-  diagnose,
   genAiSpecs,
   normalizeJaegerSpans,
-  renderInteractive,
+  TraceHarness,
 } from "@compforge/trace-harness";
 
 const spans = normalizeJaegerSpans(rawJaegerDocuments);
-const context = assemble(spans, genAiSpecs());
-const html = renderInteractive(context, diagnose(context));
+const harness = new TraceHarness({ specs: genAiSpecs() });
+const context = harness.assemble(spans);
+const html = harness.renderInteractive(context, harness.diagnose(context));
 ```
 
-Domain-specific kinds, features and facets stay in the consumer and compose with the generic
-implementation through `mergeSpecs`, `registerFeature` and `registerFacet`.
+Domain-specific behavior stays in the consumer and is passed explicitly as scoped
+`TraceContributions` (`specs`, `features`, `detectors`, and declarative `facets`). Facets state
+presentation intent; the harness owns traversal and serialization. The language-neutral contract
+is [`spec/trace-harness.md`](../../spec/trace-harness.md).

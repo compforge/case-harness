@@ -1,11 +1,10 @@
-import "./facets";
-
 import { formatMs } from "../kinds/base";
 import type { Finding, Node } from "../model/node";
 import type { ViewTree } from "../model/viewtree";
 import type { DisplayNode } from "./display";
 import type { ChildOp, RenderConfig, RenderContext } from "./facet";
-import { DEFAULT_REGISTRY, type FacetRegistry } from "./registry";
+import { builtinFacets } from "./facets";
+import { FacetRegistry } from "./registry";
 
 function subtreeSize(view: ViewTree, node: Node): { count: number; total: number } {
   let count = 1;
@@ -44,40 +43,46 @@ function foldedLine(view: ViewTree, nodes: Node[], cut: number): DisplayNode {
 export function renderDisplay(
   view: ViewTree,
   findings: Record<string, Finding[]> = {},
-  registry: FacetRegistry = DEFAULT_REGISTRY,
+  registry?: FacetRegistry,
   config: RenderConfig = {},
 ): DisplayNode[] {
+  const activeRegistry = registry ?? new FacetRegistry(builtinFacets());
+  // The engine computes error/finding visibility once; facets only declare layout intent.
+  const visibleSignal = flagged(view, findings);
   const context: RenderContext = {
     view,
     findings,
-    flagged: config.prune_below_ms === undefined ? new Map() : flagged(view, findings),
+    flagged: visibleSignal,
     config,
   };
   const visible = new Map<string, DisplayNode>();
 
   const renderNode = (node: Node): DisplayNode => {
-    const facet = registry.dispatch(node);
+    const facet = activeRegistry.dispatch(node);
     const children = view.children(node);
-    const custom = facet.render(node, children, context, renderNode);
-    if (custom) {
-      for (const nodeId of custom.node_ids) if (!visible.has(nodeId)) visible.set(nodeId, custom);
-      return custom;
-    }
     const output: DisplayNode[] = [];
     const folded: Node[] = [];
     for (const operation of facet.layout(node, children, context)) {
       switch (operation.type) {
         case "expand": output.push(renderNode(operation.node)); break;
-        case "fold": folded.push(operation.node); break;
-        case "hide": break;
+        case "fold":
+          if (visibleSignal.get(operation.node.node_id)) output.push(renderNode(operation.node));
+          else folded.push(operation.node);
+          break;
+        case "hide":
+          if (visibleSignal.get(operation.node.node_id)) output.push(renderNode(operation.node));
+          break;
         case "summarize":
-          output.push({
-            kind: operation.node.kind,
-            name: operation.node.name,
-            brief: operation.line,
-            node_ids: [operation.node.node_id],
-            children: [], findings: [], folded: 0,
-          });
+          if (visibleSignal.get(operation.node.node_id)) output.push(renderNode(operation.node));
+          else {
+            output.push({
+              kind: operation.node.kind,
+              name: operation.node.name,
+              brief: operation.line,
+              node_ids: [operation.node.node_id],
+              children: [], findings: [], folded: 0,
+            });
+          }
           break;
         case "aggregate": {
           const total = operation.nodes.reduce((sum, item) => sum + item.duration_ms, 0);

@@ -20,7 +20,7 @@ from trace_harness.view.engine import render_callstack
 from trace_harness.view.explore import render_explore
 from trace_harness.view.state import ViewState, handle, resolve_selector
 
-FIXTURE = Path(__file__).parent / "fixtures" / "trace_genai_sample.jsonl"
+FIXTURE = Path(__file__).parents[3] / "conformance" / "trace" / "fixtures" / "genai-basic.jsonl"
 
 _MODEL = {"gen_ai.operation.name": "chat", "gen_ai.request.model": "m"}
 

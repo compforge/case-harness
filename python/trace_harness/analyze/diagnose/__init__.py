@@ -3,7 +3,7 @@
 两层：
 - **base 生产者**（一次性收集）：errors（节点固有错误）/ per-kind rules（域知识跟 kind 走）/
   outlier（突变离群）/ trend（渐变恶化）/ pattern（行为模式，单条嫌疑、跨 trace 才成结论）。
-- **注册的全局 detector**（register_detector）：内置拓扑（detached/obs_hole/propagated，住
+- **scoped detector**：内置拓扑（detached/obs_hole/propagated，住
   `detectors.py`）+ domain detector，统一 `(node, ctx, found)` 签名，**后序**逐 node 跑、
   可读已产 findings 做归因。判读机制收敛到这一套，不再硬编码 detect()。
 
@@ -15,12 +15,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from trace_harness.analyze.diagnose import detectors  # noqa: F401 —— import 即注册内置拓扑 detector
+from trace_harness.analyze.diagnose.detectors import BUILTIN_DETECTORS
 from trace_harness.analyze.diagnose.outliers import find_outliers
 from trace_harness.analyze.diagnose.patterns import find_patterns
 from trace_harness.analyze.diagnose.probes import probe
-from trace_harness.analyze.diagnose.registry import register_detector as register_detector
-from trace_harness.analyze.diagnose.registry import registered_detectors
+from trace_harness.analyze.diagnose.registry import DetectorRegistry
 from trace_harness.analyze.diagnose.series import find_trends
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Finding, Node
@@ -65,7 +64,12 @@ def _post_order(ctx: TraceContext) -> list[Node]:
     return out
 
 
-def diagnose(ctx: TraceContext, probes: bool = False) -> dict[str, list[Finding]]:
+def diagnose(
+    ctx: TraceContext,
+    probes: bool = False,
+    *,
+    detector_registry: DetectorRegistry | None = None,
+) -> dict[str, list[Finding]]:
     """跑 base 判读 + 注册的全局 detector（含内置拓扑），返回 {node_id: [Finding]}。"""
     base = (
         _error_findings(ctx)
@@ -80,7 +84,8 @@ def diagnose(ctx: TraceContext, probes: bool = False) -> dict[str, list[Finding]
     for m in base:
         found[m.node_id].append(m)
     # 注册的全局 detector：后序遍历，每个 node 过一遍，可读 found（子树已产 findings）做归因
-    dets = registered_detectors()
+    detector_registry = detector_registry or DetectorRegistry(BUILTIN_DETECTORS)
+    dets = detector_registry.registered()
     if dets:
         for n in _post_order(ctx):
             for det in dets:

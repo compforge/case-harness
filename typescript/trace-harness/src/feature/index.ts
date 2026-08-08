@@ -1,6 +1,5 @@
-import "./builtins";
-
+export { builtinFeatures } from "./builtins";
 export { FeatureContext } from "./context";
 export { bakeFeatures, lazyFeatures } from "./engine";
 export type { Feature } from "./feature";
-export { producing, registerFeature, registeredFeatures } from "./registry";
+export { FeatureRegistry } from "./registry";

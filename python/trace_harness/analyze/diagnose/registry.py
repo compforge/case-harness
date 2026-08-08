@@ -1,4 +1,4 @@
-"""全局 detector 注册表：不绑 kind、对每个 node 跑一遍（自 gate；trace 级在 root gate）。
+"""Scoped detector 注册表：不绑 kind、对每个 node 跑一遍（自 gate）。
 
 与 per-kind `KindSpec.rules` 互补：rules 绑 kind、本表跨 kind（含整树/trace 级结论）。
 签名 `(node, ctx, found) -> list[Finding]`：
@@ -8,26 +8,28 @@
 - `found` = 至此已产的 findings（dict[node_id, [Finding]]）；引擎**后序**跑（子先于父），
   故 detector 到某 node 时其子树 findings 已就绪，可挑进 `Finding.causes` 归因。多数忽略 found。
 
-domain（AS）用 `register_detector(fn)` 注册。
+Domain 通过 ``TraceContributions.detectors`` 显式组合。
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Finding, Node
 
 Detector = Callable[[Node, TraceContext, "dict[str, list[Finding]]"], list[Finding]]
 
-_DETECTORS: list[Detector] = []
 
+class DetectorRegistry:
+    """一次 trace 分析使用的全局/整树 detector 集。"""
 
-def register_detector(fn: Detector) -> Detector:
-    """登记一个全局 detector，返回原对象（可作装饰器）。"""
-    _DETECTORS.append(fn)
-    return fn
+    def __init__(self, detectors: Iterable[Detector] = ()) -> None:
+        self._detectors = list(detectors)
 
+    def register(self, detector: Detector) -> Detector:
+        self._detectors.append(detector)
+        return detector
 
-def registered_detectors() -> list[Detector]:
-    return list(_DETECTORS)
+    def registered(self) -> list[Detector]:
+        return list(self._detectors)

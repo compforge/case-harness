@@ -1,6 +1,6 @@
 import type { Node } from "../model/node";
 import { DefaultFacet, type ChildOp, type RenderContext } from "./facet";
-import { registerFacet } from "./registry";
+import type { Facet } from "./facet";
 
 class ServiceFacet extends DefaultFacet {
   override priority = 10;
@@ -23,5 +23,6 @@ class ModelCallFacet extends DefaultFacet {
   }
 }
 
-registerFacet(new ServiceFacet());
-registerFacet(new ModelCallFacet());
+export function builtinFacets(): Facet[] {
+  return [new ServiceFacet(), new ModelCallFacet()];
+}

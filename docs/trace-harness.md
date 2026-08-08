@@ -1,5 +1,25 @@
 # trace_harness 设计文档
 
+> 本文解释设计理由；跨语言的 normative contract 以
+> [`spec/trace-harness.md`](../spec/trace-harness.md)、`schema/trace/v1/` 和
+> `conformance/trace/` 为准。Python 与 TypeScript 是对等实现。
+
+## 0. 作用域与扩展边界
+
+`TraceHarness` 是一套 trace 分析配置的作用域 owner；每个实例独立持有
+specs / features / detectors / facets。业务包或 Plugin 对外提供
+`TraceContributions`，Host 在构造 harness 时显式合并。因此 import 顺序、包管理器
+hoist 结果、bundle 中是否出现两份 harness，都不再决定业务语义。
+
+四类贡献的分工是：spec/feature 把各业务 span 标准化为统一 Analysis IR；detector 在 IR
+上产出 Finding；facet 只声明该业务的展示意图（哪些 node 是骨架、哪些折叠/分组、行摘要
+是什么）。树递归、DisplayNode 组装、Finding 上色和 text/HTML 序列化始终由 harness 的
+统一 renderer 执行，业务不能替换整套渲染算法。
+
+`TraceContributions` 只承载确定性扩展；probe 会写 evidence，仍是 Host 在
+`diagnose(..., probes=True)` 调用点显式开启，不随 Plugin 导入自动执行。
+Harness 不再暴露模块级 `register_*` 扩展面。
+
 trace_harness 是 e2e-harness 的第四个 Python SDK：**trace/span 分析框架**。前三个 harness
 把系统当黑盒（发请求看响应），trace_harness 开盒——消费请求留下的遥测（OTel/Jaeger
 span），回答"链路内部发生了什么、哪一层先反常"。它是另外三类的**归因补集**：e2e 失败
@@ -61,7 +81,7 @@ trace 时机器自动指出的已知原因越多，人和模型只处理注册�
 ```
 【span 流水线 · 固定】
   Source.fetch(trace_id) → raw span → normalize(NormSpan)
-  → assemble(specs) 七步 fusion ＝ Canopy「modeled trace」建模阶段
+  → TraceHarness(contributions).assemble 七步 fusion ＝ Canopy「modeled trace」建模阶段
         ↓
 【逻辑事件流（分析本体）】
   list[Node] + 父子边     —— node = 1..N 物理 span 熔成的一次逻辑调用，带命名 facts 列
@@ -97,9 +117,9 @@ facet 分层，每个消费者的签名只声明自己的 facet：
 
 ```
 KindSpec（semantic bundle）
-  AssemblyFacet   matches / claims / build      → 总线 assemble 消费（识别+卫星认领+facts 抽列）
-  RuleFacet       metrics / strategy / rules    → diagnose 消费（离群/趋势 + per-kind 判读）
-  ViewFacet       project / actions             → render / cli 消费（投影+动作）
+  Assembly contract   matches / claims / build   → assemble 消费（识别+卫星认领+facts 抽列）
+  Detection contract  metrics / strategy / rules → diagnose 消费（离群/趋势 + per-kind 判读）
+  IR projection       project                    → assemble 烤入 Node.brief（renderer 只读 IR）
 ```
 
 ### 概念词汇
@@ -110,7 +130,9 @@ KindSpec（semantic bundle）
 | Node | **分析本体**：逻辑事件 = 1..N 个物理 span（primary + 卫星）熔成的一次逻辑调用，贫血 dataclass，带命名 facts 列（"度量填值 / 原文填指针"二分）+ parent 边 |
 | facts 列 | KindSpec.build 从 raw 抽出的、已命名的轻量度量——业务字段隔离边界，下游只见列名 |
 | Tree | **视图期惰性索引**，仅 render/flame/最近祖先等递归场景按父子边现搭；非分析必经层、非中心对象 |
-| TraceContext | 一次分析的承载对象：nodes 事实 + lazy 原文池 + specs 注册表 + 运行时；dispatch 挂这里 |
+| TraceHarness | scoped 分析执行器；独立持有 specs/features/detectors/facets，并执行统一 render policy |
+| TraceContributions | 业务包或 Plugin 显式贡献的 IR 标准化、detect 与声明式 render 扩展集 |
+| TraceContext | 一次分析的承载对象：nodes 事实 + lazy 原文池 + specs + 运行时 |
 | Finding | 统一的判读输出：node_id + source + severity + note（错误/离群/趋势/拓扑/probe 同流），render 读 Finding 上色 |
 | KindSpec | 一个 kind 的语义包（≈ Canopy feature lambda 的载体），三 facet；注册进 SpecSet |
 | Source | 采集协议：fetch(trace_id, mode) + query(window) → trace_ids |
@@ -126,8 +148,8 @@ KindSpec（semantic bundle）
 ```
 cli single <trace_id|file> [--series kind:metric] [--curl span] [--html out]
   → Source.fetch → build_context（不自动判读）
-  → diagnose(ctx, probes=…)   # 按需；probe 是唯一有副作用的环节（落盘证据），默认关
-  → render_show / render_md / render_html / render_series
+  → harness.diagnose(ctx, probes=…)   # 按需；probe 是唯一有副作用的环节，默认关
+  → harness.render_* / render_series
 ```
 
 构建与判读分离：看树零副作用；`diagnose(ctx, probes=True)` 才写 evidence 文件。
@@ -237,7 +259,8 @@ light 采集模式，不靠有损预处理。
   Finding note，判定交给读它的人/模型——效果问题的判定函数在数据外部，机器能做的是备料。
   probe 是判读层唯一有副作用的环节，故 `probes=False` 默认关、显式开启。
 
-四类都只产 Finding；diagnose 汇流，render 统一上色，判读与展示不直接耦合。
+四类都只产 Finding；diagnose 汇流，render 统一消费 Finding。业务 detector 不直接操作
+DisplayNode，业务 facet 也不重复实现判读。
 
 ### 3.3 为什么 corpus 三表是特征列、用 parquet
 

@@ -1,15 +1,21 @@
 import type { Node } from "../model/node";
 import type { ViewTree } from "../model/viewtree";
-import { producing } from "./registry";
+import type { FeatureRegistry } from "./registry";
 
 export class FeatureContext {
   readonly #memo = new Map<string, unknown>();
   readonly #view: ViewTree;
   readonly #raw?: (spanId: string) => Record<string, unknown>;
+  readonly #registry: FeatureRegistry;
 
-  constructor(view: ViewTree, raw?: (spanId: string) => Record<string, unknown>) {
+  constructor(
+    view: ViewTree,
+    registry: FeatureRegistry,
+    raw?: (spanId: string) => Record<string, unknown>,
+  ) {
     this.#view = view;
     this.#raw = raw;
+    this.#registry = registry;
   }
 
   children(node: Node): Node[] {
@@ -29,7 +35,7 @@ export class FeatureContext {
       return value;
     }
     this.#memo.set(key, undefined);
-    const feature = producing(name, node);
+    const feature = this.#registry.producing(name, node);
     if (feature) {
       for (const [produced, value] of Object.entries(feature.compute(node, this) ?? {})) {
         this.#memo.set(`${node.node_id}\u0000${produced}`, value);

@@ -62,7 +62,7 @@ uv run python -m eval_harness.cli eval_harness/materials/experiments/smoke.yaml 
 uv run python -m perf_harness.cli run perf_harness/examples/mock.yaml --out /tmp/ph
 
 # trace analysis (offline jaeger file → call stacks + findings)
-uv run trace single trace_harness/tests/fixtures/trace_genai_sample.jsonl --diagnose
+uv run trace single ../conformance/trace/fixtures/genai-basic.jsonl --diagnose
 
 # Go (reference implementation)
 cd go && go test ./...

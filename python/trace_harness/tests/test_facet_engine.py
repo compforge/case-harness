@@ -13,22 +13,23 @@ from trace_harness.analyze.diagnose import diagnose
 from trace_harness.ingest.load import build_context
 from trace_harness.view import engine
 from trace_harness.view.facet import DefaultFacet
+from trace_harness.view.facets import builtin_facets
 from trace_harness.view.facets.model_call import ModelCallFacet
 from trace_harness.view.facets.service import ServiceFacet
-from trace_harness.view.registry import DEFAULT_REGISTRY
+from trace_harness.view.registry import FacetRegistry
 
-FIXTURE = Path(__file__).parent / "fixtures" / "trace_genai_sample.jsonl"
+FIXTURE = Path(__file__).parents[3] / "conformance" / "trace" / "fixtures" / "genai-basic.jsonl"
 
 
 def _ctx():
     return build_context(FIXTURE)
 
 
-def test_modelcall_facet_hides_http_child():
+def test_modelcall_facet_hides_success_http_but_surfaces_error_http():
     ctx = _ctx()
     eng = engine.render_callstack(ctx)
-    # engine 经 ModelCallFacet：http 子被 Hide，不成行（也不出 collapse 摘要）
-    assert "- http `" not in eng
+    # 通用策略允许 ModelCallFacet 隐藏成功 http，但 error node 必须强制浮出。
+    assert eng.count("- http `POST /chat/completions`") == 1
     # 但 http 结果仍在：model-call brief 带 http_status（derive 从 http 子卷上）
     assert "http=200" in eng and "http=504" in eng
 
@@ -36,18 +37,20 @@ def test_modelcall_facet_hides_http_child():
 def test_modelcall_facet_dispatched():
     ctx = _ctx()
     mc = [n for n in ctx.nodes if n.kind == "model-call"]
-    assert mc and isinstance(DEFAULT_REGISTRY.dispatch(mc[0]), ModelCallFacet)
+    registry = FacetRegistry(builtin_facets())
+    assert mc and isinstance(registry.dispatch(mc[0]), ModelCallFacet)
 
 
 def test_facet_dispatch_by_kind():
     ctx = _ctx()
+    registry = FacetRegistry(builtin_facets())
     svc = [n for n in ctx.nodes if n.kind == "service"]
     if svc:  # fixture 含残余 service 组时命中 ServiceFacet
-        assert isinstance(DEFAULT_REGISTRY.dispatch(svc[0]), ServiceFacet)
+        assert isinstance(registry.dispatch(svc[0]), ServiceFacet)
     # agent / tool-call / http 等无专属 facet 的 kind → 兜底 DefaultFacet
     plain = [n for n in ctx.nodes if n.kind not in ("service", "model-call")]
     assert plain
-    assert type(DEFAULT_REGISTRY.dispatch(plain[0])) is DefaultFacet
+    assert type(registry.dispatch(plain[0])) is DefaultFacet
 
 
 def test_engine_renders_findings():
@@ -61,7 +64,7 @@ def test_render_md_folds_http_via_engine():
 
     md = render_md(_ctx())
     assert md.startswith("# trace ")
-    assert "- http `" not in md  # md 经 facet engine → ModelCallFacet 折 http 子
+    assert md.count("- http `POST /chat/completions`") == 1  # 成功 http 藏，错误 http 浮出
     assert "http=200" in md  # model-call brief 仍带 http_status（derive 卷上）
 
 
