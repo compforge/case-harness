@@ -30,9 +30,9 @@ type DiscoveredCase struct {
 // Discover walks SourceRoot, parses every non-test .go file's comments with the
 // standard go/ast toolchain, and returns one DiscoveredCase per +case found.
 //
-// Parsing is comment-only and tolerant: a file that fails to parse is skipped
-// rather than aborting the scan, so a half-written handler never blocks
-// discovering the rest. Results are sorted by target path for stable output.
+// Discovery is a CI input, so syntax errors and malformed markers fail the scan
+// instead of silently removing cases from the result. Results are sorted by
+// target path for stable output.
 func Discover(cfg DiscoverConfig) ([]DiscoveredCase, error) {
 	var out []DiscoveredCase
 	fset := token.NewFileSet()
@@ -53,15 +53,21 @@ func Discover(cfg DiscoverConfig) ([]DiscoveredCase, error) {
 		}
 		f, perr := parser.ParseFile(fset, p, nil, parser.ParseComments)
 		if perr != nil {
-			return nil
+			return fmt.Errorf("parse source %s: %w", p, perr)
 		}
-		rel, _ := filepath.Rel(cfg.SourceRoot, p)
+		rel, relErr := filepath.Rel(cfg.SourceRoot, p)
+		if relErr != nil {
+			return fmt.Errorf("make source path relative for %s: %w", p, relErr)
+		}
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Doc == nil {
 				continue
 			}
-			spec, cases := parseDoc(fn.Doc.Text())
+			spec, cases, parseErr := parseDoc(fn.Doc.Text())
+			if parseErr != nil {
+				return fmt.Errorf("parse markers on %s %s: %w", rel, fn.Name.Name, parseErr)
+			}
 			for _, c := range cases {
 				c.Endpoint = fn.Name.Name
 				c.SpecText = spec

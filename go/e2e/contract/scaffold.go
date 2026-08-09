@@ -15,17 +15,14 @@ import (
 // RenderNew produces a fresh file; UpdateStale rewrites only the owned regions of
 // an existing one and drops a STALE marker so the next reader re-checks the body.
 
-const buildTag = "//go:build e2e"
+const (
+	buildTag     = "//go:build e2e"
+	scaffoldSkip = `t.Skip("casegen scaffold: fill in the test body")`
+)
 
 // RenderNew renders a complete *_e2e_test.go for a freshly discovered case.
 func RenderNew(dc DiscoveredCase) string {
-	return strings.Join([]string{
-		buildTag,
-		"",
-		renderDoc(dc, ""),
-		"",
-		renderMeta(dc.Case, dc.Hash),
-		"",
+	return renderOwnedHeader(dc, "") + strings.Join([]string{
 		"package " + pkgName(dc.Case.Group),
 		"",
 		renderBody(dc.Case),
@@ -36,18 +33,38 @@ func RenderNew(dc DiscoveredCase) string {
 // current case, inserts a STALE marker into the doc, and keeps the package clause
 // and everything below it untouched.
 func UpdateStale(content string, dc DiscoveredCase, now time.Time) string {
-	body := bodyFrom(content)
 	stale := fmt.Sprintf("STALE (%s): case or +spec changed; re-check the test body against the doc above.",
 		now.UTC().Format("2006-01-02T15:04:05Z"))
+	return renderOwnedHeader(dc, stale) + bodyFrom(content)
+}
+
+// RefreshOwned updates derived handler/source presentation after a refactor
+// without marking the human-owned test body stale.
+func RefreshOwned(content string, dc DiscoveredCase) string {
+	return renderOwnedHeader(dc, "") + bodyFrom(content)
+}
+
+func renderOwnedHeader(dc DiscoveredCase, stale string) string {
 	return strings.Join([]string{
 		buildTag,
 		"",
 		renderDoc(dc, stale),
 		"",
 		renderMeta(dc.Case, dc.Hash),
-		"",
-		body,
-	}, "\n")
+	}, "\n") + "\n\n"
+}
+
+func ownedHeaderMatches(content string, dc DiscoveredCase) bool {
+	indices := packageLineIdx(content)
+	return len(indices) == 1 && content[:indices[0]] == renderOwnedHeader(dc, "")
+}
+
+func needsManualReview(content string) bool {
+	header := content
+	if indices := packageLineIdx(content); len(indices) == 1 {
+		header = content[:indices[0]]
+	}
+	return strings.Contains(header, "// STALE (") || strings.Contains(content, scaffoldSkip)
 }
 
 // bodyFrom returns the file from its `package` clause onward (the human-owned
@@ -147,7 +164,7 @@ func renderBody(c Case) string {
 		"\t_ = r",
 		"\t_ = ctx",
 		"\t_ = judge.Status2xx",
-		"\tt.Skip(\"casegen scaffold: fill in the test body\")",
+		"\t" + scaffoldSkip,
 		"}",
 	}, "\n")
 }
