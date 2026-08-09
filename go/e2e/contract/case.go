@@ -13,6 +13,9 @@
 package contract
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/compforge/spec-case/toolchains/go/marker"
 )
 
@@ -44,10 +47,19 @@ type Case struct {
 //	+case:id=happy,desc=`minimal create succeeds`,expect=`200; name non-empty`
 //
 // Free-form field values are backtick- or quote-wrapped so embedded commas and
-// semicolons survive. A +case with a malformed id is skipped; casegen check
-// surfaces missing coverage another way.
-func parseDoc(doc string) (specText string, cases []Case) {
+// semicolons survive. Invalid +case markers are rejected so casegen check cannot
+// silently turn a malformed test intention into missing coverage.
+func parseDoc(doc string) (specText string, cases []Case, err error) {
 	parsed := marker.Parse(doc)
+	for lineNo, raw := range strings.Split(doc, "\n") {
+		line := strings.TrimSpace(raw)
+		if !strings.HasPrefix(line, "+case:") {
+			continue
+		}
+		if len(marker.Parse(line).Cases) != 1 {
+			return "", nil, fmt.Errorf("invalid +case marker on doc line %d: %s", lineNo+1, line)
+		}
+	}
 	for _, c := range parsed.Cases {
 		group := c.Group
 		if group == "" {
@@ -59,5 +71,5 @@ func parseDoc(doc string) (specText string, cases []Case) {
 			Group: group,
 		})
 	}
-	return parsed.Spec, cases
+	return parsed.Spec, cases, nil
 }

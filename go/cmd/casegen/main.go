@@ -50,8 +50,8 @@ usage:
   casegen check --source DIR --test DIR
 
   list   print every +case found under --source
-  sync   create missing test files; mark drifted ones STALE
-  check  exit non-zero if any case is missing or drifted (no writes)
+  sync   create/refresh files and mark changed test bodies STALE
+  check  exit non-zero for missing, pending, stale, or orphaned cases (no writes)
 `)
 }
 
@@ -95,11 +95,11 @@ func cmdList(args []string) int {
 }
 
 func cmdSync(args []string) int {
-	_, cases, code := discover(args, true)
+	cfg, cases, code := discover(args, true)
 	if code != 0 {
 		return code
 	}
-	plan, err := contract.Plan(cases)
+	plan, err := contract.Plan(cfg.TestRoot, cases)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "casegen: plan: %v\n", err)
 		return 1
@@ -112,17 +112,34 @@ func cmdSync(args []string) int {
 	for _, r := range changed {
 		fmt.Printf("%-7s %s\n", r.Action, r.Case.TargetPath)
 	}
-	fmt.Printf("%d created/updated, %d in sync\n",
-		len(changed), len(plan)-len(changed))
+	manual := 0
+	inSync := 0
+	for _, r := range plan {
+		switch r.Action {
+		case contract.ActionOK:
+			inSync++
+		case contract.ActionPending, contract.ActionOrphan:
+			fmt.Printf("%-7s %s\n", r.Action, r.Case.TargetPath)
+			manual++
+		case contract.ActionCreate, contract.ActionStale:
+			manual++
+		}
+	}
+	fmt.Printf("%d created/updated, %d in sync, %d require manual action\n",
+		len(changed), inSync, manual)
+	if manual > 0 {
+		fmt.Fprintln(os.Stderr, "casegen: finish generated/stale test bodies, remove STALE markers, and resolve orphans")
+		return 1
+	}
 	return 0
 }
 
 func cmdCheck(args []string) int {
-	_, cases, code := discover(args, true)
+	cfg, cases, code := discover(args, true)
 	if code != 0 {
 		return code
 	}
-	plan, err := contract.Plan(cases)
+	plan, err := contract.Plan(cfg.TestRoot, cases)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "casegen: plan: %v\n", err)
 		return 1
@@ -135,7 +152,7 @@ func cmdCheck(args []string) int {
 		}
 	}
 	if drift > 0 {
-		fmt.Fprintf(os.Stderr, "casegen: %d case(s) out of sync; run `casegen sync`\n", drift)
+		fmt.Fprintf(os.Stderr, "casegen: %d case(s) out of sync or awaiting review\n", drift)
 		return 1
 	}
 	fmt.Printf("all %d case(s) in sync\n", len(plan))
