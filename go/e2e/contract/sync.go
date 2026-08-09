@@ -2,9 +2,11 @@ package contract
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -30,13 +32,28 @@ func Plan(cases []DiscoveredCase) ([]SyncResult, error) {
 	for _, dc := range cases {
 		content, err := os.ReadFile(dc.TargetPath)
 		if errors.Is(err, fs.ErrNotExist) {
-			out = append(out, SyncResult{dc, ActionCreate})
-			continue
+			path, existing, found, findErr := findExistingByCaseID(filepath.Dir(dc.TargetPath), dc.Case.ID)
+			if findErr != nil {
+				return nil, findErr
+			}
+			if !found {
+				out = append(out, SyncResult{dc, ActionCreate})
+				continue
+			}
+			// The endpoint and its presentation filename may change during an
+			// internal refactor. The meta case_id is the stable API-contract
+			// identity, so keep using the existing human-owned test file.
+			dc.TargetPath = path
+			content = existing
+			err = nil
 		}
 		if err != nil {
 			return nil, err
 		}
 		meta, ok := parseMeta(string(content))
+		if ok && meta.CaseID != dc.Case.ID {
+			return nil, fmt.Errorf("case target %s belongs to %q, not %q", dc.TargetPath, meta.CaseID, dc.Case.ID)
+		}
 		if !ok || meta.CaseHash != dc.Hash {
 			out = append(out, SyncResult{dc, ActionStale})
 			continue
@@ -44,6 +61,39 @@ func Plan(cases []DiscoveredCase) ([]SyncResult, error) {
 		out = append(out, SyncResult{dc, ActionOK})
 	}
 	return out, nil
+}
+
+func findExistingByCaseID(dir, caseID string) (string, []byte, bool, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil, false, nil
+	}
+	if err != nil {
+		return "", nil, false, err
+	}
+
+	var matchPath string
+	var matchContent []byte
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_e2e_test.go") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return "", nil, false, readErr
+		}
+		meta, ok := parseMeta(string(content))
+		if !ok || meta.CaseID != caseID {
+			continue
+		}
+		if matchPath != "" {
+			return "", nil, false, fmt.Errorf("duplicate case_id %q in %s and %s", caseID, matchPath, path)
+		}
+		matchPath = path
+		matchContent = content
+	}
+	return matchPath, matchContent, matchPath != "", nil
 }
 
 // Apply writes create/stale results to disk (ok results are left untouched) and

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qiankunli/case-harness/go/e2e/core"
+	"github.com/compforge/case-harness/go/e2e/core"
 )
 
 // JSONRunner sends HTTP requests and parses JSON responses into Outcome.

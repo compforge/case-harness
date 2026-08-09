@@ -6,7 +6,7 @@
 > 三者互不 import，一致性落在 `spec/` 数据格式（含统一判定出口 [`../spec/verdict-schema.yaml`](../spec/verdict-schema.yaml)）。
 
 e2e_harness 是跨语言（Go + Python）的**确定性 API/SSE 契约测试** SDK（api-mode）：纯黑盒，
-不 import 被测服务 internal，以 pytest 为执行底座。
+不 import 被测服务 internal，以 pytest 为执行底座。这里的 e2e 是相对于单服务 SUT 边界；产品级功能测试从 UI / 产品入口出发，可横跨多个服务，不在本 SDK 边界内。
 
 ## 1. 核心模型
 

@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/qiankunli/case-harness/go/e2e/runner"
+	"github.com/compforge/case-harness/go/e2e/runner"
 )
 
 // Assertion is a check function applied to an Outcome.
