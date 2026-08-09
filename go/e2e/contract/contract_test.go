@@ -1,6 +1,8 @@
 package contract
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,10 +12,10 @@ func TestParseDoc(t *testing.T) {
 	doc := strings.Join([]string{
 		"StartSandbox creates a sandbox.",
 		"",
-		"+e2e:spec=`tenant_id required; concurrent starts join in-flight`",
-		"+e2e:case:id=happy_minimal,desc=`minimal create succeeds`,input=`POST /start`,expect=`200; sandbox_name non-empty`,forbid=`more than one pod`",
-		"+e2e:case:id=dup_conv,desc=`reuse same pod`,group=sandbox",
-		"+e2e:case:id=Bad-ID,desc=`should be skipped`",
+		"+spec=`tenant_id required; concurrent starts join in-flight`",
+		"+case:id=happy_minimal,desc=`minimal create succeeds`,input=`POST /start`,expect=`200; sandbox_name non-empty`,forbid=`more than one pod`",
+		"+case:id=dup_conv,desc=`reuse same pod`,group=sandbox",
+		"+case:id=Bad-ID,desc=`should be skipped`",
 	}, "\n")
 
 	spec, cases := parseDoc(doc)
@@ -134,5 +136,48 @@ func TestUpdateStalePreservesBody(t *testing.T) {
 	}
 	if !strings.Contains(updated, "ok, revised") {
 		t.Error("doc not refreshed with new desc")
+	}
+}
+
+func TestPlanKeepsExistingFileAcrossEndpointRename(t *testing.T) {
+	root := t.TempDir()
+	original := Case{
+		ID: "happy_minimal", Desc: "ok", Group: DefaultGroup,
+		Endpoint: "OldHandler", SpecText: "stable API contract",
+	}
+	existingPath := targetPath(root, original)
+	if err := os.MkdirAll(filepath.Dir(existingPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hash := CaseHash(original)
+	if err := os.WriteFile(existingPath, []byte(RenderNew(DiscoveredCase{Case: original, Hash: hash})), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	renamed := original
+	renamed.Endpoint = "NewHandler"
+	plan, err := Plan([]DiscoveredCase{{
+		Case:       renamed,
+		Hash:       CaseHash(renamed),
+		TargetPath: targetPath(root, renamed),
+	}})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan) != 1 || plan[0].Action != ActionOK {
+		t.Fatalf("plan = %+v, want one ok result", plan)
+	}
+	if plan[0].Case.TargetPath != existingPath {
+		t.Fatalf("target path = %q, want existing %q", plan[0].Case.TargetPath, existingPath)
+	}
+}
+
+func TestCheckCollisionsUsesStableCaseIdentity(t *testing.T) {
+	err := checkCollisions([]DiscoveredCase{
+		{Case: Case{ID: "same", Group: DefaultGroup, Endpoint: "HandlerA"}, TargetPath: "/tmp/HandlerA__same_e2e_test.go"},
+		{Case: Case{ID: "same", Group: DefaultGroup, Endpoint: "HandlerB"}, TargetPath: "/tmp/HandlerB__same_e2e_test.go"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "case identity collision") {
+		t.Fatalf("checkCollisions() error = %v, want case identity collision", err)
 	}
 }

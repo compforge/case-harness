@@ -13,7 +13,7 @@ import (
 
 // DiscoverConfig points discovery at the service source and the test output tree.
 type DiscoverConfig struct {
-	SourceRoot string // dir scanned for handlers carrying @case/@spec
+	SourceRoot string // dir scanned for handlers carrying +case/+spec
 	TestRoot   string // where generated *_e2e_test.go land, grouped by case.Group
 }
 
@@ -28,7 +28,7 @@ type DiscoveredCase struct {
 }
 
 // Discover walks SourceRoot, parses every non-test .go file's comments with the
-// standard go/ast toolchain, and returns one DiscoveredCase per @case found.
+// standard go/ast toolchain, and returns one DiscoveredCase per +case found.
 //
 // Parsing is comment-only and tolerant: a file that fails to parse is skipped
 // rather than aborting the scan, so a half-written handler never blocks
@@ -95,11 +95,12 @@ func checkCollisions(cases []DiscoveredCase) error {
 	seen := map[string]string{}
 	for _, dc := range cases {
 		owner := dc.Case.Endpoint + "/" + dc.Case.ID
-		if prev, ok := seen[dc.TargetPath]; ok {
-			return fmt.Errorf("case path collision: %s claimed by both %s and %s",
-				dc.TargetPath, prev, owner)
+		identity := dc.Case.Group + "/" + dc.Case.ID
+		if prev, ok := seen[identity]; ok {
+			return fmt.Errorf("case identity collision: %s declared by both %s and %s",
+				identity, prev, owner)
 		}
-		seen[dc.TargetPath] = owner
+		seen[identity] = owner
 	}
 	return nil
 }

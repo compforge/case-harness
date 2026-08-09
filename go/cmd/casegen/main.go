@@ -1,4 +1,4 @@
-// Command casegen discovers @case/@spec annotations on handler functions and
+// Command casegen discovers +case/+spec markers on handler functions and
 // keeps the generated *_e2e_test.go files in sync with them.
 //
 //	casegen list  --source ./internal/api
@@ -16,7 +16,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/qiankunli/case-harness/go/e2e/contract"
+	"github.com/compforge/case-harness/go/e2e/contract"
 )
 
 func main() {
@@ -42,14 +42,14 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `casegen — discover @case annotations and sync e2e test scaffolds
+	fmt.Fprint(os.Stderr, `casegen — discover +case markers and sync e2e test scaffolds
 
 usage:
   casegen list  --source DIR
   casegen sync  --source DIR --test DIR
   casegen check --source DIR --test DIR
 
-  list   print every @case found under --source
+  list   print every +case found under --source
   sync   create missing test files; mark drifted ones STALE
   check  exit non-zero if any case is missing or drifted (no writes)
 `)
@@ -57,7 +57,7 @@ usage:
 
 func discover(args []string, needTest bool) (contract.DiscoverConfig, []contract.DiscoveredCase, int) {
 	fs := flag.NewFlagSet("casegen", flag.ExitOnError)
-	source := fs.String("source", "", "dir to scan for @case/@spec handlers (required)")
+	source := fs.String("source", "", "dir to scan for +case/+spec handlers (required)")
 	test := fs.String("test", "", "dir where generated *_e2e_test.go land")
 	_ = fs.Parse(args)
 

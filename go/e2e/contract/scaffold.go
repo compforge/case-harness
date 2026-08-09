@@ -37,7 +37,7 @@ func RenderNew(dc DiscoveredCase) string {
 // and everything below it untouched.
 func UpdateStale(content string, dc DiscoveredCase, now time.Time) string {
 	body := bodyFrom(content)
-	stale := fmt.Sprintf("STALE (%s): case or @spec changed; re-check the test body against the doc above.",
+	stale := fmt.Sprintf("STALE (%s): case or +spec changed; re-check the test body against the doc above.",
 		now.UTC().Format("2006-01-02T15:04:05Z"))
 	return strings.Join([]string{
 		buildTag,
@@ -100,14 +100,14 @@ func renderDoc(dc DiscoveredCase, stale string) string {
 	}
 	line("")
 	if c.SpecText != "" {
-		line("@spec:")
+		line("spec:")
 		writeField(line, c.SpecText)
 	} else {
-		line("@spec: <handler has no @spec; consider adding one>")
+		line("spec: <handler has no +spec; consider adding one>")
 	}
 	line("")
 	line(fmt.Sprintf("handler: %s %s", dc.SourceFile, c.Endpoint))
-	line(fmt.Sprintf("source:  @case(%q)", c.ID))
+	line(fmt.Sprintf("source:  +case:id=%s", c.ID))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -124,9 +124,9 @@ func renderBody(c Case) string {
 		"\t\"testing\"",
 		"\t\"time\"",
 		"",
-		"\t\"github.com/qiankunli/case-harness/go/e2e/core\"",
-		"\t\"github.com/qiankunli/case-harness/go/e2e/judge\"",
-		"\t\"github.com/qiankunli/case-harness/go/e2e/runner\"",
+		"\t\"github.com/compforge/case-harness/go/e2e/core\"",
+		"\t\"github.com/compforge/case-harness/go/e2e/judge\"",
+		"\t\"github.com/compforge/case-harness/go/e2e/runner\"",
 		")",
 		"",
 		fmt.Sprintf("func Test_%s__%s(t *testing.T) {", c.Endpoint, c.ID),

@@ -14,8 +14,9 @@ import (
 //	// case_hash: a1b2c3d4
 //	// e2e-meta-end
 //
-// Only two fields — the test's identity (case_id) and its content fingerprint
-// (case_hash). Everything else is derivable from the file's location and name.
+// Only two fields — the test's stable API-contract identity (case_id) and its
+// content fingerprint (case_hash). The file's endpoint-oriented name is a
+// presentation detail and may survive an internal handler rename.
 const (
 	metaStart = "// e2e-meta-start"
 	metaEnd   = "// e2e-meta-end"

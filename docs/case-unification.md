@@ -13,7 +13,7 @@
 |---|---|---|---|
 | `common.Case` | `common/case.py` | data，`case.yaml` 加载 | perf（!96 已采用）；canonical 目标 |
 | `eval_harness.EvalCase` | `eval_harness/model/evalset.py` | pydantic，`evalset.yaml` | eval-suite（质量评测）|
-| `e2e_harness.api.contract.Case` | `e2e_harness/api/contract.py` | dataclass，`@case`/`+e2e:case` 注解 | eval-api（接口契约）|
+| `e2e_harness.api.contract.Case` | `e2e_harness/api/contract.py` | dataclass，`@case`/`+case` 注解 | eval-api（接口契约）|
 
 `case-schema.yaml` 已经把目标写死——**`common.Case` 是唯一 case 类型，三面各自直接读它，不存在 per-harness Case 类**。
 但实现停在平行态：eval 用自己的 `EvalCase`、e2e 用自己的 `contract.Case`。本文讲怎么收口。
@@ -27,7 +27,7 @@ case 有**两根互不相关的轴**，别混成一根：
                                   e2e   |   eval   |   perf
   authoring 轴 (case 谁写、存哪)：
    ├─ case.yaml          (data-first)    外部语料 / 数据集 / 跨 SUT 复用、可分享、累积
-   └─ @case / +e2e:case  (code-first)    贴着 handler、AST 静态发现、case_hash 漂移检测
+   └─ @case / +case      (code-first)    贴着 handler、AST 静态发现、case_hash 漂移检测
                           ↘                 ↙
                      都归一到 common.Case（唯一类型；下游 engine/judge/report 只认它）
 ```

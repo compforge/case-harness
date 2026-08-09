@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qiankunli/case-harness/go/e2e/core"
-	"github.com/qiankunli/case-harness/go/e2e/judge"
-	"github.com/qiankunli/case-harness/go/e2e/runner"
+	"github.com/compforge/case-harness/go/e2e/core"
+	"github.com/compforge/case-harness/go/e2e/judge"
+	"github.com/compforge/case-harness/go/e2e/runner"
 )
 
 func TestStartSandbox_HappyPath(t *testing.T) {

@@ -16,12 +16,26 @@ An AI project keeps growing — more features, longer chains, a wider test surfa
 
 This repo ships SDKs, not tests: the system under test (SUT) integrates the SDK in its own repo, organized around its own protocol / auth / resource lifecycle.
 
+### Where it sits in the testing stack
+
+Product positioning is usually more stable than requirements, and requirements and public contracts are more stable than implementation code. That gives three distinct testing boundaries:
+
+| Level | Boundary | Purpose | Status |
+|---|---|---|---|
+| Web / app functional testing | UI or product entry point, potentially spanning services | Verify a complete user journey, including client code | Long-term scope; not implemented yet |
+| API functional testing | Product entry APIs, potentially multi-step and cross-service | Verify backend product behavior without exercising client code | Long-term scope; not implemented yet |
+| Service API contract testing | One service's public API | Verify that its contract still works after refactoring | Current `e2e_harness` |
+| Unit testing | Function, class, or module | Verify local implementation; evolves most frequently with code | Owned by the SUT repo |
+
+Here, `e2e` means end-to-end **relative to one service SUT boundary**, not product-level UI E2E. Long-term functional testing starts from a natural-language Playbook, compiles reviewed Web / Android / iOS / API Scripts at authoring time, and executes them through target-specific SDKs. See [`docs/kernel.md`](docs/kernel.md) for the full model.
+
 ## Core ideas
 
 1. **Different judgments, one case format.** A case only describes "how to exercise the system once" — never how to judge it. The same case drives e2e (correctness), eval (quality) and perf (capacity). `spec-case` owns the canonical asset format and model; this repo keeps only runtime conventions and a compatibility projection under `spec/`.
 2. **Cases are accumulating assets.** Decoupled from judgment, cases keep piling up; the more you have, the more a full pre-release run actually means something.
 3. **Experiments compare Arms through Trials.** An Experiment asks one question, an Arm is one named configuration in the comparison, and a Trial is one real execution of an Arm. Results go to `runs/<scope>/<run-id>/`; `arm_id` stays an explicit alignment key across artifacts.
 4. **One execution, many observations.** A single request can feed correctness (e2e), quality (eval), latency/resources (perf), in-chain attribution (trace), and decision-path evaluation (trajectory). The harnesses are viewpoints, not separate load generators.
+5. **Cases anchor stable contracts.** Case identity and assertion meaning come from requirements or public API contracts. Co-locating a marker with a handler enables discovery and drift detection; it does not make an internal function name or file path the case's business identity.
 
 The unified output is `verdict.json` (schema: [`spec/verdict-schema.yaml`](spec/verdict-schema.yaml)): humans read it, CI reads it, and agentic dev loops read it to self-correct.
 
