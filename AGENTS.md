@@ -41,6 +41,7 @@ case-harness/
 
 - **md 文档分工**：`AGENTS.md` 给 developer 看（代码地图、约定、扩展点），`README.md` 给 user 看（怎么接入、怎么跑）。两者会共用一部分项目定位/边界的内容，但侧重点不同——允许适度重复，不允许混淆受众。
 - **资产与执行分工遵循 Kernel**：Case / Playbook 等稳定资产格式只有一个 canonical owner；case-harness 负责编译、Runner / Driver、Judge、Run 产物与 Verdict。具体约束见 [`docs/kernel.md`](docs/kernel.md)。
+- **可验证交付从开发期开始**：被测项目随需求、外部行为变更和缺陷修复维护 Spec / Case，再由 case-harness 在部署后针对指定版本与环境执行为 Verdict。项目拥有验证资产与判定标准，部署领域拥有环境、凭据、触发和发布策略；API、CLI、Pipeline、Job 只是可替换适配。
 - 五个 Python SDK 共享同一个 uv 工程与 `spec/` 约定，**互不 import**；公共能力集中在 `common`（case / verdict / llm / facets + report_kit 报告 IR）这一中立共享层，而不是 SDK 之间互相复用。各 SDK 仍自带一小撮协议原语（Outcome 形状、runner、SSEParser；perf 自带 httpx 发压栈、trace 自带薄 driver）——**先复制后收敛**，确属公共再收进 `common`。trace 的 parquet 持久化走可选 extra `[trace-corpus]`，不给其它 SDK 增重。
 - 新增能力先想清楚归哪类问题（对错 / 效果 / 容量 / 归因），落到对应 SDK；跨 SDK 的"公共抽象"冲动默认抑制，先复制后收敛，确属公共再进 `common`。
 - Go SDK 短期不跟进 Python 侧新增，等形状稳定后批量同步。
