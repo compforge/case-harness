@@ -4,6 +4,7 @@ import type { ViewTree } from "../model/viewtree";
 import type { DisplayNode } from "./display";
 import type { ChildOp, RenderConfig, RenderContext } from "./facet";
 import { builtinFacets } from "./facets";
+import { projectPerspective } from "./perspective";
 import { FacetRegistry } from "./registry";
 
 function subtreeSize(view: ViewTree, node: Node): { count: number; total: number } {
@@ -133,5 +134,10 @@ export function renderDisplay(
     }
     target?.findings.push(...nodeFindings);
   }
-  return roots;
+  return projectPerspective(
+    roots,
+    view.by_id,
+    activeRegistry,
+    config.perspective ?? "full",
+  );
 }

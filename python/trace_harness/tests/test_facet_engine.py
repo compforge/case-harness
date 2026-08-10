@@ -12,8 +12,9 @@ from pathlib import Path
 from trace_harness.analyze.diagnose import diagnose
 from trace_harness.ingest.load import build_context
 from trace_harness.view import engine
-from trace_harness.view.facet import DefaultFacet
+from trace_harness.view.facet import DefaultFacet, RenderConfig
 from trace_harness.view.facets import builtin_facets
+from trace_harness.view.facets.agent import AgentFacet, ToolCallFacet
 from trace_harness.view.facets.model_call import ModelCallFacet
 from trace_harness.view.facets.service import ServiceFacet
 from trace_harness.view.registry import FacetRegistry
@@ -47,8 +48,12 @@ def test_facet_dispatch_by_kind():
     svc = [n for n in ctx.nodes if n.kind == "service"]
     if svc:  # fixture 含残余 service 组时命中 ServiceFacet
         assert isinstance(registry.dispatch(svc[0]), ServiceFacet)
-    # agent / tool-call / http 等无专属 facet 的 kind → 兜底 DefaultFacet
-    plain = [n for n in ctx.nodes if n.kind not in ("service", "model-call")]
+    agent = next(n for n in ctx.nodes if n.kind == "agent")
+    tool = next(n for n in ctx.nodes if n.kind == "tool-call")
+    assert isinstance(registry.dispatch(agent), AgentFacet)
+    assert isinstance(registry.dispatch(tool), ToolCallFacet)
+    # http 等无专属 facet 的 kind → 兜底 DefaultFacet
+    plain = [n for n in ctx.nodes if n.kind not in ("service", "model-call", "agent", "tool-call")]
     assert plain
     assert type(registry.dispatch(plain[0])) is DefaultFacet
 
@@ -75,6 +80,61 @@ def test_render_interactive_via_engine_smoke():
     # 交互页也走 engine 的 DisplayNode（facet 折叠）+ 保留交互 JS（折叠/展开）+ 双视图
     assert h.startswith("<!doctype html>")
     assert "renderInto" in h and "调用栈" in h and "火焰图" in h
+    assert 'data-perspective="full"' in h and 'data-perspective="agent"' in h
+    assert 'data-layout="tree"' in h and 'data-layout="flame"' in h
+
+
+def test_agent_perspective_keeps_semantic_nodes_and_compresses_context_paths():
+    from trace_harness.model.node import Node
+    from trace_harness.model.viewtree import build_view
+
+    def make_node(
+        node_id: str,
+        kind: str,
+        parent_id: str | None = None,
+        start: float = 0,
+        *,
+        error: bool = False,
+    ):
+        return Node(
+            kind=kind,
+            name=f"{node_id}.{kind}",
+            primary_span_id=node_id,
+            span_ids=[node_id],
+            facts={},
+            start_ms=start,
+            duration_ms=10,
+            service=None,
+            node_id=node_id,
+            parent_node_id=parent_id,
+            error_span_ids=[node_id] if error else [],
+        )
+
+    root = make_node("root", "service")
+    agent = make_node("agent", "agent", root.node_id, 1)
+    bridge = make_node("bridge", "service", agent.node_id, 2)
+    model = make_node("model", "model-call", bridge.node_id, 3)
+    tool = make_node("tool", "tool-call", agent.node_id, 4)
+    noise = make_node("noise", "service", agent.node_id, 5)
+    error_http = make_node("error-http", "http", model.node_id, 6, error=True)
+    roots = engine.render(
+        build_view([root, agent, bridge, model, tool, noise, error_http]),
+        config=RenderConfig(perspective="agent"),
+    )
+    flat = []
+    stack = list(roots)
+    while stack:
+        display = stack.pop()
+        flat.append(display)
+        stack.extend(display.children)
+
+    assert sorted(display.name for display in flat if display.kind) == sorted(
+        [agent.name, model.name, tool.name]
+    )
+    assert any("上下文节点" in display.name for display in flat)
+    assert noise.name not in [display.name for display in flat]
+    assert error_http.name not in [display.name for display in flat]
+    assert model.parent_node_id == bridge.node_id
 
 
 def test_group_childop_named_virtual_concept_collapses_members():

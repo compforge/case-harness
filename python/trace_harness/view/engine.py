@@ -37,6 +37,7 @@ from trace_harness.view.facet import (
     Summarize,
 )
 from trace_harness.view.facets import builtin_facets
+from trace_harness.view.perspective import project_perspective
 from trace_harness.view.registry import FacetRegistry
 
 # —— 剪枝/折叠辅助（与 callstack._subtree_flagged / _subtree_size 同口径）——
@@ -216,7 +217,7 @@ def render(
 
     roots = [render_node(r) for r in view.roots]
     _bind_findings(view, findings, visible)
-    return roots
+    return project_perspective(roots, view.by_id, registry, config.perspective)
 
 
 def _bind_findings(

@@ -2,7 +2,8 @@
 
 TypeScript implementation of this repository's Python `trace_harness` core. It consumes Jaeger
 span documents, fuses physical spans into logical nodes, derives facts and findings, and renders
-a self-contained interactive node-tree HTML report.
+a self-contained interactive HTML report. The report independently switches perspective
+(`full`/`agent`) and layout (`tree`/`flame`) over the same node tree.
 
 ```ts
 import {

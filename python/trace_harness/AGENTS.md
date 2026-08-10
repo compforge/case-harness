@@ -51,7 +51,8 @@ trace_harness/
 │   ├── registry.py   #   FacetRegistry：priority 择一(DefaultFacet 兜底)，TraceHarness 作用域内组合 biz facet
 │   ├── engine.py     #   render(view,findings)→DisplayNode + 序列化 to_md_lines/render_md/render_callstack：dispatch facet·执行 ChildOp·finding 按 node_id 绑(折叠上浮)；signal-aware collapse(信号免疫·≥error 浮出) + 同构 Group 合并 ×N
 │   ├── display.py    #   DisplayNode：脱 ctx/kind 的显示树(md/html/treecli 共用)
-│   ├── facets/       #   harness 通用 facet：ServiceFacet / ModelCallFacet(默认 Hide http 子)；biz facet 随域包显式贡献
+│   ├── perspective.py #  同一 DisplayNode 树的 full/agent 侧重点投影；上下文路径压缩但不改 Node 父子边
+│   ├── facets/       #   harness 通用 facet：Service / Agent / ToolCall / ModelCall(默认 Hide http 子)；biz facet 随域包显式贡献
 │   ├── callstack.py  #   findings_block + render_callstack(legacy 无 facet 原样树)；md/show/html 已切 engine·facet
 │   ├── explore.py    #   render_explore：treecli 渲染核(缩略图 + expand + 同构兄弟折叠)
 │   ├── state.py      #   ViewState(展开集/focus) + selector + iso_sig：treecli 的状态与寻址

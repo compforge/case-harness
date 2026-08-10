@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import {
   analysisSnapshot,
   assemble,
+  buildView,
   DefaultFacet,
   diagnose,
   type FeatureContext,
@@ -11,6 +12,7 @@ import {
   Node,
   normalizeJaegerSpans,
   renderInteractive,
+  renderDisplay,
   TraceHarness,
 } from "../src";
 
@@ -51,9 +53,64 @@ describe("Python trace_harness parity fixture", () => {
     expect(html).toStartWith("<!doctype html>");
     expect(html).toContain("调用栈");
     expect(html).toContain("火焰图");
+    expect(html).toContain('data-perspective="full"');
+    expect(html).toContain('data-perspective="agent"');
+    expect(html).toContain('data-layout="tree"');
+    expect(html).toContain('data-layout="flame"');
     expect(html).toContain("chat planner");
     expect(html).toContain("http_status");
     expect(html).toContain("errors 2");
+  });
+});
+
+describe("trace perspectives", () => {
+  const node = (
+    nodeId: string,
+    kind: string,
+    parentNodeId?: string,
+    startMs = 0,
+    error = false,
+  ): Node => new Node({
+    kind,
+    name: `${nodeId}.${kind}`,
+    primary_span_id: nodeId,
+    span_ids: [nodeId],
+    facts: {},
+    start_ms: startMs,
+    duration_ms: 10,
+    node_id: nodeId,
+    parent_node_id: parentNodeId,
+    error_span_ids: error ? [nodeId] : [],
+  });
+
+  test("agent perspective keeps semantic nodes and compresses context paths", () => {
+    const root = node("root", "service");
+    const agent = node("agent", "agent", root.node_id, 1);
+    const bridge = node("bridge", "service", agent.node_id, 2);
+    const model = node("model", "model-call", bridge.node_id, 3);
+    const tool = node("tool", "tool-call", agent.node_id, 4);
+    const noise = node("noise", "service", agent.node_id, 5);
+    const errorHttp = node("error-http", "http", model.node_id, 6, true);
+    const roots = renderDisplay(
+      buildView([root, agent, bridge, model, tool, noise, errorHttp]),
+      {},
+      undefined,
+      { perspective: "agent" },
+    );
+    const flat: Array<{ kind: string; name: string }> = [];
+    const stack = [...roots];
+    while (stack.length) {
+      const display = stack.pop()!;
+      flat.push(display);
+      stack.push(...display.children);
+    }
+
+    expect(flat.filter((display) => display.kind).map((display) => display.name).sort())
+      .toEqual([agent.name, model.name, tool.name].sort());
+    expect(flat.some((display) => display.name.includes("上下文节点"))).toBe(true);
+    expect(flat.map((display) => display.name)).not.toContain(noise.name);
+    expect(flat.map((display) => display.name)).not.toContain(errorHttp.name);
+    expect(model.parent_node_id).toBe(bridge.node_id);
   });
 });
 
