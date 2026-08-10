@@ -31,4 +31,9 @@ from trace_harness.model.spec import KindSpec as KindSpec
 from trace_harness.model.spec import SpecSet as SpecSet
 from trace_harness.model.spec import merge as merge
 from trace_harness.view.explore import render_explore as render_explore
+from trace_harness.view.facet import DefaultFacet as DefaultFacet
+from trace_harness.view.facet import Facet as Facet
+from trace_harness.view.facet import PerspectiveLevel as PerspectiveLevel
+from trace_harness.view.facet import RenderConfig as RenderConfig
+from trace_harness.view.facet import TracePerspective as TracePerspective
 from trace_harness.view.text import render_text as render_text

@@ -1,6 +1,9 @@
 import type { Field, Finding, Node } from "../model/node";
 import type { ViewTree } from "../model/viewtree";
 
+export type TracePerspective = "full" | "agent";
+export type PerspectiveLevel = "primary" | "context" | "detail";
+
 export type ChildOp =
   | { type: "expand"; node: Node }
   | { type: "fold"; node: Node }
@@ -13,6 +16,7 @@ export interface RenderConfig {
   prune_below_ms?: number;
   max_depth?: number;
   expand?: Set<string>;
+  perspective?: TracePerspective;
 }
 
 export interface RenderContext {
@@ -28,6 +32,13 @@ export abstract class Facet {
 
   brief(node: Node): Field[] {
     return node.brief;
+  }
+
+  perspectiveLevel(
+    _node: Node,
+    _perspective: TracePerspective,
+  ): PerspectiveLevel | undefined {
+    return undefined;
   }
 
   layout(_node: Node, children: Node[], context: RenderContext): ChildOp[] {

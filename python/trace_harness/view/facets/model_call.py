@@ -8,7 +8,14 @@ model-call 的 `http_status`（显示在 brief 上），故默认 `Hide` http �
 from __future__ import annotations
 
 from trace_harness.model.node import Node
-from trace_harness.view.facet import ChildOp, DefaultFacet, Hide, RenderCtx
+from trace_harness.view.facet import (
+    ChildOp,
+    DefaultFacet,
+    Hide,
+    PerspectiveLevel,
+    RenderCtx,
+    TracePerspective,
+)
 
 
 class ModelCallFacet(DefaultFacet):
@@ -16,6 +23,11 @@ class ModelCallFacet(DefaultFacet):
 
     def match(self, node: Node) -> bool:
         return node.kind == "model-call"
+
+    def perspective_level(
+        self, node: Node, perspective: TracePerspective
+    ) -> PerspectiveLevel | None:
+        return "primary" if perspective == "agent" else None
 
     def layout(self, node: Node, children: list[Node], rctx: RenderCtx) -> list[ChildOp]:
         http = [c for c in children if c.kind == "http"]

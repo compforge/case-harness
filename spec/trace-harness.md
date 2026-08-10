@@ -29,15 +29,19 @@ raw spans -> normalize -> assemble -> eager features -> diagnose -> render
 3. `diagnose` emits `Finding` values. Physical errors and per-kind rules run before scoped
    detectors. Detectors run in post-order and receive findings accumulated so far.
 4. `render` applies scoped, declarative facets to `Node + Finding` and produces a display tree.
-   Facets declare presentation intent such as the row projection and child layout; the harness
-   owns traversal, display-tree construction, and output serialization. A renderer MAY expose
-   lazy features in node details.
+   Perspective and layout are orthogonal: `full` or `agent` decides which parts of the same node
+   tree receive emphasis, while `tree` or `flame` decides how that projection is drawn. Facets
+   declare presentation intent such as perspective level, row projection, and child layout; the
+   harness owns traversal, display-tree construction, and output serialization. A renderer MAY
+   expose lazy features in node details.
 5. A probe MAY write evidence, but MUST run only after the host explicitly enables it. Importing
    a package, constructing a harness, assembling, diagnosing without probes, and rendering MUST
    NOT create evidence files.
 
 Only `assemble` may create or change logical node parent edges. Later stages MUST be
-structure-preserving.
+structure-preserving. A coarse perspective MAY replace an uninteresting display path with a
+synthetic context connector, but it MUST retain the represented node IDs and MUST NOT rewrite
+`Node.parent_node_id`.
 
 ## 3. Analysis IR
 
@@ -67,7 +71,7 @@ four pure extension slots:
 | `specs` | assemble and per-kind diagnose | first matching spec wins |
 | `features` | eager bake and lazy detail | first applicable producer of a name wins |
 | `detectors` | diagnose | declaration order within each post-order node |
-| `facets` | render | highest priority wins; declaration order breaks ties |
+| `facets` | render | highest priority wins; declaration order breaks ties; an undefined perspective level falls through |
 
 Built-in contributions are copied into each harness before consumer contributions. A contribution
 MUST NOT be installed by relying on module import side effects. Implementations MUST NOT expose an
@@ -75,8 +79,10 @@ ambient mutable registry as a contribution mechanism.
 
 A facet MUST NOT replace the renderer or recurse through the analysis tree itself. This keeps
 cross-domain presentation policy in the harness while still allowing each domain to state which
-nodes are primary, summarized, grouped, or hidden. Findings remain renderer inputs, so generic and
-domain detectors can affect emphasis without implementing presentation code.
+nodes are primary, context, detail, summarized, grouped, or hidden. Findings remain renderer
+inputs, so generic and domain detectors can affect emphasis without implementing presentation
+code. The generic `agent` perspective treats GenAI `agent`, `model-call`, and `tool-call` nodes as
+primary; a domain facet MAY mark additional workflow-node kinds as primary or context.
 
 Merging contributions preserves declaration order. It does not execute them.
 

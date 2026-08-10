@@ -20,7 +20,15 @@ export { SpecSet, mergeSpecs, type KindSpec } from "./model/spec";
 export { NormSpan, spanErrorText, type ErrorEvent, type SpanAttributes, type SpanEvent } from "./model/span";
 export { ViewTree, buildView } from "./model/viewtree";
 export type { DisplayNode } from "./view/display";
-export { DefaultFacet, Facet, type ChildOp, type RenderConfig, type RenderContext } from "./view/facet";
+export {
+  DefaultFacet,
+  Facet,
+  type ChildOp,
+  type PerspectiveLevel,
+  type RenderConfig,
+  type RenderContext,
+  type TracePerspective,
+} from "./view/facet";
 export { builtinFacets } from "./view/facets";
 export { renderDisplay } from "./view/engine";
 export { renderInteractive } from "./view/interactive";

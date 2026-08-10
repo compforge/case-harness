@@ -112,10 +112,11 @@ function spanPayload(context: TraceContext, spanId: string): Record<string, unkn
 const CSS = String.raw`
 *{box-sizing:border-box}:root{--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
 body{font:13px/1.5 var(--mono);margin:0;background:#f6f7f9;color:#1a1a1a}
-header{background:#1f2937;color:#fff;padding:8px 16px;display:flex;gap:16px;align-items:center}
+header{background:#1f2937;color:#fff;padding:8px 16px;display:flex;gap:12px;align-items:center}
 header h1{font-size:13px;margin:0;font-weight:normal}header b{color:#93c5fd}
 header button{font:11px var(--mono);background:#374151;color:#e5e7eb;border:0;border-radius:4px;padding:2px 8px;cursor:pointer}
-nav.tabs{display:flex;gap:2px}nav.tabs button.active{background:#2563eb;color:#fff}
+nav.switch{display:flex;gap:2px;align-items:center}nav.switch span{font-size:10px;color:#9ca3af;margin-right:2px}
+nav.switch button.active{background:#2563eb;color:#fff}
 .wrap{display:flex;height:calc(100vh - 35px)}#view-flame{display:none;height:calc(100vh - 35px);overflow:auto;background:#fff;padding:12px 16px}
 .tree{flex:0 0 52%;max-width:760px;overflow:auto;border-right:1px solid #e5e7eb;background:#fff;padding:8px 0}
 .pane{flex:1;overflow:auto;padding:16px}.row{white-space:nowrap;cursor:pointer;font-size:12px;padding:2px 8px;border-left:3px solid transparent;display:flex;align-items:baseline;gap:6px}
@@ -131,11 +132,14 @@ table.facts{border-collapse:collapse;margin-bottom:14px}table.facts td{border:1p
 dl.attrs{margin:0}dl.attrs dt{font-size:11px;color:#6b7280;margin-top:10px}dl.attrs dd{margin:2px 0 0;background:#fff;border:1px solid #e5e7eb;border-radius:4px;padding:6px 8px;white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:340px;overflow:auto}
 .faxis{position:relative;height:18px;color:#6b7280;font-size:10px;border-bottom:1px solid #e5e7eb;margin-bottom:6px}.faxis span{position:absolute;transform:translateX(-50%);white-space:nowrap}.flame{position:relative}
 .fcell{position:absolute;height:18px;border-radius:2px;font-size:10px;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:1px 4px;cursor:pointer;border:1px solid rgba(255,255,255,.55)}.fcell:hover{filter:brightness(1.18)}.fcell.err{box-shadow:inset 0 0 0 2px #dc2626}
+.empty{padding:24px;color:#6b7280;font-size:12px}
 `;
 
 const SCRIPT = String.raw`
-const TREE=__TREE__,SPANS=__SPANS__,KCOLOR={agent:'#7c3aed',framework:'#2563eb',node:'#2563eb','model-call':'#059669','tool-call':'#d97706',action:'#0891b2',service:'#6b7280'};
-const treeEl=document.getElementById('tree'),paneEl=document.getElementById('pane'),byId={},parentOf={},boxOf={},twOf={};
+const TREES=__TREES__,SPANS=__SPANS__,KCOLOR={agent:'#7c3aed',framework:'#2563eb',node:'#2563eb','model-call':'#059669','tool-call':'#d97706',action:'#0891b2',service:'#6b7280'};
+const treeEl=document.getElementById('tree'),paneEl=document.getElementById('pane');
+let perspective='full',layout='tree',tree=TREES.full,selectedId=location.hash.slice(1);
+let byId={},parentOf={},boxOf={},twOf={},flameBuilt=false;
 function esc(s){return String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));}
 function fmtMs(ms){if(ms<1)return(ms*1000).toFixed(0)+'µs';if(ms<1000)return ms.toFixed(0)+'ms';const s=ms/1000;return s<60?s.toFixed(2)+'s':Math.floor(s/60)+'m'+(s%60).toFixed(1)+'s';}
 function renderInto(n,depth,parent){byId[n.node_id]=n;parentOf[n.node_id]=parent&&parent.node_id;const box=document.createElement('div'),row=document.createElement('div');row.className='row'+(n.has_error?' err':'');row.dataset.id=n.node_id;row.style.paddingLeft=(depth*16+8)+'px';
@@ -144,12 +148,18 @@ function facts(n){const rows=Object.entries(n.facts||{});return rows.length?'<ta
 function findings(n){const marks={error:'✗',warn:'▲',info:'·'};return(n.findings||[]).length?'<div class="findings">'+n.findings.map(f=>'<div class="f-'+esc(f.severity)+'">'+(marks[f.severity]||'·')+' ['+esc(f.source)+'] '+esc(f.note)+'</div>').join('')+'</div>':'';}
 function features(n){const rows=Object.entries(n.features||{});return rows.length?'<div class="meta">特征：</div>'+rows.map(([k,v])=>'<div class="feat"><div class="feat-h">'+esc(k)+'</div><pre class="feat-body">'+esc(v)+'</pre></div>').join(''):'';}
 function unfold(id){let p=parentOf[id];while(p){const b=boxOf[p];if(b&&b.style.display==='none'){b.style.display='';twOf[p].textContent='▾';}p=parentOf[p];}}
-function select(id){document.querySelectorAll('.row.sel').forEach(r=>r.classList.remove('sel'));unfold(id);const row=document.querySelector('.row[data-id="'+CSS.escape(id)+'"]');if(row){row.classList.add('sel');row.scrollIntoView({block:'nearest'});}const n=byId[id];if(!n)return;location.hash=id;paneEl.innerHTML='<h2>'+esc(n.name)+'</h2><div class="meta">'+esc(n.kind)+' · '+fmtMs(n.duration_ms)+(n.service?' · '+esc(n.service):'')+(n.has_error?' · <b style="color:#dc2626">ERROR：'+esc(n.error)+'</b>':'')+'</div>'+findings(n)+facts(n)+features(n)+'<div class="meta">溯源 span（'+n.span_ids.length+'）：</div><div class="chips">'+n.span_ids.map(sid=>'<span class="chip'+((n.error_span_ids||[]).includes(sid)?' errc':'')+'" data-sid="'+esc(sid)+'">'+(sid===n.primary_span_id?'primary':'卫星')+' · '+esc((SPANS[sid]||{}).operation||sid)+'</span>').join('')+'</div><div id="attrs"></div>';paneEl.querySelectorAll('.chip').forEach(c=>c.onclick=()=>showSpan(c.dataset.sid));paneEl.querySelectorAll('.feat-h').forEach(h=>h.onclick=()=>h.parentElement.classList.toggle('open'));showSpan((n.error_span_ids||[])[0]||n.primary_span_id);}
+function select(id){document.querySelectorAll('.row.sel').forEach(r=>r.classList.remove('sel'));unfold(id);const row=document.querySelector('.row[data-id="'+CSS.escape(id)+'"]');if(row){row.classList.add('sel');row.scrollIntoView({block:'nearest'});}const n=byId[id];if(!n)return;selectedId=id;location.hash=id;paneEl.innerHTML='<h2>'+esc(n.name)+'</h2><div class="meta">'+esc(n.kind)+' · '+fmtMs(n.duration_ms)+(n.service?' · '+esc(n.service):'')+(n.has_error?' · <b style="color:#dc2626">ERROR：'+esc(n.error)+'</b>':'')+'</div>'+findings(n)+facts(n)+features(n)+'<div class="meta">溯源 span（'+n.span_ids.length+'）：</div><div class="chips">'+n.span_ids.map(sid=>'<span class="chip'+((n.error_span_ids||[]).includes(sid)?' errc':'')+'" data-sid="'+esc(sid)+'">'+(sid===n.primary_span_id?'primary':'卫星')+' · '+esc((SPANS[sid]||{}).operation||sid)+'</span>').join('')+'</div><div id="attrs"></div>';paneEl.querySelectorAll('.chip').forEach(c=>c.onclick=()=>showSpan(c.dataset.sid));paneEl.querySelectorAll('.feat-h').forEach(h=>h.onclick=()=>h.parentElement.classList.toggle('open'));const sid=(n.error_span_ids||[])[0]||n.primary_span_id;if(sid)showSpan(sid);else document.getElementById('attrs').innerHTML='<div class="meta">视图压缩节点，无独立 span</div>';}
 function showSpan(sid){paneEl.querySelectorAll('.chip').forEach(c=>c.classList.toggle('sel',c.dataset.sid===sid));const sp=SPANS[sid],box=document.getElementById('attrs');if(!sp){box.innerHTML='<div class="meta">span 不在快照内</div>';return;}box.innerHTML='<div class="meta">span '+esc(sid)+' · '+esc(sp.operation)+' · '+fmtMs(sp.duration_ms)+'</div><dl class="attrs">'+Object.entries(sp.attrs).map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd>').join('')+'</dl>';}
-TREE.roots.forEach(r=>treeEl.appendChild(renderInto(r,0,null)));document.getElementById('expand').onclick=()=>document.querySelectorAll('.tw').forEach(t=>{if(t.textContent==='▸')t.click();});document.getElementById('fold').onclick=()=>document.querySelectorAll('.tw').forEach(t=>{if(t.textContent==='▾')t.click();});
-const views={stack:document.getElementById('view-stack'),flame:document.getElementById('view-flame')};let flameBuilt=false;function showView(v){Object.entries(views).forEach(([k,e])=>e.style.display=k===v?(k==='stack'?'flex':'block'):'none');document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));if(v==='flame'&&!flameBuilt){buildFlame();flameBuilt=true;}}document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>showView(b.dataset.v));
-function buildFlame(){const box=document.getElementById('flame'),axis=document.getElementById('faxis');let t0=Infinity,t1=-Infinity,maxD=0;(function scan(ns,d){ns.forEach(n=>{t0=Math.min(t0,n.start_ms);t1=Math.max(t1,n.start_ms+n.duration_ms);maxD=Math.max(maxD,d);scan(n.children,d+1);});})(TREE.roots,0);const span=Math.max(t1-t0,1e-6),rowH=20;box.style.height=((maxD+1)*rowH+4)+'px';for(let i=0;i<=10;i++){const s=document.createElement('span');s.style.left=(i*10)+'%';s.textContent=fmtMs(span*i/10);axis.appendChild(s);}(function place(ns,d){ns.forEach(n=>{const c=document.createElement('div');c.className='fcell'+(n.has_error?' err':'');c.style.left=((n.start_ms-t0)/span*100)+'%';c.style.width=Math.max(n.duration_ms/span*100,.15)+'%';c.style.top=(d*rowH)+'px';c.style.background=KCOLOR[n.kind]||'#9ca3af';c.textContent=n.name;c.onclick=()=>{showView('stack');select(n.node_id);};box.appendChild(c);place(n.children,d+1);});})(TREE.roots,0);}
-function firstError(ns){for(const n of ns){if(n.has_error)return n.node_id;const child=firstError(n.children);if(child)return child;}return null;}const wanted=location.hash.slice(1);select((wanted&&byId[wanted]&&wanted)||firstError(TREE.roots)||(TREE.roots[0]&&TREE.roots[0].node_id));
+function firstError(ns){for(const n of ns){if(n.has_error&&n.kind)return n.node_id;const child=firstError(n.children);if(child)return child;}return null;}
+function firstReal(ns){for(const n of ns){if(n.kind)return n.node_id;const child=firstReal(n.children);if(child)return child;}return null;}
+function renderTree(){tree=TREES[perspective]||{roots:[]};treeEl.replaceChildren();byId={};parentOf={};boxOf={};twOf={};flameBuilt=false;tree.roots.forEach(r=>treeEl.appendChild(renderInto(r,0,null)));if(!tree.roots.length){treeEl.innerHTML='<div class="empty">当前侧重点没有可展示节点</div>';paneEl.innerHTML='<div class="empty">切换到“完整”查看全部节点</div>';if(layout==='flame')buildFlame();return;}const wanted=selectedId&&byId[selectedId]?selectedId:null;select(wanted||firstError(tree.roots)||firstReal(tree.roots)||tree.roots[0].node_id);if(layout==='flame')buildFlame();}
+document.getElementById('expand').onclick=()=>treeEl.querySelectorAll('.tw').forEach(t=>{if(t.textContent==='▸')t.click();});document.getElementById('fold').onclick=()=>treeEl.querySelectorAll('.tw').forEach(t=>{if(t.textContent==='▾')t.click();});
+const views={tree:document.getElementById('view-stack'),flame:document.getElementById('view-flame')};
+function showLayout(next){layout=next;Object.entries(views).forEach(([key,element])=>element.style.display=key===next?(key==='tree'?'flex':'block'):'none');document.querySelectorAll('[data-layout]').forEach(button=>button.classList.toggle('active',button.dataset.layout===next));document.getElementById('expand').style.display=next==='tree'?'':'none';document.getElementById('fold').style.display=next==='tree'?'':'none';if(next==='flame'&&!flameBuilt)buildFlame();}
+function showPerspective(next){perspective=next;document.querySelectorAll('[data-perspective]').forEach(button=>button.classList.toggle('active',button.dataset.perspective===next));renderTree();}
+document.querySelectorAll('[data-layout]').forEach(button=>button.onclick=()=>showLayout(button.dataset.layout));document.querySelectorAll('[data-perspective]').forEach(button=>button.onclick=()=>showPerspective(button.dataset.perspective));
+function buildFlame(){const box=document.getElementById('flame'),axis=document.getElementById('faxis');box.replaceChildren();axis.replaceChildren();if(!tree.roots.length){box.innerHTML='<div class="empty">当前侧重点没有可展示节点</div>';flameBuilt=true;return;}let t0=Infinity,t1=-Infinity,maxD=0;(function scan(ns,d){ns.forEach(n=>{t0=Math.min(t0,n.start_ms);t1=Math.max(t1,n.start_ms+n.duration_ms);maxD=Math.max(maxD,d);scan(n.children,d+1);});})(tree.roots,0);const span=Math.max(t1-t0,1e-6),rowH=20;box.style.height=((maxD+1)*rowH+4)+'px';for(let i=0;i<=10;i++){const s=document.createElement('span');s.style.left=(i*10)+'%';s.textContent=fmtMs(span*i/10);axis.appendChild(s);}(function place(ns,d){ns.forEach(n=>{const c=document.createElement('div');c.className='fcell'+(n.has_error?' err':'');c.style.left=((n.start_ms-t0)/span*100)+'%';c.style.width=Math.max(n.duration_ms/span*100,.15)+'%';c.style.top=(d*rowH)+'px';c.style.background=KCOLOR[n.kind]||'#9ca3af';c.textContent=n.name;c.onclick=()=>{showLayout('tree');select(n.node_id);};box.appendChild(c);place(n.children,d+1);});})(tree.roots,0);flameBuilt=true;}
+renderTree();showLayout('tree');
 `;
 
 export function renderInteractive(
@@ -163,21 +173,25 @@ export function renderInteractive(
   const featureRegistry = options.featureRegistry ?? new FeatureRegistry(builtinFeatures());
   const facetRegistry = options.facetRegistry ?? new FacetRegistry(builtinFacets());
   const byId = new Map(context.nodes.map((node) => [node.node_id, node]));
-  const roots = renderDisplay(context.view(), findings, facetRegistry);
-  const tree = {
-    roots: roots.map((root) => displayPayload(context, root, byId, featureRegistry)),
-  };
+  const trees = Object.fromEntries((["full", "agent"] as const).map((perspective) => [
+    perspective,
+    {
+      roots: renderDisplay(context.view(), findings, facetRegistry, { perspective })
+        .map((root) => displayPayload(context, root, byId, featureRegistry)),
+    },
+  ]));
   const referenced = new Set(context.nodes.flatMap((node) => node.span_ids));
   const spans = Object.fromEntries(
     [...referenced].filter((spanId) => context.spans.has(spanId)).map((spanId) => [spanId, spanPayload(context, spanId)]),
   );
   const embed = (value: unknown) => JSON.stringify(value).replaceAll("</", "<\\/");
-  const script = SCRIPT.replace("__TREE__", embed(tree)).replace("__SPANS__", embed(spans));
+  const script = SCRIPT.replace("__TREES__", embed(trees)).replace("__SPANS__", embed(spans));
   const title = htmlEscape(context.trace_id);
   const errorCount = context.nodes.filter((node) => node.has_error).length;
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>trace ${title}</title><style>${CSS}</style></head>
 <body><header><h1>trace <b>${title}</b> · ${context.nodes.length} nodes / ${context.spans.size} spans · errors ${errorCount}</h1>
-<nav class="tabs"><button data-v="stack" class="active">调用栈</button><button data-v="flame">火焰图</button></nav><button id="expand">全部展开</button><button id="fold">全部折叠</button></header>
+<nav class="switch"><span>侧重点</span><button data-perspective="full" class="active">完整</button><button data-perspective="agent">Agent</button></nav>
+<nav class="switch"><span>形态</span><button data-layout="tree" class="active">调用栈</button><button data-layout="flame">火焰图</button></nav><button id="expand">全部展开</button><button id="fold">全部折叠</button></header>
 <div class="wrap" id="view-stack"><div class="tree" id="tree"></div><div class="pane" id="pane"></div></div>
 <div id="view-flame"><div class="faxis" id="faxis"></div><div class="flame" id="flame"></div></div><script>${script}</script></body></html>\n`;
 }
