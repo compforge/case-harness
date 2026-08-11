@@ -118,6 +118,13 @@ func LoadEnv(configPath string) (*Env, error) {
 	if err != nil {
 		return nil, err
 	}
+	if auth, ok := resolved["auth"].(map[string]any); ok {
+		if headers, exists := auth["headers"]; exists {
+			if _, ok := headers.(map[string]any); !ok {
+				return nil, fmt.Errorf("parse config %s: auth.headers must be a mapping", configPath)
+			}
+		}
+	}
 
 	return parseEnv(resolved), nil
 }

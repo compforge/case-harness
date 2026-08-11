@@ -118,3 +118,13 @@ func TestLoadEnvRejectsInvalidAuthHeadersJSON(t *testing.T) {
 		t.Fatal("expected invalid E2E_AUTH_HEADERS error")
 	}
 }
+
+func TestLoadEnvRejectsNonMappingAuthHeaders(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("auth:\n  headers: bearer-token\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadEnv(configPath); err == nil {
+		t.Fatal("expected non-mapping auth.headers error")
+	}
+}
