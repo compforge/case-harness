@@ -1,0 +1,7 @@
+caseset: perf-mock
+focus: offline perf harness smoke
+facets:
+  difficulty: { values: [simple, complex], ordered: true }
+cases:
+  - { id: hello, input: {ms: 3}, facets: {difficulty: simple} }
+  - { id: caocao, input: {ms: 25}, facets: {difficulty: complex} }

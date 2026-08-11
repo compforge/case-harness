@@ -27,6 +27,7 @@ import json
 import shutil
 from pathlib import Path
 
+import yaml
 from harness_common.report_kit import (
     KV,
     Chart,
@@ -381,7 +382,19 @@ def write_run(
 
     if config_path:
         try:
-            shutil.copyfile(config_path, run_dir / "config.yaml")
+            source_config = Path(config_path).expanduser().resolve()
+            raw_config = yaml.safe_load(source_config.read_text()) or {}
+            caseset_ref = raw_config.get("caseset")
+            if isinstance(caseset_ref, str) and caseset_ref:
+                source_caseset = Path(caseset_ref).expanduser()
+                if not source_caseset.is_absolute():
+                    source_caseset = source_config.parent / source_caseset
+                shutil.copyfile(source_caseset, run_dir / "caseset.yaml")
+                raw_config["caseset"] = "./caseset.yaml"
+                (run_dir / "config.yaml").write_text(yaml.safe_dump(raw_config, sort_keys=False))
+                paths["caseset"] = str(run_dir / "caseset.yaml")
+            else:
+                shutil.copyfile(source_config, run_dir / "config.yaml")
             paths["config"] = str(run_dir / "config.yaml")
         except OSError:
             pass

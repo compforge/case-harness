@@ -10,7 +10,7 @@ dependencies = [
     "pydantic>=2.0,<3.0",
     "prombed>=0.1.0",
     # canonical Case model lives in the asset layer (spec-case); this repo is a runner
-    "spec-case[model]>=0.1.1",
+    "spec-case[model]>=0.2.1",
 ]
 
 [project.optional-dependencies]

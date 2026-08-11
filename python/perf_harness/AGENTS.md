@@ -49,6 +49,7 @@ perf_harness/
 
 ### 扩展点（业务接入只碰这两个）
 
+- **Case 资产归 spec-case**：实验用 `caseset: <path>` 引用 canonical CaseSet，`cases:` 只做 case 选择/排序与实验本地 `weight`；`input/facets/judge/binding` 不在 perf 配置里覆盖。无 `caseset` 的内联 cases 仍是轻量实验入口。
 - **`Workload`**（怎么压 + 怎么判）：`fire(case)` 只记原始观测，`judge(outcome)→Verdict` 才裁决（纯函数，可离线重判）；SSE"200 但流坏了"靠 override `judge`。各服务在自己项目写、`register_workload` 注册；Trial 固定按 `setup → measurement → deactivation → cooldown → cleanup` 运行，其中业务 hook 只有 `setup/deactivate/cleanup`。
 - **`Probe`**（看什么）：`families` 单表声明元数据（FamilySpec：unit/value_kind/description，describe/summarize/Engine 共读），`sample()` 周期采样；Source 不绑 k8s，consumer 可通过 extension module + `register_probe` 扩展。Prometheus 来源由 `PrometheusProbe` 内嵌 Prombed，配置直接声明 PromQL 与输出 label 契约，不在 perf 内重复实现解析、存储和查询语义。
 - **压后观测不污染容量口径**：`cooldown_s` 延长 raw series 以观察回收/缩容；默认 SLO 只读 measurement Window，`window: {kind: cooldown}` 显式读取 cooldown。

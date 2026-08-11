@@ -15,7 +15,7 @@ from typing import get_args
 import yaml
 from harness_common.overlay import Overlay
 from spec_case.facets import FacetSchema
-from spec_case.model import Case
+from spec_case.model import Case, CaseSet, load_caseset, validate
 
 from perf_harness.drive.load import LoadModel, LoadProfile, Pacing, PacingKind, Schedule, Stage
 from perf_harness.drive.workload import MockWorkload, Workload, build_workload
@@ -73,7 +73,8 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
     registry. Declared extension modules are still imported so custom probes and
     config validation use the same path as a real run.
     """
-    raw = yaml.safe_load(Path(path).expanduser().read_text())
+    config_path = Path(path).expanduser().resolve()
+    raw = yaml.safe_load(config_path.read_text())
     _load_extensions(raw.get("extensions"))
     subj = raw["subject"]
     subj_name = subj.get("name", "subject")
@@ -114,7 +115,8 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
             "`derived:` was removed — express server-side ratios and rates directly "
             "as PromQL queries on the `prometheus` probe"
         )
-    cases = _parse_cases(raw)
+    caseset = _load_caseset_ref(raw.get("caseset"), config_path.parent)
+    cases = _parse_cases(raw, caseset)
     mix = _parse_mix(raw, cases)
     slo = _parse_slo(raw.get("slo"))
     cooldown_s = float(raw.get("cooldown_s", 0.0))
@@ -122,7 +124,8 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
         raise ValueError("cooldown_s must be >= 0")
     _validate_producers(probes, workload)
     registry = _static_registry(probes, workload)
-    declared_facets = _declared_facet_pairs(raw.get("facets"), cases, workload)
+    facet_schema = caseset.facet_schema if caseset else FacetSchema.from_raw(raw.get("facets"))
+    declared_facets = _declared_facet_pairs(facet_schema, cases, workload)
     # observed services close the `{service="…"}` label value space (the family-keyed
     # registry no longer carries a per-service entry to check against)
     declared_services = {p.labels["service"] for p in probes if "service" in p.labels}
@@ -160,7 +163,7 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
         probes=probes,
         cases=cases,
         mix=mix,
-        facet_order=_parse_facet_order(raw.get("facets")),
+        facet_order=facet_schema.ordered_value_lists(),
         slo=slo,
         abort_on_fail=bool(raw.get("abort_on_fail", False)),
         strict_slo=bool(raw.get("strict_slo", False)),  # skip → run failure (default lenient)
@@ -192,12 +195,69 @@ def _load_extensions(value: object) -> None:
             raise ValueError(f"failed to import extension module {module!r}: {exc}") from exc
 
 
-def _parse_cases(raw: dict) -> list[Case]:
+def _load_caseset_ref(value: object, config_dir: Path) -> CaseSet | None:
+    """Load a canonical CaseSet referenced by the experiment config.
+
+    Relative paths belong to the config file, not the caller's current working
+    directory. The canonical loader and validator remain owned by spec-case.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ValueError("caseset must be a non-empty path string")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = config_dir / path
+    caseset = load_caseset(path)
+    validate(caseset)
+    return caseset
+
+
+def _parse_cases(raw: dict, caseset: CaseSet | None = None) -> list[Case]:
     """Top-level ``cases:`` → the canonical Case pool. Backward-compat: no cases but a
     top-level ``payload``/``payload_file`` → one default Case; neither → empty (Engine
     uses one anonymous Case). An entry's ``weight`` is experiment usage, not part of
     the Case — ``_parse_mix`` lifts it into the Experiment's mix Overlay."""
     items = raw.get("cases")
+    if caseset is not None:
+        if "facets" in raw:
+            raise ValueError(
+                "top-level `facets:` cannot accompany `caseset:` — the canonical "
+                "CaseSet owns its facet schema"
+            )
+        if "payload" in raw or "payload_file" in raw:
+            raise ValueError(
+                "top-level payload cannot accompany `caseset:` — select canonical "
+                "cases under `cases:`"
+            )
+        if items is None:
+            return list(caseset.cases)
+        if not isinstance(items, list):
+            raise ValueError("cases must be a list of canonical case selections")
+        by_id = {case.id: case for case in caseset.cases}
+        selected: list[Case] = []
+        seen: set[str] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("caseset selections must be mappings with an `id`")
+            unknown = set(item) - {"id", "weight"}
+            if unknown:
+                raise ValueError(
+                    f"caseset selection has unsupported fields {sorted(unknown)!r}; "
+                    "only `id` and experiment-local `weight` are allowed"
+                )
+            case_id = item.get("id")
+            if not isinstance(case_id, str) or not case_id:
+                raise ValueError("caseset selection needs a non-empty string `id`")
+            if case_id in seen:
+                raise ValueError(f"duplicate caseset selection: {case_id}")
+            if case_id not in by_id:
+                raise ValueError(f"caseset selection {case_id!r} not found in {caseset.caseset!r}")
+            selected.append(by_id[case_id])
+            seen.add(case_id)
+        if not selected:
+            raise ValueError("caseset selection must not be empty")
+        return selected
     if items:
         return [
             Case(
@@ -644,15 +704,16 @@ def _static_registry(probes: list[Probe], workload: Workload) -> dict[str, Metri
     return reg
 
 
-def _declared_facet_pairs(facets: dict | None, cases: list[Case], workload: Workload) -> set[str]:
+def _declared_facet_pairs(
+    facet_schema: FacetSchema, cases: list[Case], workload: Workload
+) -> set[str]:
     """``k=v`` facet pairs an SLO scope may gate: the static Case mix + the
     Workload's declared runtime facets + any ``facets:`` block values."""
     pairs = {f"{k}={v}" for c in cases for k, v in c.facets.items()}
     for fd in workload.describe_facets():
         pairs.update(f"{fd.name}={v}" for v in fd.values)
-    for key, spec in (facets or {}).items():
-        if isinstance(spec, dict):
-            pairs.update(f"{key}={v}" for v in spec.get("values", []))
+    for key, spec in facet_schema.facets.items():
+        pairs.update(f"{key}={v}" for v in spec.values or [])
     return pairs
 
 

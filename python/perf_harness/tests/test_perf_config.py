@@ -78,6 +78,74 @@ def test_load_experiment_parses_cases_and_facets(tmp_path):
     assert experiment.facet_order == {"difficulty": ["simple", "complex"]}
 
 
+def test_load_experiment_references_canonical_caseset(tmp_path):
+    (tmp_path / "cases.yaml").write_text(
+        "caseset: shared-perf\n"
+        "facets:\n"
+        "  difficulty: { values: [simple, complex], ordered: true }\n"
+        "cases:\n"
+        "  - id: simple\n"
+        "    desc: quick request\n"
+        "    input: {ms: 3}\n"
+        "    facets: {difficulty: simple}\n"
+        "    judge: {perf: {p99_ms: 20}}\n"
+        "    binding: {symbol_id: internal/api.py::run, spec_id: sync_run}\n"
+        "  - id: complex\n"
+        "    input: {ms: 25}\n"
+        "    facets: {difficulty: complex}\n"
+    )
+    cfg = tmp_path / "experiment.yaml"
+    cfg.write_text(
+        _BASE + "caseset: ./cases.yaml\n"
+        "cases:\n"
+        "  - {id: complex, weight: 30}\n"
+        "  - {id: simple, weight: 70}\n"
+        "load: { model: closed, levels: [1], steady_s: 0.1 }\n"
+    )
+
+    experiment, _ = load_experiment(str(cfg))
+
+    assert [case.id for case in experiment.cases] == ["complex", "simple"]
+    assert experiment.mix.overrides == {"complex": 30.0, "simple": 70.0}
+    assert experiment.facet_order == {"difficulty": ["simple", "complex"]}
+    simple = experiment.cases[1]
+    assert simple.desc == "quick request"
+    assert simple.judge == {"perf": {"p99_ms": 20}}
+    assert simple.binding.symbol_id == "internal/api.py::run"
+    assert simple.binding.spec_id == "sync_run"
+
+
+def test_canonical_caseset_selection_does_not_override_case_data(tmp_path):
+    (tmp_path / "cases.yaml").write_text(
+        "caseset: shared-perf\ncases:\n  - {id: simple, input: {ms: 3}}\n"
+    )
+    cfg = tmp_path / "experiment.yaml"
+    cfg.write_text(
+        _BASE + "caseset: ./cases.yaml\n"
+        "cases:\n"
+        "  - {id: simple, request_json: {ms: 9}}\n"
+        "load: { model: closed, levels: [1], steady_s: 0.1 }\n"
+    )
+
+    with pytest.raises(ValueError, match="only `id`.*`weight`"):
+        load_experiment(str(cfg))
+
+
+def test_canonical_caseset_fails_fast_on_unknown_selection(tmp_path):
+    (tmp_path / "cases.yaml").write_text(
+        "caseset: shared-perf\ncases:\n  - {id: simple, input: {ms: 3}}\n"
+    )
+    cfg = tmp_path / "experiment.yaml"
+    cfg.write_text(
+        _BASE + "caseset: ./cases.yaml\n"
+        "cases: [{id: missing}]\n"
+        "load: { model: closed, levels: [1], steady_s: 0.1 }\n"
+    )
+
+    with pytest.raises(ValueError, match="not found"):
+        load_experiment(str(cfg))
+
+
 def test_mix_resolves_to_engine_weights(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(_MIX)

@@ -14,15 +14,12 @@ resources:
 workload:
   name: mock                       # the protocol adapter (here: the built-in mock)
 
-# Weighted Case mix (the *what*) + facet schema (report ordering). Omit `cases`
-# for a single anonymous request. MockWorkload sleeps `case.input.ms`; facets
-# drive the report's by-facet pivot. `weight` is how THIS experiment uses the
-# case (default 1.0) — it rides the entry, not the Case itself.
-facets:
-  difficulty: { values: [simple, complex], ordered: true }
+# Reuse the canonical CaseSet. `cases` only selects/reorders cases and assigns
+# this experiment's weights; input/facets/judges stay owned by mock_cases.yaml.
+caseset: ./mock_cases.yaml
 cases:
-  - { id: hello,  weight: 70, facets: {difficulty: simple},  input: {ms: 3} }
-  - { id: caocao, weight: 30, facets: {difficulty: complex}, input: {ms: 25} }
+  - { id: hello,  weight: 70 }
+  - { id: caocao, weight: 30 }
 
 load:                              # how hard, over time (LoadProfile)
   model: closed                    # closed = N concurrent users / open = arrival rps
