@@ -480,8 +480,8 @@ wheels = [
 
 [[package]]
 name = "spec-case"
-version = "0.1.1"
-source = { git = "https://github.com/compforge/spec-case?subdirectory=toolchains%2Fpython#883d84a4b4847e276faf53e36f95dc3593f34fbc" }
+version = "0.2.1"
+source = { git = "https://github.com/compforge/spec-case?subdirectory=toolchains%2Fpython#5f60860f76fbe333e84bf3e34f5d147e1902a977" }
 
 [package.optional-dependencies]
 model = [

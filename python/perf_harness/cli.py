@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
 
         import yaml
 
-        from perf_harness.config import _parse_facet_order
+        from perf_harness.config import _load_caseset_ref, _parse_facet_order
         from perf_harness.report import write_report
         from perf_harness.runio import load_run
 
@@ -56,7 +56,12 @@ def main(argv: list[str] | None = None) -> int:
         cfg = run_dir / "config.yaml"  # the run's config snapshot carries the facet order
         if cfg.exists():
             raw = yaml.safe_load(cfg.read_text()) or {}
-            facet_order = _parse_facet_order(raw.get("facets"))
+            caseset = _load_caseset_ref(raw.get("caseset"), cfg.parent)
+            facet_order = (
+                caseset.facet_schema.ordered_value_lists()
+                if caseset
+                else _parse_facet_order(raw.get("facets"))
+            )
         loaded = load_run(run_dir)
         paths = write_report(loaded.trials, str(run_dir), facet_order=facet_order)
         print(f"re-rendered from model layer: {paths['report']}")

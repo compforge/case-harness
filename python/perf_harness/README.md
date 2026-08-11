@@ -23,10 +23,10 @@ subject:
 
 workload: { name: example, path: /api/v1/run, timeout: 180 }  # 你注册的协议适配（见下）
 
-cases:                                  # 混合流量：weight = 本实验怎么用这个 case
-  - { id: simple,  weight: 70, facets: {difficulty: simple},  input_file: ./simple.json }
-  - { id: complex, weight: 30, facets: {difficulty: complex}, input_file: ./complex.json }
-facets: { difficulty: { values: [simple, complex], ordered: true } }
+caseset: ./cases.yaml                    # canonical CaseSet：唯一持有 input/facets/judge
+cases:                                   # 本实验只选 case + 配 weight
+  - { id: simple,  weight: 70 }
+  - { id: complex, weight: 30 }
 
 load: { model: closed, levels: [5, 10, 20, 40], ramp_s: 20, steady_s: 120 }  # 容量扫描
 
@@ -70,6 +70,7 @@ python -m perf_harness.cli report  <run_dir>        # 从模型层重渲染报�
 ```
 outcomes.jsonl · timeseries.csv    # raw：每请求事实 / probe 采样
 run.json                           # 模型层（schema 版本化）：分析的唯一入口，load_run 可离线重建
+config.yaml · caseset.yaml        # 本次配置与 canonical CaseSet 快照（引用时）
 report.md/html · summary.csv · by_facet.csv · windows.csv · verdict.json  # 视图层
 ```
 
@@ -82,7 +83,8 @@ report.md/html · summary.csv · by_facet.csv · windows.csv · verdict.json  # 
 | `load` | 压多狠、怎么随时间变：`model`(open/closed) + `levels` 或 `stages` + pacing/熔断/优雅停 | [`docs/load-model-redesign.md`](docs/load-model-redesign.md) |
 | `workload` | 协议适配器（你写、`register_workload` 注册；框架只内置 mock） | 见下「接入一个服务」 |
 | `extensions` | 运行前导入的 consumer 模块；模块注册 workload / 自定义 probe | 配置和 CLI/SDK 使用同一发现方式 |
-| `cases` / `facets` | 混合流量（输入 + facets + weight）；报告按 facet 边际拆 | 聚合 p99 双峰没意义，拆开才有用 |
+| `caseset` / `cases` | 引用 canonical CaseSet；`cases` 可选择/排序并设置实验本地 `weight`，省略则全选 | input/facets/judge 由 CaseSet 持有，实验不覆盖 |
+| `cases` / `facets` | 无 canonical CaseSet 时仍可内联定义混合流量 | 报告按 facet 边际拆；`weight` 仍是实验用法 |
 | `observe` | 资源观测：看谁（self+下游同一形状）、抓什么（prometheus/top/rss/restart/limits/pods 或自定义 probe）；prometheus 内声明 PromQL `queries` | Prombed 负责抓取/存储/查询；`service` 是 perf 的 label |
 | `cooldown_s` | measurement 结束且 `deactivate()` 完成后继续采样的秒数；用于回收、缩容与泄漏曲线 | 原始 series 保留；`window: {kind: cooldown}` 显式读取 |
 | `slo` | run 级断言；metric label 选实体，`window: {kind/name/level}` 选时间（三态 pass/fail/skipped） | [`docs/result-semantics.md`](docs/result-semantics.md) |

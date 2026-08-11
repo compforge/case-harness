@@ -1,5 +1,7 @@
 import json
 
+import yaml
+
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.drive.workload import MockWorkload, Workload
 from perf_harness.engine import Engine, Experiment, Subject
@@ -32,7 +34,12 @@ async def test_write_run_lays_out_experiment_dir(tmp_path):
     engine = Engine(experiment, run_id="20260101-000000")
     run = await engine.run()
     assert run.experiment == "chat-sizing" and run.run_id == "20260101-000000"
-    write_run(run, str(tmp_path))
+    config_dir = tmp_path / "source"
+    config_dir.mkdir()
+    (config_dir / "cases.yaml").write_text("caseset: shared\ncases:\n  - {id: simple, input: {}}\n")
+    config = config_dir / "experiment.yaml"
+    config.write_text("caseset: ./cases.yaml\n")
+    write_run(run, str(tmp_path), config_path=str(config))
 
     run_dir = tmp_path / "chat-sizing" / "20260101-000000"
     assert run_dir.is_dir()
@@ -43,6 +50,10 @@ async def test_write_run_lays_out_experiment_dir(tmp_path):
     assert meta["experiment"] == "chat-sizing"
     assert meta["run_id"] == "20260101-000000"
     assert meta["n_trials"] == len(run.trials)
+
+    snapshot = yaml.safe_load((run_dir / "config.yaml").read_text())
+    assert snapshot["caseset"] == "./caseset.yaml"
+    assert (run_dir / "caseset.yaml").read_text() == (config_dir / "cases.yaml").read_text()
 
     # run.jsonl at the experiment level, one line per run (accumulates)
     log = tmp_path / "chat-sizing" / "run.jsonl"
