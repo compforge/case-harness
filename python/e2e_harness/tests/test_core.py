@@ -36,8 +36,7 @@ class TestInterpolation:
 class TestLoadEnv:
     def test_load_from_yaml(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MY_URL", "http://localhost:8080")
-        monkeypatch.setenv("MY_TENANT", "t1")
-        monkeypatch.setenv("MY_USER", "u1")
+        monkeypatch.setenv("MY_TOKEN", "token-1")
 
         config = tmp_path / "config.yaml"
         config.write_text(
@@ -46,8 +45,8 @@ class TestLoadEnv:
               name: test-svc
               base_url: ${MY_URL}
             auth:
-              tenant_id: ${MY_TENANT}
-              user_id: ${MY_USER}
+              headers:
+                Authorization: Bearer ${MY_TOKEN}
             profile: minimal
             custom:
               ttl: "60"
@@ -57,20 +56,18 @@ class TestLoadEnv:
         env = load_env(config)
         assert env.service.name == "test-svc"
         assert env.service.base_url == "http://localhost:8080"
-        assert env.auth.tenant_id == "t1"
-        assert env.auth.user_id == "u1"
+        assert env.auth.headers == {"Authorization": "Bearer token-1"}
         assert env.profile == "minimal"
         assert env.custom["ttl"] == "60"
 
     def test_load_from_env_vars(self, tmp_path, monkeypatch):
         monkeypatch.setenv("E2E_BASE_URL", "http://fallback:9090")
-        monkeypatch.setenv("E2E_TENANT_ID", "tenant-fb")
-        monkeypatch.setenv("E2E_USER_ID", "user-fb")
+        monkeypatch.setenv("E2E_AUTH_HEADERS", '{"Authorization":"Bearer fallback"}')
         monkeypatch.setenv("E2E_PROFILE", "full")
 
         env = load_env(tmp_path / "nonexistent.yaml")
         assert env.service.base_url == "http://fallback:9090"
-        assert env.auth.tenant_id == "tenant-fb"
+        assert env.auth.headers == {"Authorization": "Bearer fallback"}
         assert env.profile == "full"
 
     def test_load_auth_headers_mapping(self, tmp_path, monkeypatch):
@@ -80,21 +77,17 @@ class TestLoadEnv:
             service:
               base_url: http://localhost:8080
             auth:
-              tenant_id: t1
-              user_id: u1
               headers:
-                tenant_id: X-Top-Tenant-Id
-                user_id: X-Top-User-Id
+                X-Top-Tenant-Id: t1
+                X-Top-User-Id: u1
         """)
         )
 
         env = load_env(config)
-        assert env.auth.tenant_id == "t1"
         assert env.auth.headers == {
-            "tenant_id": "X-Top-Tenant-Id",
-            "user_id": "X-Top-User-Id",
+            "X-Top-Tenant-Id": "t1",
+            "X-Top-User-Id": "u1",
         }
-        assert "headers" not in env.auth.extra
 
 
 class TestBuildAuthHeaders:
@@ -106,22 +99,20 @@ class TestBuildAuthHeaders:
             auth=AuthConfig(**auth_kwargs),
         )
 
-    def test_headers_use_mapping(self):
+    def test_headers_are_injected_directly(self):
         from e2e_harness.runner.headers import build_auth_headers
 
         env = self._env(
-            tenant_id="t1",
-            user_id="u1",
-            headers={"tenant_id": "X-Top-Tenant-Id", "user_id": "X-Top-User-Id"},
+            headers={"X-Top-Tenant-Id": "t1", "X-Top-User-Id": "u1"},
         )
         headers = build_auth_headers(env)
         assert headers["X-Top-Tenant-Id"] == "t1"
         assert headers["X-Top-User-Id"] == "u1"
 
-    def test_no_headers_when_no_mapping(self):
+    def test_no_auth_headers_when_empty(self):
         from e2e_harness.runner.headers import build_auth_headers
 
-        env = self._env(tenant_id="t1", user_id="u1")
+        env = self._env()
         headers = build_auth_headers(env)
         assert "X-Top-Tenant-Id" not in headers
         assert headers == {"Content-Type": "application/json"}
@@ -129,7 +120,7 @@ class TestBuildAuthHeaders:
     def test_extra_overrides_auth(self):
         from e2e_harness.runner.headers import build_auth_headers
 
-        env = self._env(tenant_id="t1", user_id="u1", headers={"tenant_id": "X-T"})
+        env = self._env(headers={"X-T": "t1"})
         headers = build_auth_headers(env, extra={"X-T": "override"})
         assert headers["X-T"] == "override"
 
@@ -137,9 +128,7 @@ class TestBuildAuthHeaders:
         from e2e_harness.runner.headers import build_auth_headers
 
         env = self._env(
-            tenant_id="t1",
-            user_id="u1",
-            headers={"tenant_id": "X-T", "user_id": "X-U"},
+            headers={"X-T": "t1", "X-U": "u1"},
         )
         headers = build_auth_headers(env, exclude={"X-T"})
         assert "X-T" not in headers
@@ -151,13 +140,6 @@ class TestBuildAuthHeaders:
         env = self._env()
         headers = build_auth_headers(env, content_type="text/event-stream")
         assert headers["Content-Type"] == "text/event-stream"
-
-    def test_auth_extra_injected(self):
-        from e2e_harness.runner.headers import build_auth_headers
-
-        env = self._env(extra={"X-Cluster": "n-dev"})
-        headers = build_auth_headers(env)
-        assert headers["X-Cluster"] == "n-dev"
 
 
 class TestOutcome:

@@ -10,7 +10,10 @@ def test_top_level_aggregates_canonical_surface():
     """``from e2e_harness import X`` resolves the judgment-as-data path + marker front-end."""
     from e2e_harness import (
         Assertion,
+        Budgets,
         Case,
+        CaseRef,
+        CaseRun,
         CaseSpec,
         DiscoverConfig,
         DiscoveredCase,
@@ -18,12 +21,14 @@ def test_top_level_aggregates_canonical_surface():
         Outcome,
         Request,
         SSERunner,
+        Variant,
         case,
         case_hash,
         discover,
         run_asserts,
         run_case,
         run_cases,
+        run_lifecycle,
         spec,
     )
 
@@ -31,6 +36,10 @@ def test_top_level_aggregates_canonical_surface():
         x is not None
         for x in [
             Case,
+            CaseRef,
+            CaseRun,
+            Budgets,
+            Variant,
             CaseSpec,
             case,
             spec,
@@ -40,6 +49,7 @@ def test_top_level_aggregates_canonical_surface():
             DiscoveredCase,  # AST discovery (casegen reuses)
             run_case,
             run_cases,
+            run_lifecycle,
             Assertion,
             run_asserts,  # engine + judgment-as-data
             JSONRunner,

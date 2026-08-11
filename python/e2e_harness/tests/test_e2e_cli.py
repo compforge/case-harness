@@ -92,3 +92,21 @@ def test_parser_run_subcommand():
     )
     assert args.cmd == "run" and args.cases == ["a.yaml", "b.yaml"]
     assert args.base_url == "http://x" and args.protocol == "json"
+
+
+def test_run_files_rejects_mixed_caseset_identity(tmp_path):
+    other = tmp_path / "other.yaml"
+    other.write_text(
+        "caseset: other\n"
+        "cases:\n"
+        "  - id: other\n"
+        "    input: {path: /note}\n"
+        "    judge: {e2e: {assert: [{path: status, op: eq, value: 200}]}}\n"
+    )
+    with pytest.raises(SystemExit, match="one canonical CaseSet"):
+        run_files(
+            [str(_CASES), str(other)],
+            _runner(),
+            runs_dir=str(tmp_path),
+            run_id="mixed",
+        )

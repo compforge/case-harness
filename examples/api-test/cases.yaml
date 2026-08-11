@@ -1,0 +1,12 @@
+caseset: widget-api
+cases:
+  - id: happy
+    input:
+      method: POST
+      path: /api/v1/widgets
+      body: {name: e2e-widget}
+    judge:
+      e2e:
+        assert:
+          - {path: status, op: eq, value: 201}
+          - {path: body.id, op: not_empty}

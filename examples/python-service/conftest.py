@@ -1,8 +1,6 @@
-"""Pytest fixtures for this service's e2e tests."""
-
 import pytest
 
-from e2e_harness import Env, JSONRunner, AssertJudge, load_env
+from e2e_harness import Env, JSONRunner, load_env
 
 
 @pytest.fixture(scope="session")
@@ -11,12 +9,6 @@ def env() -> Env:
 
 
 @pytest.fixture(scope="session")
-def runner(env: Env) -> JSONRunner:
-    r = JSONRunner(env)
-    yield r
-    r.close()
-
-
-@pytest.fixture(scope="session")
-def judge() -> AssertJudge:
-    return AssertJudge()
+def runner(env: Env):
+    with JSONRunner(env) as value:
+        yield value

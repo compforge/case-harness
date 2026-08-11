@@ -2,8 +2,8 @@
 Case dataclass, case_hash, YAML loader.
 
 These decorators are markers — they attach metadata to handler functions so
-external tooling (discover/scaffold + static spec extractors) can enumerate it
-statically. At runtime they have zero side effect on the handler itself.
+casegen discovery and static spec extractors can enumerate it. At runtime they
+have zero side effect on the handler itself.
 
 @case / @spec drive casegen (discover compiles them into common.Case); @rule /
 @link are review-side context — function-level reviewer guidance and a curated
@@ -47,6 +47,7 @@ GROUP_PATTERN = CASE_ID_PATTERN
 DEFAULT_GROUP = "default"
 CASES_ATTR = "__cases__"
 SPEC_ATTR = "__spec__"
+SPEC_ID_ATTR = "__spec_id__"
 RULES_ATTR = "__rules__"
 LINKS_ATTR = "__links__"
 
@@ -145,14 +146,17 @@ def case(
     return decorator
 
 
-def spec(text: str) -> Callable[[F], F]:
-    """Attach endpoint-level intent / preamble (free-form natural language)."""
+def spec(text: str, *, id: str | None = None) -> Callable[[F], F]:
+    """Attach one endpoint contract; ``id`` names it on a plural-spec symbol."""
     normalized = (text or "").strip()
     if not normalized:
         raise ValueError("@spec requires non-empty text")
+    if id is not None and not CASE_ID_PATTERN.fullmatch(id):
+        raise ValueError(f"@spec id {id!r} must match {CASE_ID_PATTERN.pattern}")
 
     def decorator(fn: F) -> F:
         setattr(fn, SPEC_ATTR, normalized)
+        setattr(fn, SPEC_ID_ATTR, id)
         return fn
 
     return decorator
@@ -207,6 +211,11 @@ def get_spec(fn: Callable) -> str | None:
     return getattr(fn, SPEC_ATTR, None)
 
 
+def get_spec_id(fn: Callable) -> str | None:
+    """Return the optional canonical spec id attached to ``fn``."""
+    return getattr(fn, SPEC_ID_ATTR, None)
+
+
 def get_links(fn: Callable) -> list[str]:
     """Return the curated links attached to ``fn`` in source order."""
     return list(getattr(fn, LINKS_ATTR, []))
@@ -226,7 +235,7 @@ def hash_text(text: str) -> str:
     return hashlib.sha256(normalized).hexdigest()[:8]
 
 
-def case_hash(c: Case, spec_text: str | None) -> str:
+def case_hash(c: Case, spec_text: str | None, spec_id: str | None = None) -> str:
     """Joint hash of case fields + enclosing @spec text.
 
     Bundling spec into the hash means editing @spec marks all that endpoint's
@@ -244,6 +253,8 @@ def case_hash(c: Case, spec_text: str | None) -> str:
         c.forbid or "",
         "\n--spec--\n",
         spec_text or "",
+        "\n--spec-id--\n",
+        spec_id or "",
     ]
     return hash_text("".join(parts))
 

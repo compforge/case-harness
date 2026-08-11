@@ -1,6 +1,6 @@
 """Metric protocol — ``BaseMetric[T]`` + ``MetricResult``.
 
-The soft-scoring counterpart to ``AssertJudge``: api-mode metrics read an
+The soft-scoring counterpart to deterministic assertions: e2e metrics read an
 ``Outcome`` (HTTP / SSE protocol response) and score it. ``BaseMetric`` stays
 generic over the target type ``T`` so the abstraction isn't tied to ``Outcome``,
 but in this package the only target is ``Outcome`` (dataset-sample scoring lives

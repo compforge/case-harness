@@ -42,12 +42,10 @@ func TestInterpolateMissingRequired(t *testing.T) {
 
 func TestLoadEnvFromYAML(t *testing.T) {
 	os.Setenv("MY_URL", "http://localhost:9090")
-	os.Setenv("MY_TENANT", "t1")
-	os.Setenv("MY_USER", "u1")
+	os.Setenv("MY_TOKEN", "token-1")
 	defer func() {
 		os.Unsetenv("MY_URL")
-		os.Unsetenv("MY_TENANT")
-		os.Unsetenv("MY_USER")
+		os.Unsetenv("MY_TOKEN")
 	}()
 
 	dir := t.TempDir()
@@ -57,8 +55,8 @@ service:
   name: test-svc
   base_url: ${MY_URL}
 auth:
-  tenant_id: ${MY_TENANT}
-  user_id: ${MY_USER}
+  headers:
+    Authorization: Bearer ${MY_TOKEN}
 profile: minimal
 custom:
   ttl: "60"
@@ -77,8 +75,8 @@ custom:
 	if env.Service.BaseURL != "http://localhost:9090" {
 		t.Errorf("service.base_url = %q, want %q", env.Service.BaseURL, "http://localhost:9090")
 	}
-	if env.Auth.TenantID != "t1" {
-		t.Errorf("auth.tenant_id = %q, want %q", env.Auth.TenantID, "t1")
+	if env.Auth.Headers["Authorization"] != "Bearer token-1" {
+		t.Errorf("auth headers = %#v", env.Auth.Headers)
 	}
 	if env.Profile != "minimal" {
 		t.Errorf("profile = %q, want %q", env.Profile, "minimal")
@@ -90,13 +88,11 @@ custom:
 
 func TestLoadEnvFallback(t *testing.T) {
 	os.Setenv("E2E_BASE_URL", "http://fallback:8080")
-	os.Setenv("E2E_TENANT_ID", "fb-tenant")
-	os.Setenv("E2E_USER_ID", "fb-user")
+	os.Setenv("E2E_AUTH_HEADERS", `{"Authorization":"Bearer fallback"}`)
 	os.Setenv("E2E_PROFILE", "full")
 	defer func() {
 		os.Unsetenv("E2E_BASE_URL")
-		os.Unsetenv("E2E_TENANT_ID")
-		os.Unsetenv("E2E_USER_ID")
+		os.Unsetenv("E2E_AUTH_HEADERS")
 		os.Unsetenv("E2E_PROFILE")
 	}()
 
@@ -107,10 +103,18 @@ func TestLoadEnvFallback(t *testing.T) {
 	if env.Service.BaseURL != "http://fallback:8080" {
 		t.Errorf("base_url = %q, want %q", env.Service.BaseURL, "http://fallback:8080")
 	}
-	if env.Auth.TenantID != "fb-tenant" {
-		t.Errorf("tenant_id = %q, want %q", env.Auth.TenantID, "fb-tenant")
+	if env.Auth.Headers["Authorization"] != "Bearer fallback" {
+		t.Errorf("auth headers = %#v", env.Auth.Headers)
 	}
 	if env.Profile != "full" {
 		t.Errorf("profile = %q, want %q", env.Profile, "full")
+	}
+}
+
+func TestLoadEnvRejectsInvalidAuthHeadersJSON(t *testing.T) {
+	os.Setenv("E2E_AUTH_HEADERS", "not-json")
+	defer os.Unsetenv("E2E_AUTH_HEADERS")
+	if _, err := LoadEnv("/nonexistent/config.yaml"); err == nil {
+		t.Fatal("expected invalid E2E_AUTH_HEADERS error")
 	}
 }

@@ -2,6 +2,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -17,9 +18,7 @@ type ServiceConfig struct {
 }
 
 type AuthConfig struct {
-	TenantID string            `yaml:"tenant_id"`
-	UserID   string            `yaml:"user_id"`
-	Extra    map[string]string `yaml:"-"`
+	Headers map[string]string `yaml:"headers"`
 }
 
 type RuntimeConfig struct {
@@ -105,7 +104,7 @@ func LoadEnv(configPath string) (*Env, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return loadFromEnvVars(), nil
+			return loadFromEnvVars()
 		}
 		return nil, fmt.Errorf("read config %s: %w", configPath, err)
 	}
@@ -123,16 +122,17 @@ func LoadEnv(configPath string) (*Env, error) {
 	return parseEnv(resolved), nil
 }
 
-func loadFromEnvVars() *Env {
+func loadFromEnvVars() (*Env, error) {
+	headers, err := authHeadersFromEnv()
+	if err != nil {
+		return nil, err
+	}
 	return &Env{
 		Service: ServiceConfig{
 			Name:    os.Getenv("E2E_SERVICE_NAME"),
 			BaseURL: os.Getenv("E2E_BASE_URL"),
 		},
-		Auth: AuthConfig{
-			TenantID: os.Getenv("E2E_TENANT_ID"),
-			UserID:   os.Getenv("E2E_USER_ID"),
-		},
+		Auth: AuthConfig{Headers: headers},
 		Runtime: RuntimeConfig{
 			HTTPTimeoutS:   120,
 			PollIntervalMS: 500,
@@ -141,7 +141,7 @@ func loadFromEnvVars() *Env {
 		},
 		Profile: envOrDefault("E2E_PROFILE", "full"),
 		Custom:  map[string]string{},
-	}
+	}, nil
 }
 
 func parseEnv(data map[string]any) *Env {
@@ -161,12 +161,10 @@ func parseEnv(data map[string]any) *Env {
 		env.Service.BaseURL = strings.TrimRight(strVal(svc, "base_url"), "/")
 	}
 	if auth, ok := data["auth"].(map[string]any); ok {
-		env.Auth.TenantID = strVal(auth, "tenant_id")
-		env.Auth.UserID = strVal(auth, "user_id")
-		env.Auth.Extra = make(map[string]string)
-		for k, v := range auth {
-			if k != "tenant_id" && k != "user_id" {
-				env.Auth.Extra[k] = fmt.Sprint(v)
+		env.Auth.Headers = make(map[string]string)
+		if headers, ok := auth["headers"].(map[string]any); ok {
+			for key, value := range headers {
+				env.Auth.Headers[key] = fmt.Sprint(value)
 			}
 		}
 	}
@@ -193,6 +191,18 @@ func parseEnv(data map[string]any) *Env {
 		}
 	}
 	return env
+}
+
+func authHeadersFromEnv() (map[string]string, error) {
+	raw := os.Getenv("E2E_AUTH_HEADERS")
+	if raw == "" {
+		return map[string]string{}, nil
+	}
+	headers := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &headers); err != nil {
+		return nil, fmt.Errorf("parse E2E_AUTH_HEADERS as JSON object: %w", err)
+	}
+	return headers, nil
 }
 
 func strVal(m map[string]any, key string) string {

@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
-	"testing"
 	"time"
 
 	"github.com/compforge/case-harness/go/e2e/core"
@@ -20,22 +20,24 @@ type JSONRunner struct {
 
 // NewJSONRunner creates a runner for standard JSON REST/RPC APIs.
 func NewJSONRunner(env *core.Env) *JSONRunner {
+	timeout := time.Duration(env.Runtime.HTTPTimeoutS) * time.Second
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
 	return &JSONRunner{
 		env: env,
 		client: &http.Client{
-			Timeout: time.Duration(env.Runtime.HTTPTimeoutS) * time.Second,
+			Timeout: timeout,
 		},
 	}
 }
 
-func (r *JSONRunner) Trigger(t *testing.T, ctx context.Context, req Request) *Outcome {
-	t.Helper()
-
+func (r *JSONRunner) Trigger(ctx context.Context, req Request) (*Outcome, error) {
 	var bodyReader io.Reader
 	if req.Body != nil {
 		data, err := json.Marshal(req.Body)
 		if err != nil {
-			t.Fatalf("marshal request body: %v", err)
+			return nil, fmt.Errorf("marshal request body: %w", err)
 		}
 		bodyReader = bytes.NewReader(data)
 	}
@@ -48,22 +50,19 @@ func (r *JSONRunner) Trigger(t *testing.T, ctx context.Context, req Request) *Ou
 	url := r.env.Service.BaseURL + req.Path
 	httpReq, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
-		t.Fatalf("build request: %v", err)
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 
 	// Set headers
 	httpReq.Header.Set("Content-Type", "application/json")
-	if r.env.Auth.TenantID != "" {
-		httpReq.Header.Set("X-AS-Tenant-ID", r.env.Auth.TenantID)
-	}
-	if r.env.Auth.UserID != "" {
-		httpReq.Header.Set("X-AS-User-ID", r.env.Auth.UserID)
-	}
-	for k, v := range r.env.Auth.Extra {
+	for k, v := range r.env.Auth.Headers {
 		httpReq.Header.Set(k, v)
 	}
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
+	}
+	for _, key := range req.ExcludeHeaders {
+		httpReq.Header.Del(key)
 	}
 
 	// Set query params
@@ -78,14 +77,14 @@ func (r *JSONRunner) Trigger(t *testing.T, ctx context.Context, req Request) *Ou
 	start := time.Now()
 	resp, err := r.client.Do(httpReq)
 	if err != nil {
-		t.Fatalf("HTTP request failed: %v", err)
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	durationMS := time.Since(start).Milliseconds()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("read response body: %v", err)
+		return nil, fmt.Errorf("read response body: %w", err)
 	}
 
 	// Parse response headers
@@ -110,5 +109,5 @@ func (r *JSONRunner) Trigger(t *testing.T, ctx context.Context, req Request) *Ou
 		DurationMS: durationMS,
 		Metadata:   map[string]any{},
 		Raw:        raw,
-	}
+	}, nil
 }

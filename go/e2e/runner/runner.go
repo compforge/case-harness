@@ -4,16 +4,16 @@ package runner
 import (
 	"context"
 	"encoding/json"
-	"testing"
 )
 
 // Request represents what to send to the service.
 type Request struct {
-	Method  string
-	Path    string
-	Body    any
-	Headers map[string]string
-	Query   map[string]string
+	Method         string
+	Path           string
+	Body           any
+	Headers        map[string]string
+	Query          map[string]string
+	ExcludeHeaders []string
 }
 
 // Outcome is the standardized runner output — the contract between Runner and Judge.
@@ -74,7 +74,7 @@ func (o *Outcome) Decode(v any) error {
 
 // Runner is the protocol adapter interface.
 type Runner interface {
-	Trigger(t *testing.T, ctx context.Context, req Request) *Outcome
+	Trigger(ctx context.Context, req Request) (*Outcome, error)
 }
 
 func dotPath(obj any, path string) any {

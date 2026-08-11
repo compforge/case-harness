@@ -1,6 +1,6 @@
-"""Outcome metrics — ``BaseMetric[Outcome]`` subclasses for Mode A (pytest).
+"""Outcome metrics — ``BaseMetric[Outcome]`` subclasses for e2e runs.
 
-Complement to ``AssertJudge``: when a pytest API/SSE case wants soft scores
+When an API/SSE case wants soft scores
 (latency, status, event count, ...) alongside hard assertions, attach
 ``BaseMetric[Outcome]`` instances and call ``score_outcome(outcome, metrics)``.
 
@@ -9,10 +9,8 @@ These metrics are sync; LLM-judge async lives in
 
 Usage::
 
-    def test_chat_smoke(env, runner):
-        case = MyChatCase(env, runner)
-        case.execute()
-        scores = score_outcome(case.state.last_outcome, [
+    def test_chat_smoke(outcome):
+        scores = score_outcome(outcome, [
             LatencyMetric(target_ms=2000, cutoff_ms=10000),
             StatusMetric(expected=200),
         ])

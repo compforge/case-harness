@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -61,14 +62,54 @@ func TestFetchCapabilitiesDegradesGracefully(t *testing.T) {
 func TestRetry(t *testing.T) {
 	// retryable until the 3rd attempt, then succeeds.
 	n := 0
-	Retry(t, time.Millisecond, time.Second, func() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := Retry(ctx, time.Millisecond, func(context.Context) (bool, error) {
 		n++
 		if n < 3 {
 			return true, errors.New("transient")
 		}
 		return false, nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if n != 3 {
 		t.Errorf("expected 3 attempts, got %d", n)
+	}
+}
+
+func TestPollHonorsContextDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	err := Poll(ctx, time.Millisecond, func(context.Context) (bool, error) {
+		return false, nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Poll error = %v", err)
+	}
+}
+
+func TestConsistently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := Consistently(ctx, 5*time.Millisecond, time.Millisecond, func(context.Context) (bool, error) {
+		return true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("successful observation consumed the phase deadline")
+	}
+}
+
+func TestConsistentlyRequiresWindowInsideDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	err := Consistently(ctx, 10*time.Millisecond, time.Millisecond, func(context.Context) (bool, error) {
+		return true, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "fit within") {
+		t.Fatalf("Consistently error = %v", err)
 	}
 }

@@ -39,6 +39,8 @@ def _dc(**kw) -> DiscoveredCase:
         case=nl,
         handler_qualname="m.create_note",
         spec_text=kw.get("spec", "note create contract"),
+        spec_id=kw.get("spec_id"),
+        symbol_id="m.py::create_note",
         case_hash="h1",
         target_script_path=Path("x"),
     )
@@ -48,6 +50,7 @@ def test_draft_inlines_nl_into_desc_and_leaves_input_assert_empty():
     c = DraftCompiler().compile(_dc())
     assert c.id == "dup_name"
     assert c.input == {} and c.judge == {"e2e": {"assert": []}}  # fillable placeholders
+    assert c.binding.symbol_id == "m.py::create_note"
     for needle in (
         "重名应 409",  # the NL desc
         "input(NL): POST /nb {name}",
@@ -89,3 +92,7 @@ def test_compile_writes_draft_guidance_into_valid_case_yaml(tmp_path):
         c for c in yaml.safe_load(out.read_text())["cases"] if c["id"] == "happy"
     )
     assert "expect: HTTP 201" in happy["desc"] and happy["judge"]["e2e"]["assert"] == []
+    assert happy["binding"] == {
+        "symbol_id": "v1/nb.py::create",
+        "spec": "create contract",
+    }

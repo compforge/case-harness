@@ -78,11 +78,7 @@ def _serve(
 def _env(base_url: str) -> Env:
     return Env(
         service=ServiceConfig(name="t", base_url=base_url),
-        auth=AuthConfig(
-            tenant_id="ten",
-            user_id="usr",
-            headers={"tenant_id": "X-T", "user_id": "X-U"},
-        ),
+        auth=AuthConfig(headers={"X-T": "ten", "X-U": "usr"}),
     )
 
 
