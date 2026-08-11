@@ -43,14 +43,31 @@ def run_files(
     run verdict and the path written.
     """
     cases = []
+    casesets: list[str] = []
     for p in case_paths:
         cs = load_caseset(p)
         validate(cs)  # fail fast on a malformed case file
         cases.extend(cs.cases)
+        casesets.append(cs.caseset)
         scope = scope or cs.caseset
     if not cases:
         raise SystemExit("e2e: no cases found in the given file(s)")
-    rv = run_cases(cases, runner, scope=scope or "e2e", run_id=run_id)
+    if len(set(casesets)) != 1:
+        raise SystemExit(
+            "e2e: one run must reference one canonical CaseSet; "
+            f"got {sorted(set(casesets))}"
+        )
+    ids = [case.id for case in cases]
+    if len(ids) != len(set(ids)):
+        raise SystemExit("e2e: duplicate case id across CaseSet input files")
+    caseset = casesets[0]
+    rv = run_cases(
+        cases,
+        runner,
+        scope=scope or "e2e",
+        run_id=run_id,
+        caseset=caseset,
+    )
     path = write_verdict(run_dir_for(runs_dir, rv.scope, rv.run_id), rv)
     return rv, path
 

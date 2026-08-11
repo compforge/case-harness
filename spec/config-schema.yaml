@@ -19,13 +19,11 @@ properties:
   auth:
     type: object
     properties:
-      tenant_id:
-        type: string
-      user_id:
-        type: string
-    additionalProperties:
-      type: string
-      description: 额外认证 header（框架自动注入到请求）
+      headers:
+        type: object
+        additionalProperties:
+          type: string
+        description: 框架注入到每个请求的认证 header；不预设租户、用户或 token 协议
 
   runtime:
     type: object

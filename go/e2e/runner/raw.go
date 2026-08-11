@@ -17,13 +17,7 @@ func (r *JSONRunner) RawRequest(ctx context.Context, method, path string, body [
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if r.env.Auth.TenantID != "" {
-		req.Header.Set("X-AS-Tenant-ID", r.env.Auth.TenantID)
-	}
-	if r.env.Auth.UserID != "" {
-		req.Header.Set("X-AS-User-ID", r.env.Auth.UserID)
-	}
-	for k, v := range r.env.Auth.Extra {
+	for k, v := range r.env.Auth.Headers {
 		req.Header.Set(k, v)
 	}
 	return req, nil

@@ -107,6 +107,21 @@ properties:
           items: { type: string }
           description: 引用 sources[].name；空 = 依赖整个 case 集的已选素材。只声明、不执行准备。
 
+        binding:
+          type: object
+          required: [symbol_id]
+          description: 绑定到代码 symbol 的契约；同一 symbol 有多个 specs 时以 spec_id 选择
+          properties:
+            symbol_id:
+              type: string
+              description: spec-case symbol-id，形如 internal/api/handler.go::Service.Create
+            spec_id:
+              type: string
+              description: 可选，对应 spec.json 中 specs[].id；单 spec 可省略
+            spec:
+              type: string
+              description: 契约文本快照
+
         # 判定：按面分区，全部可选；字段由各 harness 自治，下面仅列当前已知形状
         judge:
           type: object

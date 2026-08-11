@@ -23,7 +23,11 @@ from spec_case.model import Case
 from harness_common.verdict import RunVerdict, build_run_verdict
 from harness_common.verdict import CaseVerdict
 from e2e_harness.assertion import Assertion, run_asserts
+from e2e_harness.caserun import Budgets, CaseRef, CaseRun, Fail, run_lifecycle
 from e2e_harness.runner.base import BaseRunner, Outcome, Request
+
+
+DEFAULT_BUDGETS = Budgets(prepare_s=30, execute_s=120, judge_s=30, cleanup_s=120)
 
 
 def response_view(outcome: Outcome) -> dict:
@@ -59,7 +63,13 @@ def _request_of(case: Case) -> Request:
     )
 
 
-def run_case(case: Case, runner: BaseRunner) -> CaseVerdict:
+def run_case(
+    case: Case,
+    runner: BaseRunner,
+    *,
+    caseset: str = "cases",
+    budgets: Budgets = DEFAULT_BUDGETS,
+) -> CaseVerdict:
     """Fire one case through ``runner`` and judge its e2e face → one ``CaseVerdict``."""
     judge = case.judge or {}
     if "e2e" not in judge:
@@ -82,32 +92,41 @@ def run_case(case: Case, runner: BaseRunner) -> CaseVerdict:
             reason="judge.e2e declared but no assert — draft not filled",
             facets=dict(case.facets),
         )
-    try:
-        outcome = runner.trigger(_request_of(case))
-    except Exception as e:  # noqa: BLE001 — any fire failure is an errored case, not a fail
-        return CaseVerdict(
-            case_id=case.id,
-            status="error",
-            reason=f"could not fire: {type(e).__name__}: {e}",
-            facets=dict(case.facets),
+    state: dict[str, Outcome] = {}
+
+    def execute(_, run_state: dict[str, Outcome]) -> None:
+        run_state["outcome"] = runner.trigger(_request_of(case))
+
+    def judge(_, run_state: dict[str, Outcome]) -> None:
+        results = run_asserts(
+            [Assertion.from_dict(a) for a in raw_asserts],
+            response_view(run_state["outcome"]),
         )
-    results = run_asserts(
-        [Assertion.from_dict(a) for a in raw_asserts], response_view(outcome)
+        failed = [result for result in results if not result.ok]
+        if failed:
+            raise Fail("; ".join(result.detail for result in failed[:3]))
+
+    result = run_lifecycle(
+        CaseRef(caseset=caseset, id=case.id),
+        state,
+        CaseRun(
+            execute=execute,
+            judge=judge,
+            budgets=budgets,
+            facets=case.facets,
+        ),
     )
-    failed = [r for r in results if not r.ok]
-    if failed:
-        return CaseVerdict(
-            case_id=case.id,
-            status="fail",
-            reason="; ".join(r.detail for r in failed[:3]),
-            facets=dict(case.facets),
-        )
-    return CaseVerdict(case_id=case.id, status="pass", facets=dict(case.facets))
+    return result.case_verdict()
 
 
 def run_cases(
-    cases: list[Case], runner: BaseRunner, *, scope: str, run_id: str
+    cases: list[Case],
+    runner: BaseRunner,
+    *,
+    scope: str,
+    run_id: str,
+    caseset: str | None = None,
 ) -> RunVerdict:
     """Run every case → one e2e ``RunVerdict`` (status = rollup over the per-case verdicts)."""
-    verdicts = [run_case(c, runner) for c in cases]
+    verdicts = [run_case(c, runner, caseset=caseset or scope) for c in cases]
     return build_run_verdict("e2e", scope, run_id, verdicts)

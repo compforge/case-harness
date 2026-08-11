@@ -22,7 +22,7 @@ from typing import Protocol
 
 import yaml
 
-from spec_case.model import Case, load_caseset, validate
+from spec_case.model import Binding, Case, case_to_raw, load_caseset, validate
 from e2e_harness.casegen.discover import DiscoverConfig, DiscoveredCase, discover
 
 
@@ -40,7 +40,12 @@ class StubCompiler:
     """
 
     def compile(self, nl: DiscoveredCase) -> Case:
-        return Case(id=nl.case.id, input={}, judge={"e2e": {"assert": []}})
+        return Case(
+            id=nl.case.id,
+            input={},
+            judge={"e2e": {"assert": []}},
+            binding=_binding(nl),
+        )
 
 
 class DraftCompiler:
@@ -73,7 +78,11 @@ class DraftCompiler:
             if val:
                 guide.append(f"{label}: {val}")
         return Case(
-            id=c.id, input={}, desc="\n".join(guide), judge={"e2e": {"assert": []}}
+            id=c.id,
+            input={},
+            desc="\n".join(guide),
+            judge={"e2e": {"assert": []}},
+            binding=_binding(nl),
         )
 
 
@@ -81,17 +90,16 @@ class DraftCompiler:
 
 
 def _case_to_dict(case: Case) -> dict:
-    """Round-trippable dict (mirror of ``common.case.from_raw``); omit empty optionals."""
-    d: dict = {"id": case.id, "input": case.input}
-    if case.desc:
-        d["desc"] = case.desc
-    if case.facets:
-        d["facets"] = dict(case.facets)
-    if case.requires:
-        d["requires"] = list(case.requires)
-    if case.judge:
-        d["judge"] = case.judge
-    return d
+    """Delegate canonical Case serialization to spec-case."""
+    return case_to_raw(case)
+
+
+def _binding(nl: DiscoveredCase) -> Binding:
+    return Binding(
+        symbol_id=nl.symbol_id,
+        spec=nl.spec_text or "",
+        spec_id=nl.spec_id,
+    )
 
 
 def _write_caseset(

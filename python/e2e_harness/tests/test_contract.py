@@ -17,6 +17,7 @@ from e2e_harness.casegen.contract import (
     get_links,
     get_rules,
     get_spec,
+    get_spec_id,
     link,
     load_cases_file,
     rule,
@@ -73,10 +74,11 @@ class TestDecorators:
             def handler(): ...
 
     def test_spec_decorator_attaches(self):
-        @spec("endpoint contract here")
+        @spec("endpoint contract here", id="create_note")
         def handler(): ...
 
         assert get_spec(handler) == "endpoint contract here"
+        assert get_spec_id(handler) == "create_note"
 
     def test_spec_strips_whitespace(self):
         @spec("\n  some text  \n")
@@ -88,6 +90,12 @@ class TestDecorators:
         with pytest.raises(ValueError):
 
             @spec("")
+            def handler(): ...
+
+    def test_spec_rejects_invalid_id(self):
+        with pytest.raises(ValueError, match="must match"):
+
+            @spec("contract", id="Bad-ID")
             def handler(): ...
 
     def test_link_decorator_attaches(self):

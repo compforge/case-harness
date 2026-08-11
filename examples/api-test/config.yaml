@@ -3,15 +3,8 @@ service:
   base_url: ${WIDGET_BASE_URL:-http://localhost:8080}
 
 auth:
-  tenant_id: ${WIDGET_TENANT_ID}
-  user_id: ${WIDGET_USER_ID}
   headers:
-    tenant_id: X-Top-Tenant-Id
-    user_id: X-Top-User-Id
+    Authorization: Bearer ${WIDGET_TOKEN}
 
 runtime:
   http_timeout_s: 30
-
-discover:
-  source_root: ./handlers   # 直接指向扫 @case/@spec 的目录
-  test_root: ./tests        # 脚本按 case.group 落 ./tests/<group>/

@@ -2,18 +2,18 @@
 
 ## Case 规范（canonical case）
 
-case 是**可积累、可分享**的资产：同一份 case，e2e 看对错、eval 看效果、perf 看压力下表现，一次执行多面观测；而且能**把它给别人、或拿别人的 `case.yaml` 来驱动你自己的 e2e/eval/perf**（像一份 conformance / benchmark 语料）。要做到，必须守住下面的硬规则（文件形状见 [`case-schema.yaml`](case-schema.yaml)；唯一中立模型 + load/validate/case_hash 落在 `python/common/case.py`，与 `common/verdict.py` 输出契约对称——判定面 `judge.<面>` 的 key = `common.Face`，与 verdict 的 `harness` 共用，`case.id` == `verdict.case_id`）：
+case 是**可积累、可分享**的资产：同一份 case，e2e 看对错、eval 看效果、perf 看压力下表现，一次执行多面观测；而且能**把它给别人、或拿别人的 `case.yaml` 来驱动你自己的 e2e/eval/perf**（像一份 conformance / benchmark 语料）。canonical Case/CaseSet、load/validate/case_hash 与 binding 契约归 [`spec-case`](https://github.com/compforge/spec-case)；本仓 [`case-schema.yaml`](case-schema.yaml) 是运行时兼容投影，输出契约见 [`verdict-schema.yaml`](verdict-schema.yaml)。
 
-1. **id 不可变、集内唯一**。id 是跨 run / 跨 harness 对齐结果的主键（输入 `case.id` == 输出 `verdict.case_id`）；语义变了换新 id，不复用旧 id。意图漂移检测用 `case_hash`（`common/case.py`）。
+1. **id 不可变、集内唯一**。id 是跨 run / 跨 harness 对齐结果的主键（输入 `case.id` == 输出 `verdict.case_id`）；语义变了换新 id，不复用旧 id。意图漂移检测用 spec-case `case_hash`。
 2. **case 无环境**。不写 base_url / token / 模型名——环境归 experiment config。同一 case 必须能打到任意环境/SUT。
 3. **case 无实验参数**。混流权重、并发、重复次数归 experiment；case 只描述单次请求长什么样。
 4. **判定按面分区（`judge.e2e/eval/perf`）且全部可选**。缺某面判定 = 该面只观测不判定（"观测面 ⟂ 判定面"）。公共段（id/input/facets/requires）演进走 spec/，判定段字段各 harness 自治。
 5. **facets 必须有词表 schema**。约束 values + ordered + `open` 逃生舱；自由字符串列会腐烂。
 6. **case 声明依赖，不执行准备**。case 用 `requires` 按名引用素材；素材本体（`sources`）与 case 同文件积累、进 git；provision（上传/建库）、复用（key = 素材内容 hash）、清理（复用制下退化为按 key 的 GC）都是 experiment 运行时的事。
 7. **case 是 git 里的平文件**。yaml 进消费方仓库（`cases/<domain>/*.yaml`），可 diff、可 round-trip；不进 DB。框架仓库只放 schema + mock case。
-8. **唯一 `common.Case`，各家行为直接消费**。canonical case 是**唯一的 case 类型**（`common/case.py`）；三面（含 e2e）的**行为各自直接读它**——runner/solver/workload 读 `input`、报告读 `facets`、各面读自己那段 `judge.<面>`——**不存在 per-harness Case 类、不做 case 类的投影**。这和输出侧对称：case 是被各家行为消费的纯数据，正如 verdict 是各家行为产出的纯数据。
+8. **唯一 canonical Case，各家行为直接消费**。Case 模型由 spec-case 持有；三面（含 e2e）的行为各自直接读它——runner/solver/workload 读 `input`、报告读 `facets`、各面读自己那段 `judge.<面>`——不存在 per-harness Case 类。
 
-> e2e 的 `@case` 注解（贴 handler 的 5 字段意图 → AI scaffold 生成 pytest）是 canonical case 的一种 **co-located 编写前端**：它产出 / 按 id 链接 canonical case，便于"贴着代码写 + 改 handler 时 case_hash 报漂移"；e2e 同样可直接吃 `case.yaml`。**编写位置不同（yaml / 注解 / AI），case 定义统一。**
+> e2e 的 `@case` / `+case` 注解是 canonical case 的 **co-located 编写前端**：Python casegen 将 NL intent 编译为结构化 CaseSet；Go casegen 静态检查每个 marker 都有唯一 `caserun.Ref(caseset, case_id)`。编写位置不同，运行身份统一为 CaseSet + case id。
 
 ## 核心概念
 
@@ -23,20 +23,22 @@ case 是**可积累、可分享**的资产：同一份 case，e2e 看对错、ev
 | **Runner** | 协议适配：将 input 变成请求，收集响应 → Outcome |
 | **Outcome** | Runner 和 Judge 之间的标准化契约 |
 | **Judge** | 对 Outcome 做判定：硬断言（assert）或软评分（metric） |
-| **Pipeline** | 编排：case × runner × judge 的组合 |
+| **CaseRun** | 一条 case 的运行生命周期、阶段预算和执行证据 |
 
 ## 生命周期
 
 所有 case 遵循四阶段：
 
 ```
-prepare → trigger → judge → clean
+prepare → execute → judge → cleanup
 ```
 
 - `prepare`：创建前置资源（可选）
-- `trigger`：Runner 发请求收响应，产出 Outcome
+- `execute`：Runner 发请求收响应，产出 Outcome；也可承载多步操作
 - `judge`：Assert（硬 pass/fail）和/或 Metric（软评分 0~1）
-- `clean`：best-effort 清理，永不 fail 测试
+- `cleanup`：总会执行并使用独立预算；失败记为 error，不能把资源泄漏隐藏成 pass
+
+每个阶段都记录状态和耗时。长时间等待放在 execute/judge 内，使用阶段 context/deadline 的 poll、retry、consistently；不要用固定 sleep。Case 是稳定资产，不承载 prepare/cleanup 过程代码。
 
 ## Outcome 结构
 
@@ -82,8 +84,9 @@ service:
   base_url: ${ENV_VAR:-default}
 
 auth:
-  tenant_id: ${TENANT_ID}
-  user_id: ${USER_ID}
+  headers:
+    Authorization: Bearer ${API_TOKEN}
+    X-Tenant-ID: ${TENANT_ID}
 
 runtime:
   http_timeout_s: 120
@@ -108,7 +111,6 @@ custom:                    # 服务自定义扩展区，框架透传
 | `AsyncJSONRunner` | HTTP JSON | async | 已实现 |
 | `SSERunner` | HTTP SSE | sync | 已实现 |
 | `AsyncSSERunner` | HTTP SSE | async | 已实现 |
-| `WebSocketRunner` | WebSocket | - | 计划中 |
 
 所有 runner 产出相同的 Outcome 结构（SSE events 进 `metadata['events']`），judge 层无需关心协议差异。
 
@@ -116,7 +118,7 @@ custom:                    # 服务自定义扩展区，框架透传
 
 | 类型 | 适用 | 输入 | 输出 |
 |------|------|------|------|
-| `AssertJudge` 方法 | 硬断言 | Outcome | pass / 抛 AssertionError |
+| 结构化 e2e assertion / Go `judge.Assertion` | 硬断言 | Outcome | pass / fail reason |
 | `OutcomeMetric` 子类 | 软评分（Outcome） | Outcome | MetricResult (0~1) |
 | `BaseLLMJudge` 子类 | LLM-as-judge | EvalSample | MetricResult (async) |
 | 同步 metric 模块 | 关键词 / 模板匹配 | EvalSample | MetricResult |
@@ -125,7 +127,7 @@ custom:                    # 服务自定义扩展区，框架透传
 
 ## 使用模式（三类 harness）
 
-- **e2e（API 测试）**: pytest 驱动 + `BaseCase` 三段式 + sync runner / AssertJudge / OutcomeMetric。
+- **e2e（API 测试）**: canonical CaseSet + CaseRun 四阶段 + sync/async runner + 结构化 assertion / OutcomeMetric。
 - **eval（效果测试）**: `EvalEngine` 驱动大表 + reconciler 填表，per-case async runner + builder + metric set。
 - **perf（压力测试）**: `Engine` 把资源档 × 负载档解析为 Arm，逐 Trial 采样并按 Window 聚合，出容量与资源画像。
 
@@ -161,7 +163,7 @@ runs/<scope>/<run-id>/
 
 | harness | verdict 投影落点 | 来源 |
 |---------|------------------|------|
-| e2e | `e2e_harness/api/verdict.py`（纯投影）+ `pytest_plugin.py`（conftest opt-in，钩 `pytest_runtest_logreport` 等聚合落盘）；pytest 仍驱动 | 现成 PASS/FAIL/ERROR 三态 |
+| e2e | `e2e_harness.engine` / Go `caserun.Recorder` | CaseRun 阶段结果 + 结构化 assertion |
 | eval | `eval_harness/verdict.py`，`engine.run_experiment` 收尾调用 `write_verdict()` | `row_overall`（weighted）+ per-cell state |
 | perf | `perf_harness/verdict.py`，`report.write_run` 收尾调用 `write_verdict()` | 每条 SLO check → `checks[]`；run status 按 per-check rollup，cooldown skip 失败关闭；**不取 `run.passed`** |
 | trace | `trace_harness/verdict.py`，`corpus.experiment.run_experiment` 收尾调用 `write_verdict()` | experiment 显式声明的 `gates:`（对三表/算子结果的断言）→ `checks[]`；**Finding 是发现不是判定**、永不直接变 verdict；无 gates → `skipped`（同 perf 记录门原则） |

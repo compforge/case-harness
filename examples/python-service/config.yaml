@@ -3,8 +3,8 @@ service:
   base_url: ${CONTROL_BASE_URL:-http://localhost:8080}
 
 auth:
-  tenant_id: ${CONTROL_TENANT_ID}
-  user_id: ${CONTROL_USER_ID}
+  headers:
+    Authorization: Bearer ${CONTROL_TOKEN}
 
 runtime:
   http_timeout_s: 30

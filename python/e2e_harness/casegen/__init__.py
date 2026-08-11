@@ -31,6 +31,7 @@ from e2e_harness.casegen.contract import get_cases as get_cases
 from e2e_harness.casegen.contract import get_links as get_links
 from e2e_harness.casegen.contract import get_rules as get_rules
 from e2e_harness.casegen.contract import get_spec as get_spec
+from e2e_harness.casegen.contract import get_spec_id as get_spec_id
 from e2e_harness.casegen.contract import link as link
 from e2e_harness.casegen.contract import load_cases_file as load_cases_file
 from e2e_harness.casegen.contract import rule as rule

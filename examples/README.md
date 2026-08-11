@@ -2,8 +2,7 @@
 
 ## api-test (recommended starting point)
 
-Demonstrates the **API mode**: @case/@spec → discover → AI-generated pytest
-with RPCCase. See [`api-test/README.md`](api-test/README.md).
+Demonstrates canonical CaseSet → data-driven engine → Verdict. See [`api-test/README.md`](api-test/README.md).
 
 ## agent-test
 
@@ -13,13 +12,12 @@ EvalEngine, AsyncSSERunner, BasePrepareHandler, and BaseLLMJudge. See
 
 ## go-service
 
-以 sandbox-server (Go) 为例，展示模式 A（代码内联）的写法。
+展示 Go CaseRun：显式阶段 budget、类型化 state、独立 cleanup 和 canonical CaseRef。
 
 ```bash
 cd go-service
 export ASANDBOX_BASE_URL=http://localhost:8090
-export ASANDBOX_TENANT_ID=your-tenant
-export ASANDBOX_USER_ID=your-user
+export EXAMPLE_TOKEN=your-token
 go test -tags=e2e -v ./...
 ```
 
@@ -29,19 +27,16 @@ go test -tags=e2e -v ./...
 
 ## python-service
 
-以 control-server (Python) 为例，展示两种写法：
-- 直接用 `runner` + `judge`（轻量，适合简单 case）
-- 用 `BaseCase[State]`（结构化生命周期，适合需要 cleanup 的 case）
+展示 Python CaseRun；生命周期语义与 Go 一致，API 使用 dataclass + callable。
 
 ```bash
 cd python-service
 export CONTROL_BASE_URL=http://localhost:8080
-export CONTROL_TENANT_ID=your-tenant
-export CONTROL_USER_ID=your-user
+export CONTROL_TOKEN=your-token
 pytest -v
 ```
 
 文件：
 - `config.yaml` — 服务配置
-- `conftest.py` — pytest fixtures（env / runner / judge）
-- `test_bot_crud_e2e.py` — CRUD + duplicate 三个 case
+- `conftest.py` — pytest fixtures（env / runner）
+- `test_bot_crud_e2e.py` — prepare/execute/judge/cleanup 完整 case

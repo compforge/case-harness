@@ -1,0 +1,8 @@
+caseset: control-bot
+cases:
+  - id: create_and_get
+    input: {operation: create-and-get-bot}
+    judge:
+      e2e:
+        assert:
+          - {path: final.name, op: not_empty}

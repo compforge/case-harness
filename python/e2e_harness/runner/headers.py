@@ -21,21 +21,13 @@ def build_auth_headers(
 
     Resolution order:
       1. ``Content-Type`` (overridable via ``extra``)
-      2. Auth tenant_id / user_id mapped through ``env.auth.headers``
-      3. Any ``env.auth.extra`` headers
-      4. Per-request ``extra`` (overrides everything above)
-      5. Drop keys in ``exclude`` (after merging, so callers can omit auth headers
+      2. Generic headers from ``env.auth.headers``
+      3. Per-request ``extra`` (overrides everything above)
+      4. Drop keys in ``exclude`` (after merging, so callers can omit auth headers
          injected by the runner — needed for missing-auth negative tests)
     """
     headers: dict[str, str] = {"Content-Type": content_type}
-    auth = env.auth
-    header_map = auth.headers
-    if "tenant_id" in header_map and auth.tenant_id:
-        headers[header_map["tenant_id"]] = auth.tenant_id
-    if "user_id" in header_map and auth.user_id:
-        headers[header_map["user_id"]] = auth.user_id
-    for k, v in auth.extra.items():
-        headers[k] = v
+    headers.update(env.auth.headers)
     if extra:
         headers.update(extra)
     if exclude:

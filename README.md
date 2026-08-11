@@ -31,11 +31,12 @@ Here, `e2e` means end-to-end **relative to one service SUT boundary**, not produ
 
 ## Core ideas
 
-1. **Different judgments, one case format.** A case only describes "how to exercise the system once" — never how to judge it. The same case drives e2e (correctness), eval (quality) and perf (capacity). `spec-case` owns the canonical asset format and model; this repo keeps only runtime conventions and a compatibility projection under `spec/`.
+1. **Different judgments, one case format.** A case carries one reusable stimulus plus face-specific judgment data (`judge.e2e/eval/perf`). Environment, lifecycle code and experiment parameters stay outside it. `spec-case` owns the canonical asset format and model.
 2. **Cases are accumulating assets.** Decoupled from judgment, cases keep piling up; the more you have, the more a full pre-release run actually means something.
 3. **Experiments compare Arms through Trials.** An Experiment asks one question, an Arm is one named configuration in the comparison, and a Trial is one real execution of an Arm. Results go to `runs/<scope>/<run-id>/`; `arm_id` stays an explicit alignment key across artifacts.
 4. **One execution, many observations.** A single request can feed correctness (e2e), quality (eval), latency/resources (perf), in-chain attribution (trace), and decision-path evaluation (trajectory). The harnesses are viewpoints, not separate load generators.
 5. **Cases anchor stable contracts.** Case identity and assertion meaning come from requirements or public API contracts. Co-locating a marker with a handler enables discovery and drift detection; it does not make an internal function name or file path the case's business identity.
+6. **Long cases have an explicit lifecycle.** CaseRun separates prepare, execute, judge and cleanup; each phase has a budget, cleanup always runs, and cleanup failure is an error rather than hidden best-effort noise.
 
 The unified output is `verdict.json` (schema: [`spec/verdict-schema.yaml`](spec/verdict-schema.yaml)): humans read it, CI reads it, and agentic dev loops read it to self-correct.
 
@@ -78,7 +79,7 @@ uv run python -m perf_harness.cli run perf_harness/examples/mock.yaml --out /tmp
 # trace analysis (offline jaeger file → call stacks + findings)
 uv run trace single ../conformance/trace/fixtures/genai-basic.jsonl --diagnose
 
-# Go (reference implementation)
+# Go (same CaseRun/Verdict semantics, idiomatic API)
 cd go && go test ./...
 
 # TypeScript trace-harness

@@ -25,6 +25,7 @@ from e2e_harness.casegen.contract import get_cases as get_cases
 from e2e_harness.casegen.contract import get_links as get_links
 from e2e_harness.casegen.contract import get_rules as get_rules
 from e2e_harness.casegen.contract import get_spec as get_spec
+from e2e_harness.casegen.contract import get_spec_id as get_spec_id
 from e2e_harness.casegen.contract import link as link
 from e2e_harness.casegen.contract import load_cases_file as load_cases_file
 from e2e_harness.casegen.contract import rule as rule
@@ -40,6 +41,16 @@ from e2e_harness.core.profile import require_capability as require_capability
 from e2e_harness.core.profile import require_profile as require_profile
 from e2e_harness.engine import run_case as run_case
 from e2e_harness.engine import run_cases as run_cases
+from e2e_harness.caserun import Budgets as Budgets
+from e2e_harness.caserun import CaseRef as CaseRef
+from e2e_harness.caserun import CaseRun as CaseRun
+from e2e_harness.caserun import Fail as Fail
+from e2e_harness.caserun import PhaseContext as PhaseContext
+from e2e_harness.caserun import CaseRunResult as CaseRunResult
+from e2e_harness.caserun import Skip as Skip
+from e2e_harness.caserun import run_lifecycle as run_lifecycle
+from e2e_harness.matrix import Variant as Variant
+from e2e_harness.matrix import expand_matrix as expand_matrix
 from e2e_harness.judge.metric import BaseMetric as BaseMetric
 from e2e_harness.judge.metric import EventCountMetric as EventCountMetric
 from e2e_harness.judge.metric import LatencyMetric as LatencyMetric

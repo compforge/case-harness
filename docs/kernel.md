@@ -23,6 +23,7 @@ case-harness 的价值不是再提供一个测试 runner，而是让稳定的测
 | **Playbook** | 用自然语言表达的产品功能测试剧本：用户目标、前置条件、有序动作、关键检查点和最终验收结果。它与 Web / Android / iOS / API 等执行目标解耦。 |
 | **Script** | Playbook 针对某个 Target 编译出的可执行代码。它是可 review、可重放、可再生成的派生产物，不是功能需求的事实源。 |
 | **Target** | 脚本真正操作的系统边界，例如 Web、Android、iOS、产品 API 或单服务 API。Target 决定 Script 使用的 SDK / Driver 和可观测证据。 |
+| **CaseRun** | 一条 Case 在某个环境和 variant 上的运行实例；拥有 prepare/execute/judge/cleanup 生命周期、阶段预算和证据。 |
 | **Run** | 一次真实执行的生命周期和产物边界，记录输入版本、Target、环境、输出、证据和对齐键。Experiment / Arm / Trial 是在 Run 之上组织对照的编排语义。 |
 | **Verdict** | 对一次 Run 的可机器消费判定。人、CI 和 agent 开发循环都通过它判断是否通过、为何失败，以及下一步应读哪些证据。 |
 
@@ -37,10 +38,10 @@ case-harness 的价值不是再提供一个测试 runner，而是让稳定的测
 ### Case 路径（当前主路径）
 
 ```text
-Case → Runner / Driver → Outcome + observations → Judge → Verdict
+Case + Variant → CaseRun(prepare → execute → judge → cleanup) → Verdict
 ```
 
-Case 是可直接消费的结构化数据。不同 harness 可以对同一次执行做确定性断言、效果评估、容量观测或链路归因，不必为每个视角重复发起请求。
+Case 是可直接消费的结构化数据，CaseRun 承担环境相关的过程。prepare/cleanup 不进入 Case；cleanup 总执行并使用独立预算，失败必须进入 Verdict error。耗时收敛检查属于 execute/judge，可复用 deadline-aware poll/retry/consistently。不同 harness 可以对同一次执行做确定性断言、效果评估、容量观测或链路归因，不必为每个视角重复发起请求。
 
 ### Playbook 路径（长期功能测试）
 

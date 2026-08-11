@@ -49,6 +49,8 @@ class DiscoveredCase:
     case: Case
     handler_qualname: str  # for traceability ("api.rest.v1.endpoints.note.create_note")
     spec_text: str | None
+    spec_id: str | None
+    symbol_id: str
     case_hash: str  # joint hash of case content + @spec text
     target_script_path: Path
 
@@ -59,6 +61,7 @@ class HandlerInfo:
 
     name: str
     spec_text: str | None
+    spec_id: str | None
     cases: list[Case]  # @case-derived cases, in source order
 
 
@@ -86,14 +89,17 @@ def discover(config: DiscoverConfig) -> list[DiscoveredCase]:
             handler_py=handler_py,
         )
         for c in merged:
-            info = handlers.get(c.endpoint)
+            info = _single_handler(handlers, c.endpoint, cases_file)
             spec_text = info.spec_text if info else None
+            spec_id = info.spec_id if info else None
             out.append(
                 DiscoveredCase(
                     case=c,
                     handler_qualname=f"{dotted}.{c.endpoint}",
                     spec_text=spec_text,
-                    case_hash=case_hash(c, spec_text),
+                    spec_id=spec_id,
+                    symbol_id=_symbol_id(handler_py, config.source_root, c.endpoint),
+                    case_hash=case_hash(c, spec_text, spec_id),
                     target_script_path=_target_path(config.test_root, c),
                 )
             )
@@ -109,19 +115,24 @@ def discover(config: DiscoverConfig) -> list[DiscoveredCase]:
             handlers = _extract_handlers(handler_py, source_module=dotted)
         except SyntaxError:
             continue
-        if not any(info.cases for info in handlers.values()):
+        if not any(info.cases for infos in handlers.values() for info in infos):
             continue
-        for info in handlers.values():
-            for c in info.cases:
-                out.append(
-                    DiscoveredCase(
-                        case=c,
-                        handler_qualname=f"{dotted}.{c.endpoint}",
-                        spec_text=info.spec_text,
-                        case_hash=case_hash(c, info.spec_text),
-                        target_script_path=_target_path(config.test_root, c),
+        for infos in handlers.values():
+            for info in infos:
+                for c in info.cases:
+                    out.append(
+                        DiscoveredCase(
+                            case=c,
+                            handler_qualname=f"{dotted}.{c.endpoint}",
+                            spec_text=info.spec_text,
+                            spec_id=info.spec_id,
+                            symbol_id=_symbol_id(
+                                handler_py, config.source_root, c.endpoint
+                            ),
+                            case_hash=case_hash(c, info.spec_text, info.spec_id),
+                            target_script_path=_target_path(config.test_root, c),
+                        )
                     )
-                )
     _check_unique_targets(out)
     return out
 
@@ -165,29 +176,39 @@ def _module_from_cases_path(cases_path: Path, source_root: Path) -> tuple[str, P
     return _module_dotted(handler_py, source_root), handler_py
 
 
-def _extract_handlers(handler_py: Path, source_module: str) -> dict[str, HandlerInfo]:
-    """Walk module AST, return ``{fn_name: HandlerInfo}`` for every top-level def."""
+def _extract_handlers(
+    handler_py: Path, source_module: str
+) -> dict[str, list[HandlerInfo]]:
+    """Return every top-level declaration, preserving plural specs per symbol."""
     tree = ast.parse(handler_py.read_text(encoding="utf-8"), filename=str(handler_py))
-    out: dict[str, HandlerInfo] = {}
+    out: dict[str, list[HandlerInfo]] = {}
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        spec_text = _read_spec_decorator(node, handler_py)
+        spec_text, spec_id = _read_spec_decorator(node, handler_py)
         cases = _read_case_decorators(node, handler_py, source_module)
-        out[node.name] = HandlerInfo(name=node.name, spec_text=spec_text, cases=cases)
+        out.setdefault(node.name, []).append(
+            HandlerInfo(
+                name=node.name,
+                spec_text=spec_text,
+                spec_id=spec_id,
+                cases=cases,
+            )
+        )
     return out
 
 
 def _read_spec_decorator(
     fn: ast.FunctionDef | ast.AsyncFunctionDef,
     source_path: Path,
-) -> str | None:
+) -> tuple[str | None, str | None]:
+    found: tuple[str, str | None] | None = None
     for deco in fn.decorator_list:
         if not isinstance(deco, ast.Call) or _decorator_name(deco.func) != "spec":
             continue
-        if len(deco.args) != 1 or deco.keywords:
+        if len(deco.args) != 1 or any(kw.arg != "id" for kw in deco.keywords):
             raise ValueError(
-                f"{source_path}:{deco.lineno}: @spec takes exactly one positional string argument"
+                f"{source_path}:{deco.lineno}: @spec takes text and optional id="
             )
         arg = deco.args[0]
         if not isinstance(arg, ast.Constant) or not isinstance(arg.value, str):
@@ -200,8 +221,22 @@ def _read_spec_decorator(
             raise ValueError(
                 f"{source_path}:{deco.lineno}: @spec text must be non-empty"
             )
-        return text
-    return None
+        spec_id: str | None = None
+        for keyword in deco.keywords:
+            spec_id = _require_string_literal(
+                keyword.value, source_path, deco.lineno, "spec id"
+            )
+            if not CASE_ID_PATTERN.fullmatch(spec_id):
+                raise ValueError(
+                    f"{source_path}:{deco.lineno}: @spec id {spec_id!r} must match "
+                    f"{CASE_ID_PATTERN.pattern}"
+                )
+        if found is not None:
+            raise ValueError(
+                f"{source_path}:{deco.lineno}: one declaration may carry only one @spec"
+            )
+        found = (text, spec_id)
+    return found or (None, None)
 
 
 _CASE_KW_FIELDS = ("input", "expect", "forbid", "group")
@@ -306,7 +341,7 @@ def _decorator_name(node: ast.expr) -> str | None:
 def _merge_yaml_and_decorator_cases(
     *,
     yaml_cases: list[Case],
-    handlers: dict[str, HandlerInfo],
+    handlers: dict[str, list[HandlerInfo]],
     cases_file: Path,
     handler_py: Path,
 ) -> list[Case]:
@@ -323,16 +358,33 @@ def _merge_yaml_and_decorator_cases(
         merged.append(c)
         seen_per_endpoint.setdefault(c.endpoint, set()).add(c.id)
 
-    for endpoint, info in handlers.items():
+    for endpoint, infos in handlers.items():
         seen = seen_per_endpoint.setdefault(endpoint, set())
-        for c in info.cases:
-            if c.id in seen:
-                warnings.warn(
-                    f"{handler_py}: @case id {c.id!r} on {endpoint} conflicts with "
-                    f"the same id in {cases_file}; yaml wins, decorator case ignored.",
-                    stacklevel=2,
-                )
-                continue
-            merged.append(c)
-            seen.add(c.id)
+        for info in infos:
+            for c in info.cases:
+                if c.id in seen:
+                    warnings.warn(
+                        f"{handler_py}: @case id {c.id!r} on {endpoint} conflicts with "
+                        f"the same id in {cases_file}; yaml wins, decorator case ignored.",
+                        stacklevel=2,
+                    )
+                    continue
+                merged.append(c)
+                seen.add(c.id)
     return merged
+
+
+def _single_handler(
+    handlers: dict[str, list[HandlerInfo]], endpoint: str, cases_file: Path
+) -> HandlerInfo | None:
+    infos = handlers.get(endpoint, [])
+    if len(infos) > 1:
+        raise ValueError(
+            f"{cases_file}: endpoint {endpoint!r} has plural named specs; "
+            "bind cases with decorators so each spec remains unambiguous"
+        )
+    return infos[0] if infos else None
+
+
+def _symbol_id(handler_py: Path, source_root: Path, endpoint: str) -> str:
+    return f"{handler_py.relative_to(source_root).as_posix()}::{endpoint}"

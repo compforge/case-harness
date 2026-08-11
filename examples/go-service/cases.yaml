@@ -1,0 +1,8 @@
+caseset: sandbox-runtime
+cases:
+  - id: happy_minimal
+    input: {operation: start-sandbox}
+    judge: {e2e: {assert: [{path: body.sandbox_name, op: not_empty}]}}
+  - id: reuse
+    input: {operation: start-sandbox-twice}
+    judge: {e2e: {assert: [{path: second.sandbox_name, op: eq, value: first.sandbox_name}]}}

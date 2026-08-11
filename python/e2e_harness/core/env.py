@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -23,10 +24,7 @@ class ServiceConfig:
 
 @dataclass
 class AuthConfig:
-    tenant_id: str = ""
-    user_id: str = ""
     headers: dict[str, str] = field(default_factory=dict)
-    extra: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -45,7 +43,7 @@ class Capabilities:
 
 @dataclass
 class DiscoverConfigSection:
-    """Optional dev-time tooling config for discover/scaffold."""
+    """Optional dev-time tooling config for casegen discovery."""
 
     source_root: str = ""  # dir to scan for @case/@spec (relative to config.yaml dir)
     test_root: str = ""  # where tests land, grouped <test_root>/<group>/ (relative to config.yaml dir)
@@ -110,15 +108,16 @@ def load_env(config_path: str | Path = "config.yaml") -> Env:
 
 def _build_from_env() -> dict:
     """Fallback: construct config dict purely from environment variables."""
+    raw_headers = os.environ.get("E2E_AUTH_HEADERS", "")
+    headers = json.loads(raw_headers) if raw_headers else {}
+    if not isinstance(headers, dict):
+        raise ValueError("E2E_AUTH_HEADERS must be a JSON object")
     return {
         "service": {
             "name": os.environ.get("E2E_SERVICE_NAME", ""),
             "base_url": os.environ.get("E2E_BASE_URL", ""),
         },
-        "auth": {
-            "tenant_id": os.environ.get("E2E_TENANT_ID", ""),
-            "user_id": os.environ.get("E2E_USER_ID", ""),
-        },
+        "auth": {"headers": headers},
         "runtime": {},
         "profile": os.environ.get("E2E_PROFILE", "full"),
         "custom": {},
@@ -133,24 +132,15 @@ def _parse_env(data: dict) -> Env:
     disc = data.get("discover", {}) or {}
 
     auth_headers = auth_raw.get("headers") or {}
-    auth_extra = {
-        k: v
-        for k, v in auth_raw.items()
-        if k not in ("tenant_id", "user_id", "headers")
-    }
-
     return Env(
         service=ServiceConfig(
             name=svc.get("name", ""),
             base_url=svc.get("base_url", "").rstrip("/"),
         ),
         auth=AuthConfig(
-            tenant_id=auth_raw.get("tenant_id", ""),
-            user_id=auth_raw.get("user_id", ""),
             headers={str(k): str(v) for k, v in auth_headers.items()}
             if auth_headers
             else {},
-            extra=auth_extra,
         ),
         runtime=RuntimeConfig(
             http_timeout_s=int(rt.get("http_timeout_s", 120)),

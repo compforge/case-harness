@@ -31,7 +31,7 @@ class TestDiscover:
             """
             from e2e_harness.casegen.contract import case, spec
 
-            @spec("endpoint contract")
+            @spec("endpoint contract", id="create_contract")
             @case("happy_minimal", "minimal happy path")
             @case("missing_field", "missing required field")
             async def create_note(): ...
@@ -46,6 +46,8 @@ class TestDiscover:
         c = next(c for c in cases if c.case.id == "happy_minimal")
         assert c.case.endpoint == "create_note"
         assert c.spec_text == "endpoint contract"
+        assert c.spec_id == "create_contract"
+        assert c.symbol_id == "v1/handlers/note.py::create_note"
         # group-keyed path (default group), not a mirror of the handler source dir
         expected_path = test_root / "default" / "test_create_note__happy_minimal.py"
         assert c.target_script_path == expected_path
@@ -137,6 +139,31 @@ class TestDiscover:
             DiscoverConfig(source_root=source_root, test_root=test_root)
         )
         assert cases_v1[0].case_hash != cases_v2[0].case_hash
+
+    def test_plural_named_specs_on_same_symbol_are_preserved(self, tmp_path: Path):
+        source_root = tmp_path / "server"
+        test_root = tmp_path / "tests"
+        self._setup_handler(
+            source_root,
+            "h",
+            """
+            from e2e_harness.casegen.contract import case, spec
+
+            @spec("string contract", id="string_input")
+            @case("string_happy", "string path")
+            def parse(): ...
+
+            @spec("integer contract", id="integer_input")
+            @case("integer_happy", "integer path")
+            def parse(): ...
+        """,
+        )
+
+        cases = discover(DiscoverConfig(source_root=source_root, test_root=test_root))
+        assert [(item.case.id, item.spec_id) for item in cases] == [
+            ("string_happy", "string_input"),
+            ("integer_happy", "integer_input"),
+        ]
 
     def test_target_path_keyed_by_group(self, tmp_path: Path):
         source_root = tmp_path / "server"

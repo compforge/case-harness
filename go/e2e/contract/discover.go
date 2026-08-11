@@ -11,72 +11,49 @@ import (
 	"strings"
 )
 
-// DiscoverConfig points discovery at the service source and the test output tree.
-type DiscoverConfig struct {
-	SourceRoot string // dir scanned for handlers carrying +case/+spec
-	TestRoot   string // where generated *_e2e_test.go land, grouped by case.Group
-}
-
-// DiscoveredCase is one case resolved against the filesystem: the parsed Case,
-// its content hash, the handler source file (relative to SourceRoot), and the
-// absolute path of the test file that should embody it.
 type DiscoveredCase struct {
 	Case       Case
-	Hash       string
 	SourceFile string
-	TargetPath string
 }
 
-// Discover walks SourceRoot, parses every non-test .go file's comments with the
-// standard go/ast toolchain, and returns one DiscoveredCase per +case found.
-//
-// Discovery is a CI input, so syntax errors and malformed markers fail the scan
-// instead of silently removing cases from the result. Results are sorted by
-// target path for stable output.
-func Discover(cfg DiscoverConfig) ([]DiscoveredCase, error) {
+// Discover returns every +case marker under sourceRoot. Case IDs must be
+// unique because a canonical CaseSet uses id, not source layout, as its key.
+func Discover(sourceRoot string) ([]DiscoveredCase, error) {
 	var out []DiscoveredCase
 	fset := token.NewFileSet()
-
-	err := filepath.WalkDir(cfg.SourceRoot, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	err := filepath.WalkDir(sourceRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		if d.IsDir() {
-			// Never skip the scan root itself — only nested noise dirs.
-			if p != cfg.SourceRoot && skipDir(d.Name()) {
+		if entry.IsDir() {
+			if path != sourceRoot && skipDir(entry.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		f, perr := parser.ParseFile(fset, p, nil, parser.ParseComments)
-		if perr != nil {
-			return fmt.Errorf("parse source %s: %w", p, perr)
+		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+		if err != nil {
+			return fmt.Errorf("parse source %s: %w", path, err)
 		}
-		rel, relErr := filepath.Rel(cfg.SourceRoot, p)
-		if relErr != nil {
-			return fmt.Errorf("make source path relative for %s: %w", p, relErr)
+		rel, err := filepath.Rel(sourceRoot, path)
+		if err != nil {
+			return fmt.Errorf("make source path relative for %s: %w", path, err)
 		}
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Doc == nil {
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Doc == nil {
 				continue
 			}
-			spec, cases, parseErr := parseDoc(fn.Doc.Text())
-			if parseErr != nil {
-				return fmt.Errorf("parse markers on %s %s: %w", rel, fn.Name.Name, parseErr)
+			cases, err := parseDoc(function.Doc.Text())
+			if err != nil {
+				return fmt.Errorf("parse markers on %s %s: %w", rel, function.Name.Name, err)
 			}
-			for _, c := range cases {
-				c.Endpoint = fn.Name.Name
-				c.SpecText = spec
-				out = append(out, DiscoveredCase{
-					Case:       c,
-					Hash:       CaseHash(c),
-					SourceFile: rel,
-					TargetPath: targetPath(cfg.TestRoot, c),
-				})
+			for _, item := range cases {
+				item.Symbol = symbolOf(function)
+				out = append(out, DiscoveredCase{Case: item, SourceFile: filepath.ToSlash(rel)})
 			}
 		}
 		return nil
@@ -84,29 +61,44 @@ func Discover(cfg DiscoverConfig) ([]DiscoveredCase, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkCollisions(out); err != nil {
+	if err := checkCaseIDs(out); err != nil {
 		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].TargetPath < out[j].TargetPath })
+	sort.Slice(out, func(i, j int) bool { return out[i].Case.ID < out[j].Case.ID })
 	return out, nil
 }
 
-// targetPath keys the test file by group (not by source layout), so handlers can
-// be reorganized without moving tests: <test_root>/<group>/<endpoint>__<id>_e2e_test.go.
-func targetPath(testRoot string, c Case) string {
-	return filepath.Join(testRoot, c.Group, fmt.Sprintf("%s__%s_e2e_test.go", c.Endpoint, c.ID))
+func symbolOf(function *ast.FuncDecl) string {
+	if function.Recv == nil || len(function.Recv.List) == 0 {
+		return function.Name.Name
+	}
+	expression := function.Recv.List[0].Type
+	if pointer, ok := expression.(*ast.StarExpr); ok {
+		expression = pointer.X
+	}
+	switch typed := expression.(type) {
+	case *ast.IndexExpr:
+		expression = typed.X
+	case *ast.IndexListExpr:
+		expression = typed.X
+	}
+	if identifier, ok := expression.(*ast.Ident); ok {
+		return identifier.Name + "." + function.Name.Name
+	}
+	return function.Name.Name
 }
 
-func checkCollisions(cases []DiscoveredCase) error {
+func checkCaseIDs(cases []DiscoveredCase) error {
 	seen := map[string]string{}
-	for _, dc := range cases {
-		owner := dc.Case.Endpoint + "/" + dc.Case.ID
-		identity := dc.Case.Group + "/" + dc.Case.ID
-		if prev, ok := seen[identity]; ok {
-			return fmt.Errorf("case identity collision: %s declared by both %s and %s",
-				identity, prev, owner)
+	for _, discovered := range cases {
+		owner := discovered.SourceFile + "::" + discovered.Case.Symbol
+		if previous, ok := seen[discovered.Case.ID]; ok {
+			return fmt.Errorf(
+				"case id collision %q: declared by both %s and %s",
+				discovered.Case.ID, previous, owner,
+			)
 		}
-		seen[identity] = owner
+		seen[discovered.Case.ID] = owner
 	}
 	return nil
 }
