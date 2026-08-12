@@ -33,7 +33,8 @@ export interface LoadProfile {
 
 export function validateLoadProfile(load: LoadProfile): void {
   if (!load.schedule.stages.length) throw new Error("load.schedule requires at least one stage");
-  if (load.schedule.start_level < 0 || load.schedule.stages.some(
+  if (!Number.isFinite(load.schedule.start_level) || load.schedule.start_level < 0
+    || load.schedule.stages.some(
     (stage) => !Number.isFinite(stage.over_s) || stage.over_s < 0
       || !Number.isFinite(stage.to_level) || stage.to_level < 0,
   )) throw new Error("load schedule levels and durations must be finite and >= 0");
@@ -51,6 +52,16 @@ export function validateLoadProfile(load: LoadProfile): void {
       || load.abort_on_error_rate <= 0
       || load.abort_on_error_rate > 1)) {
     throw new Error("load.abort_on_error_rate must be in (0, 1]");
+  }
+  const pacing = load.pacing;
+  if (pacing && pacing.kind !== "none") {
+    if (!Number.isFinite(pacing.secs) || pacing.secs < 0) {
+      throw new Error("load.pacing.secs must be finite and >= 0");
+    }
+    if (pacing.kind === "between"
+      && (!Number.isFinite(pacing.max_secs) || pacing.max_secs < pacing.secs)) {
+      throw new Error("load.pacing.max_secs must be finite and >= pacing.secs");
+    }
   }
   for (const [name, value] of [
     ["warmup_s", load.warmup_s],

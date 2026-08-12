@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  buildWindows,
   Engine,
   rampHold,
   serializeOutcomes,
@@ -122,6 +123,43 @@ describe("TypeScript perf harness", () => {
       workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
       loads: [rampHold("closed", 1, 0, 1, { warmup_s: -1 })],
     })).toThrow("warmup_s");
+    expect(() => new Engine({
+      subject: { name: "chat", target: {} },
+      workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
+      loads: [{
+        model: "closed",
+        schedule: { start_level: Number.NaN, stages: [{ over_s: 1, to_level: 1, kind: "hold" }] },
+      }],
+    })).toThrow("levels and durations");
+    expect(() => new Engine({
+      subject: { name: "chat", target: {} },
+      workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
+      loads: [rampHold("closed", 1, 0, 1, {
+        pacing: { kind: "between", secs: 2, max_secs: 1 },
+      })],
+    })).toThrow("max_secs");
+  });
+
+  test("clips stage drill-downs to the post-warmup measurement interval", () => {
+    const load = {
+      model: "closed" as const,
+      schedule: {
+        start_level: 0,
+        stages: [
+          { over_s: 0.5, to_level: 1, kind: "ramp" as const },
+          { over_s: 0.5, to_level: 1, kind: "hold" as const },
+        ],
+      },
+      warmup_s: 0.75,
+    };
+    const windows = buildWindows(load, [
+      { t: 0.25, outcome: { status: 200, duration_ms: 5, ok: true } },
+      { t: 0.8, outcome: { status: 200, duration_ms: 10, ok: true } },
+    ], 1);
+
+    expect(windows.map((window) => window.id)).toEqual(["measurement", "stage-02"]);
+    expect(windows[0]).toMatchObject({ start_s: 0.75, end_s: 1, request: { n: 1 } });
+    expect(windows[1]).toMatchObject({ start_s: 0.75, end_s: 1, request: { n: 1 } });
   });
 
   test("preserves both primary and cleanup errors", async () => {

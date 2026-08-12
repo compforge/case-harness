@@ -98,8 +98,9 @@ function caseStats(outcomes: Outcome[], durationS: number, closed: boolean): Win
 
 export function buildWindows(load: LoadProfile, timed: TimedOutcome[], actualEndS: number): Window[] {
   const plannedEnd = scheduleDuration(load.schedule);
-  const measurementStart = Math.min(load.warmup_s ?? 0, actualEndS);
-  const measurementEnd = Math.min(actualEndS, plannedEnd);
+  const warmup = load.warmup_s ?? 0;
+  const measurementStart = warmup;
+  const measurementEnd = Math.max(warmup, Math.min(actualEndS, plannedEnd));
   const make = (
     id: string,
     name: string,
@@ -134,7 +135,7 @@ export function buildWindows(load: LoadProfile, timed: TimedOutcome[], actualEnd
   )];
   let cursor = 0;
   load.schedule.stages.forEach((stage, index) => {
-    const start = cursor;
+    const start = Math.max(cursor, warmup);
     const plannedStageEnd = cursor + stage.over_s;
     const end = Math.min(plannedStageEnd, actualEndS);
     if (end > start) {
