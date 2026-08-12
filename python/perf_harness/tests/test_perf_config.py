@@ -61,6 +61,17 @@ def test_config_rejects_bad_stop_policy(tmp_path, bad):
         load_experiment(str(cfg))
 
 
+def test_config_rejects_unsupported_max_requests(tmp_path):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(
+        "subject: { name: s, base_url: 'http://x' }\n"
+        "resources: [ {} ]\nworkload: { name: mock }\n"
+        "load: { model: closed, levels: [1], steady_s: 0.1, max_requests: 10 }\n"
+    )
+    with pytest.raises(ValueError, match="max_requests is not supported"):
+        load_experiment(str(cfg))
+
+
 def test_load_experiment_parses_cases_and_facets(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(_MIX)

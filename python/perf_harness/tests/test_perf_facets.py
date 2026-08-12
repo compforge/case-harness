@@ -26,6 +26,8 @@ async def test_facets_pivot_and_weighting():
     r = (await Engine(experiment).run()).trials[0]
 
     assert r.measurement.request.n > 0
+    assert set(r.measurement.by_case) == {"simple", "complex"}
+    assert sum(s.n for s in r.measurement.by_case.values()) == r.measurement.request.n
     assert "difficulty" in r.measurement.by_facet
     by = r.measurement.by_facet["difficulty"]
     assert set(by) <= {"simple", "complex"}
@@ -63,6 +65,9 @@ async def test_open_loop_drops_are_separate_not_latency_samples():
     r = (await Engine(experiment).run()).trials[0]
     assert r.measurement.request.n_dropped > 0  # saturation happened
     assert r.measurement.request.n > 0  # some requests were actually sent
+    assert set(r.measurement.by_case) == {"x"}
+    assert r.measurement.by_case["x"].n == r.measurement.request.n
+    assert r.measurement.by_case["x"].n_dropped == r.measurement.request.n_dropped
     # drops are out of the latency histogram → fired ~50ms requests set the
     # percentile, not the 0ms drops (the coordinated-omission bug this fixes)
     assert r.measurement.request.p50_ms >= 40
@@ -88,4 +93,5 @@ async def test_no_cases_is_anonymous_no_facets():
     )
     r = (await Engine(experiment).run()).trials[0]
     assert r.measurement.request.n > 0
+    assert r.measurement.by_case == {"default": r.measurement.request}
     assert r.measurement.by_facet == {}

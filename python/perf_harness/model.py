@@ -290,6 +290,7 @@ class Window:
     complete: bool
     target_level: float | None = None
     request: RequestStats | None = None
+    by_case: dict[str, RequestStats] = field(default_factory=dict)
     by_facet: dict[str, dict[str, RequestStats]] = field(default_factory=dict)
     probe_metrics: dict[str, MetricSummary] = field(default_factory=dict)
 
