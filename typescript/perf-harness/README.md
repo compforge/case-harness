@@ -19,6 +19,10 @@ const run = await new Engine({
   name: "service-capacity",
   subject: { name: "service", target: {} },
   workload,
+  caseMix: [
+    { case: { id: "ordinary_chat", input: { query: "hello" } }, weight: 4 },
+    { case: { id: "knowledge_chat", input: { query: "use the docs" } }, weight: 1 },
+  ],
   resources: [{}],
   loads: [rampHold("closed", 20, 10, 60)],
 }).run();
@@ -26,7 +30,13 @@ const run = await new Engine({
 writeRunData(run, "./runs/service-capacity");
 ```
 
-Service-specific request and SSE semantics stay in the consumer's `Workload`. Resource-side
+`caseMix` selects one or more canonical Case assets for this Experiment; its weights are load-plan
+metadata and do not mutate the Cases. `CaseView` is only the minimal runtime shape accepted by the
+Harness—the canonical Case/CaseSet schema remains owned by spec-case.
+
+Service-specific request and SSE semantics stay in the consumer's `Workload`. Each `fire` handles
+exactly one dispatch and must be safe for concurrent calls; the Workload must not start its own load
+loop. Resource-side
 Prometheus/Kubernetes observation stays with the consumer as well; Doctor, for example, reuses its
 existing Prombed-backed `doctor metric` collection.
 

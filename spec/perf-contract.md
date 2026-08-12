@@ -21,6 +21,22 @@ Verdict = Workload 对 Outcome 的纯判定
 - `window_id` 是 Trial 内时间切片的局部键。
 - `trace_id` 等遥测关联键进入 `Outcome.meta`，不得只存在于人类报告。
 
+## Case 与加压边界
+
+Case / CaseSet 是稳定的输入资产，canonical schema 由 spec-case 维护。Case 可以声明 `id`、`input`、
+`facets`、`requires`、`judge`、`binding` 等测试语义，但不携带环境地址、凭证、并发度或流量权重。
+Harness 只消费执行所需的最小 runtime view（至少 `id` / `input`，可带 `facets`），不复制或重新定义
+Case schema。
+
+一次 Perf Experiment 可以从一个 CaseSet 选择一个或多个 Case，并在本次 Experiment 的 `case mix`
+里声明权重。权重属于本次加压计划，而不是 Case 资产。Harness 负责按 mix 选择 Case、调度 dispatch、
+控制并发/到达率、停止和归约，并在 `Window.by_case` 产出逐 Case 统计。
+
+具体服务协议由 Workload/driver 实现。Harness 每次 dispatch 只调用一次 `fire(case)`；driver 负责把
+Case input 变成一次 HTTP/SSE 等请求并返回一次 Outcome，必须支持 Harness 发起的并发调用，不能在
+内部再启动隐藏的加压循环。这样，同一个 Case runner 可被 Perf、单 Case 调试或其它 Case Harness
+入口复用，而调度策略仍只有一个权威实现。
+
 ## 负载语义
 
 - `closed` 表示 N 个虚拟用户循环 `fire → pacing → fire`，强度单位是并发用户数。

@@ -318,6 +318,14 @@ class Engine:
                 continue
             selected = [o for t, o in timed if window.start_s <= t < window.end_s]
             window.request = request_stats(selected, max(window.duration_s, 1e-9), closed=closed)
+            case_groups: dict[str, list[Outcome]] = defaultdict(list)
+            for outcome in selected:
+                if outcome.case_id:
+                    case_groups[outcome.case_id].append(outcome)
+            window.by_case = {
+                case_id: request_stats(group, max(window.duration_s, 1e-9), closed=closed)
+                for case_id, group in case_groups.items()
+            }
             facet_keys = {key for outcome in selected for key in outcome.facets}
             for key in facet_keys:
                 groups: dict[str, list[Outcome]] = defaultdict(list)

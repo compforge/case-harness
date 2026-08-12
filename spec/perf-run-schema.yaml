@@ -92,7 +92,7 @@ $defs:
     additionalProperties: true
   window:
     type: object
-    required: [id, name, kind, start_s, end_s, complete, request, by_facet, probe_metrics]
+    required: [id, name, kind, start_s, end_s, complete, request, by_case, by_facet, probe_metrics]
     properties:
       id: {type: string, minLength: 1}
       name: {type: string, minLength: 1}
@@ -103,6 +103,9 @@ $defs:
       target_level: {type: [number, 'null'], minimum: 0}
       request:
         oneOf: [{$ref: '#/$defs/request_stats'}, {type: 'null'}]
+      by_case:
+        type: object
+        additionalProperties: {$ref: '#/$defs/request_stats'}
       by_facet:
         type: object
         additionalProperties:

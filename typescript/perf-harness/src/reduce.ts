@@ -83,6 +83,19 @@ function facetStats(outcomes: Outcome[], durationS: number, closed: boolean): Wi
   return result;
 }
 
+function caseStats(outcomes: Outcome[], durationS: number, closed: boolean): Window["by_case"] {
+  const result: Window["by_case"] = {};
+  const caseIds = new Set(outcomes.flatMap((outcome) => outcome.case_id ? [outcome.case_id] : []));
+  for (const caseId of caseIds) {
+    result[caseId] = requestStats(
+      outcomes.filter((outcome) => outcome.case_id === caseId),
+      durationS,
+      closed,
+    );
+  }
+  return result;
+}
+
 export function buildWindows(load: LoadProfile, timed: TimedOutcome[], actualEndS: number): Window[] {
   const plannedEnd = scheduleDuration(load.schedule);
   const measurementStart = Math.min(load.warmup_s ?? 0, actualEndS);
@@ -106,6 +119,7 @@ export function buildWindows(load: LoadProfile, timed: TimedOutcome[], actualEnd
       complete,
       target_level: targetLevel,
       request: requestStats(outcomes, Math.max(end - start, 1e-9), load.model === "closed"),
+      by_case: caseStats(outcomes, Math.max(end - start, 1e-9), load.model === "closed"),
       by_facet: facetStats(outcomes, Math.max(end - start, 1e-9), load.model === "closed"),
       probe_metrics: {},
     };

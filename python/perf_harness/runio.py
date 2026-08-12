@@ -356,6 +356,9 @@ def _trial_json(r: TrialRecord) -> dict:
                 "complete": window.complete,
                 "target_level": window.target_level,
                 "request": _stats_json(window.request) if window.request is not None else None,
+                "by_case": {
+                    case_id: _stats_json(stats) for case_id, stats in window.by_case.items()
+                },
                 "by_facet": {
                     key: {value: _stats_json(stats) for value, stats in values.items()}
                     for key, values in window.by_facet.items()
@@ -392,6 +395,10 @@ def _trial_from(d: dict, subject: str) -> TrialRecord:
                 complete=bool(window["complete"]),
                 target_level=window.get("target_level"),
                 request=_stats_from(window["request"]) if window.get("request") else None,
+                by_case={
+                    case_id: _stats_from(stats)
+                    for case_id, stats in (window.get("by_case") or {}).items()
+                },
                 by_facet={
                     key: {value: _stats_from(stats) for value, stats in values.items()}
                     for key, values in (window.get("by_facet") or {}).items()

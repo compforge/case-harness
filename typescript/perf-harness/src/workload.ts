@@ -1,4 +1,4 @@
-import type { Arm, Case, Outcome, Subject, Verdict } from "./model";
+import type { Arm, CaseView, Outcome, Subject, Verdict } from "./model";
 
 export interface TrialContext {
   subject: Subject;
@@ -8,7 +8,7 @@ export interface TrialContext {
 }
 
 export interface FireContext extends TrialContext {
-  case: Case;
+  case: CaseView;
 }
 
 export interface Workload {

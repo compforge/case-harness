@@ -1,9 +1,15 @@
 import type { LoadProfile } from "./load";
 
-export interface Case {
+/** Minimal runtime view of a canonical Case asset. Schema ownership stays with spec-case. */
+export interface CaseView {
   id: string;
   input: Record<string, unknown>;
   facets?: Record<string, string>;
+}
+
+export interface CaseMixEntry {
+  case: CaseView;
+  weight?: number;
 }
 
 export interface ResourceProfile {
@@ -86,6 +92,7 @@ export interface Window {
   complete: boolean;
   target_level?: number;
   request?: RequestStats;
+  by_case: Record<string, RequestStats>;
   by_facet: Record<string, Record<string, RequestStats>>;
   probe_metrics: Record<string, never>;
 }

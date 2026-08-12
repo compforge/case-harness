@@ -103,6 +103,7 @@ async def test_run_json_is_the_full_model(tmp_path):
     assert "cooldown" in windows
     assert t["registry"]["ttft_ms"]["unit"] == "ms"  # metric metadata persisted
     assert windows["measurement"]["request"]["n"] == run.trials[0].measurement.request.n
+    assert "a" in windows["measurement"]["by_case"]
     assert "simple" in windows["measurement"]["by_facet"]["difficulty"]
     sid = series_id("top.cpu_m", {"service": "chat"})
     assert windows["measurement"]["probe_metrics"][sid]["kind"] == "gauge"

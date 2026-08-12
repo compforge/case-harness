@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { drive } from "./scheduler";
 import { buildWindows } from "./reduce";
 import { loadLabel, resourceLabel, validateLoadProfile, type LoadProfile } from "./load";
-import type { Arm, Case, ResourceProfile, Run, Subject, TrialRecord } from "./model";
+import type { Arm, CaseMixEntry, ResourceProfile, Run, Subject, TrialRecord } from "./model";
 import type { TrialContext, Workload } from "./workload";
 
 export interface Experiment {
@@ -11,8 +11,7 @@ export interface Experiment {
   workload: Workload;
   resources?: ResourceProfile[];
   loads: LoadProfile[];
-  cases?: Case[];
-  weights?: Record<string, number>;
+  caseMix?: readonly CaseMixEntry[];
   signal?: AbortSignal;
   onTrialStart?(context: TrialContext, startedAt: Date): Promise<void> | void;
   onTrialFinish?(trial: TrialRecord): Promise<void> | void;
@@ -47,6 +46,20 @@ export class Engine {
   constructor(experiment: Experiment, options: { run_id?: string } = {}) {
     if (!experiment.loads.length) throw new Error("perf experiment requires at least one load profile");
     experiment.loads.forEach(validateLoadProfile);
+    const caseMix = experiment.caseMix ?? [];
+    const ids = new Set<string>();
+    for (const entry of caseMix) {
+      if (!entry.case.id) throw new Error("perf Case id must not be empty");
+      if (ids.has(entry.case.id)) throw new Error(`duplicate perf Case id: ${entry.case.id}`);
+      ids.add(entry.case.id);
+      const weight = entry.weight ?? 1;
+      if (!Number.isFinite(weight) || weight < 0) {
+        throw new Error(`perf Case weight must be finite and >= 0: ${entry.case.id}`);
+      }
+    }
+    if (caseMix.length && !caseMix.some((entry) => (entry.weight ?? 1) > 0)) {
+      throw new Error("perf case mix requires at least one positive weight");
+    }
     this.#experiment = experiment;
     this.#runId = options.run_id ?? runId();
   }
@@ -54,10 +67,11 @@ export class Engine {
   async run(): Promise<Run> {
     const created = new Date();
     const trials: TrialRecord[] = [];
-    const cases = this.#experiment.cases?.length
-      ? this.#experiment.cases
-      : [{ id: "default", input: {} }];
-    const weights = cases.map((item) => Math.max(0, this.#experiment.weights?.[item.id] ?? 1));
+    const caseMix = this.#experiment.caseMix?.length
+      ? this.#experiment.caseMix
+      : [{ case: { id: "default", input: {} }, weight: 1 }];
+    const cases = caseMix.map((entry) => entry.case);
+    const weights = caseMix.map((entry) => entry.weight ?? 1);
     for (const arm of arms(this.#experiment)) {
       if (this.#experiment.signal?.aborted) break;
       const started = new Date();

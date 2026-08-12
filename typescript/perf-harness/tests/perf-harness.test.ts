@@ -65,6 +65,36 @@ describe("TypeScript perf harness", () => {
     expect(run.trials[0]!.outcomes).toHaveLength(12);
   });
 
+  test("loads multiple canonical Cases and reduces each Case independently", async () => {
+    const originalRandom = Math.random;
+    let pick = 0;
+    Math.random = () => (pick++ % 2 === 0 ? 0.1 : 0.9);
+    try {
+      const run = await new Engine({
+        subject: { name: "chat", target: {} },
+        workload: {
+          fire: async ({ case: selected }) => ({
+            status: 200,
+            duration_ms: selected.id === "ordinary_chat" ? 10 : 20,
+          }),
+        },
+        caseMix: [
+          { case: { id: "ordinary_chat", input: { query: "hello" } }, weight: 1 },
+          { case: { id: "knowledge_chat", input: { query: "docs" } }, weight: 1 },
+        ],
+        loads: [rampHold("closed", 1, 0, 1, { max_requests: 4 })],
+      }).run();
+
+      const byCase = run.trials[0]!.windows[0]!.by_case;
+      expect(Object.keys(byCase).sort()).toEqual(["knowledge_chat", "ordinary_chat"]);
+      expect(byCase.ordinary_chat!.n + byCase.knowledge_chat!.n).toBe(4);
+      expect(byCase.ordinary_chat!.p50_ms).toBe(10);
+      expect(byCase.knowledge_chat!.p50_ms).toBe(20);
+    } finally {
+      Math.random = originalRandom;
+    }
+  });
+
   test("error-rate breaker stops a failing trial", async () => {
     const workload: Workload = {
       fire: async () => ({ status: 503, duration_ms: 1 }),
@@ -138,7 +168,10 @@ describe("TypeScript perf harness", () => {
       trials: [{
         id: "default__closed-5c",
         arm: { id: "default__closed-5c" },
-        windows: [{ request: { metrics: { first_token_ms: { p95: 6500 } } } }],
+        windows: [{
+          request: { metrics: { first_token_ms: { p95: 6500 } } },
+          by_case: { ordinary_chat: { n: 1 } },
+        }],
       }],
     });
     expect(outcome).toMatchObject({

@@ -80,6 +80,22 @@
               }
             }
           },
+          "by_case": {
+            "ordinary_chat": {
+              "n": 1,
+              "n_ok": 1,
+              "throughput_rps": 0.0142857143,
+              "p50_ms": 7000,
+              "p95_ms": 7000,
+              "p99_ms": 7000,
+              "mean_ms": 7000,
+              "error_rate": 0,
+              "error_breakdown": {},
+              "n_dropped": 0,
+              "caveats": ["small_sample"],
+              "metrics": {}
+            }
+          },
           "by_facet": {},
           "probe_metrics": {}
         }
