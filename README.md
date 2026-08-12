@@ -10,7 +10,7 @@ An AI project keeps growing — more features, longer chains, a wider test surfa
 |----------|------|-----|
 | Are the APIs correct? | API testing (e2e, black-box) | `python/e2e_harness` |
 | Is the agent any good? | Quality evaluation (eval, black-box) | `python/eval_harness` |
-| How does it behave under pressure? | Load testing (perf, black-box) | `python/perf_harness` |
+| How does it behave under pressure? | Load testing (perf, black-box) | `python/perf_harness` / `typescript/perf-harness` |
 | Which layer misbehaves first? | Trace analysis (trace, open-box) | `python/trace_harness` / `typescript/trace-harness` |
 | Were the agent's decisions and actions efficient? | Trajectory evaluation (open-box) | `python/trajectory_harness` |
 
@@ -57,7 +57,7 @@ case-harness/
 │   ├── trajectory_harness/ # agent trajectory normalization + evaluation
 │   └── harness_common/  # neutral shared layer: verdict / llm / report_kit
 ├── go/                  # Go SDK (reference implementation, shapes aligned to spec/)
-├── typescript/          # TypeScript SDK; trace-harness aligned with the Python analysis IR
+├── typescript/          # TypeScript perf/trace SDKs implementing contracts under spec/
 ├── examples/            # integration examples: api-test / agent-test
 └── docs/                # cross-SDK design docs
 ```
@@ -84,10 +84,13 @@ cd go && go test ./...
 
 # TypeScript trace-harness
 cd typescript/trace-harness && bun install --frozen-lockfile && bun test
+
+# TypeScript perf-harness
+cd ../perf-harness && bun install --frozen-lockfile && bun test
 ```
 
 Per-SDK integration guides live in each SDK's `README.md`; developer-facing code maps and conventions in each `AGENTS.md`.
 
 ## Status
 
-Early public release. The canonical case schema comes from `spec-case`; verdict and runtime conventions under `spec/` are this repo's stable center. SDK APIs may still move. The Go SDK tracks the Python side batch-wise, while TypeScript trace-harness keeps its public analysis IR aligned with Python.
+Early public release. The canonical case schema comes from `spec-case`; verdict and runtime contracts under `spec/` are this repo's stable center. SDK APIs may still move. Language implementations may cover different features, but their shared IR follows the same contracts rather than treating one implementation as canonical.

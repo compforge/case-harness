@@ -4,6 +4,9 @@
 
 不测对错（`e2e_harness`）、不测质量（`eval_harness`），测**容量与资源画像**：把服务放到某个资源档下、施加压力、观察它随时间的表现，回答"在 xx 资源 + xx qps 下扛得住多少、cpu/内存/错误率如何"。**自给自足**，不 import 另两个 SDK；k8s 只活在 `subject.py`（HelmProvisioner）+ `observe/k8s.py` 两处。
 
+本目录是 Perf Harness 跨语言契约的 Python 实现，不是其它语言实现的 canonical source。共享名词、
+调度语义、对齐键和落盘字段以 `../../spec/perf-contract.md` 及对应 schema 为准。
+
 ### 脊柱
 
 ```
@@ -69,6 +72,8 @@ perf_harness/
 
 ## References
 
+- 跨语言契约：[`../../spec/perf-contract.md`](../../spec/perf-contract.md)
+- 落盘 schema：[`../../spec/perf-run-schema.yaml`](../../spec/perf-run-schema.yaml) / [`../../spec/perf-outcome-schema.yaml`](../../spec/perf-outcome-schema.yaml)
 - 使用指南（user 视角）：[`README.md`](README.md)
 - metric 模型（含 otel-collector 对照）：[`docs/metric-model.md`](docs/metric-model.md)
 - 结果/SLO 语义：[`docs/result-semantics.md`](docs/result-semantics.md)

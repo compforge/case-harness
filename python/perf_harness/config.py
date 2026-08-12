@@ -510,6 +510,9 @@ def _parse_loads(c: dict) -> list[LoadProfile]:
     Common across both: ``model`` (open/closed), ``pacing`` (closed), and
     ``max_inflight`` (open).
     """
+    if "max_requests" in c:
+        raise ValueError("load.max_requests is not supported by the Python implementation")
+
     model = c.get("model", "closed")
     if model not in _LOAD_MODELS:
         raise ValueError(f"load.model must be one of {_LOAD_MODELS}, got {model!r}")

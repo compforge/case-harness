@@ -4,6 +4,8 @@ MetricStore) offline. The report/CSVs are derived views; THESE are the analysis
 contract, so the round-trip must be lossless for everything the store can address."""
 
 import json
+import shutil
+from pathlib import Path
 
 import pytest
 from spec_case.model import Case
@@ -18,6 +20,8 @@ from perf_harness.observe import FamilySpec, Probe
 from perf_harness.report import write_run
 from perf_harness.runio import RUN_SCHEMA, load_outcomes, load_run
 from perf_harness.slo import evaluate_slo
+
+PERF_FIXTURES = Path(__file__).parents[3] / "conformance" / "perf" / "fixtures"
 
 
 class _FakeTop(Probe):
@@ -150,6 +154,20 @@ async def test_outcomes_jsonl_is_the_request_raw_layer(tmp_path):
     assert o0.status == 200 and o0.ok and o0.case_id == "a"
     assert o0.facets == {"difficulty": "simple"}
     assert o0.metrics["ttft_ms"] == 5.0  # per_request raw values survive
+
+
+def test_reads_language_neutral_conformance_fixture(tmp_path):
+    shutil.copy(PERF_FIXTURES / "basic.run.json", tmp_path / "run.json")
+    shutil.copy(PERF_FIXTURES / "basic.outcomes.jsonl", tmp_path / "outcomes.jsonl")
+
+    run = load_run(tmp_path, with_series=False)
+    trial = run.trials[0]
+    assert trial.label() == "default__closed-5c"
+    assert trial.measurement.request.metrics["first_token_ms"].p95 == 6500
+
+    outcome = load_outcomes(tmp_path)[trial.label()][0][1]
+    assert outcome.metrics["first_token_ms"] == 6500
+    assert outcome.meta["trace_id"] == "0123456789abcdef0123456789abcdef"
 
 
 async def test_load_run_rejects_unknown_schema(tmp_path):

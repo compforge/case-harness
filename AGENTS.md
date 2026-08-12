@@ -8,7 +8,7 @@
 |------|----------|-----|
 | 接口对不对 | API 测试（e2e，黑盒） | `python/e2e_harness` |
 | agent 效果好不好 | 效果测试（eval，黑盒） | `python/eval_harness` |
-| 压力下表现如何 | 压力测试（perf，黑盒） | `python/perf_harness` |
+| 压力下表现如何 | 压力测试（perf，黑盒） | `python/perf_harness` / `typescript/perf-harness` |
 | 链路内部哪层先反常 | trace 分析（trace，开盒） | `python/trace_harness` / `typescript/trace-harness` |
 | agent 的行动过程是否合理 | 轨迹评估（trajectory，开盒） | `python/trajectory_harness` |
 
@@ -32,7 +32,7 @@ case-harness/
 │   ├── common/          # 中立共享层：case / verdict / llm / facets + report_kit（报告 IR + HTML 渲染），五个 SDK 共用、无业务概念
 │   └── …/tests/         # 测试在各自包内（e2e_harness/tests 等；common 同），打包时排除
 ├── go/                  # Go SDK（参考实现，形状对齐 spec）→ 见 go/AGENTS.md
-├── typescript/          # TypeScript SDK；trace-harness 对齐 Python 分析 IR 与交互 HTML
+├── typescript/          # TypeScript SDK；perf/trace 实现共同遵守 spec 下的跨语言契约
 ├── examples/            # 接入示例：api-test / agent-test
 └── docs/                # 跨 SDK 设计文档
 ```
@@ -73,6 +73,9 @@ cd go && go test ./...
 
 # TypeScript trace-harness
 cd typescript/trace-harness && bun install --frozen-lockfile && bun test && bun run typecheck
+
+# TypeScript perf-harness
+cd ../perf-harness && bun install --frozen-lockfile && bun test && bun run typecheck
 ```
 
 ## References
@@ -81,6 +84,8 @@ cd typescript/trace-harness && bun install --frozen-lockfile && bun test && bun 
 - e2e_harness（API 测试）：[`python/e2e_harness/AGENTS.md`](python/e2e_harness/AGENTS.md)
 - eval_harness（效果测试）：[`python/eval_harness/AGENTS.md`](python/eval_harness/AGENTS.md)，使用指南 [`python/eval_harness/README.md`](python/eval_harness/README.md)
 - perf_harness（压力测试）：[`python/perf_harness/AGENTS.md`](python/perf_harness/AGENTS.md)，使用指南 [`python/perf_harness/README.md`](python/perf_harness/README.md)
+- Perf 跨语言契约：[`spec/perf-contract.md`](spec/perf-contract.md) + [`spec/perf-run-schema.yaml`](spec/perf-run-schema.yaml) + [`spec/perf-outcome-schema.yaml`](spec/perf-outcome-schema.yaml)
+- TypeScript perf-harness：[`typescript/perf-harness/AGENTS.md`](typescript/perf-harness/AGENTS.md)，使用指南 [`typescript/perf-harness/README.md`](typescript/perf-harness/README.md)
 - trace_harness（trace 分析）：[`python/trace_harness/AGENTS.md`](python/trace_harness/AGENTS.md)，设计文档 [`docs/trace-harness.md`](docs/trace-harness.md)
 - trajectory_harness（agent 轨迹评估）：[`python/trajectory_harness/AGENTS.md`](python/trajectory_harness/AGENTS.md)，设计文档 [`docs/trajectory-harness.md`](docs/trajectory-harness.md)
 - Go SDK：[`go/AGENTS.md`](go/AGENTS.md)
