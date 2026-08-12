@@ -67,7 +67,7 @@
             "error_rate": 0,
             "error_breakdown": {},
             "n_dropped": 0,
-            "caveats": ["small_sample"],
+            "caveats": ["co_biased", "few_samples"],
             "metrics": {
               "first_token_ms": {
                 "kind": "distribution",
@@ -76,7 +76,7 @@
                 "p50": 6500,
                 "p95": 6500,
                 "p99": 6500,
-                "caveats": ["small_sample"]
+                "caveats": ["co_biased", "few_samples"]
               }
             }
           },
@@ -92,7 +92,7 @@
               "error_rate": 0,
               "error_breakdown": {},
               "n_dropped": 0,
-              "caveats": ["small_sample"],
+              "caveats": ["co_biased", "few_samples"],
               "metrics": {}
             }
           },

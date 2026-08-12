@@ -49,13 +49,13 @@ function trialJson(trial: TrialRecord): Record<string, unknown> {
       load: loadJson(trial.arm.load),
     },
     stop: trial.stop,
-    slo: [],
-    registry: {},
+    slo: trial.slo,
+    registry: trial.registry,
     windows: trial.windows.map((window) => ({
       ...window,
       request: statsJson(window.request),
     })),
-    probe_errors: {},
+    probe_errors: trial.probe_errors,
   };
 }
 
@@ -85,7 +85,7 @@ export function serializeRun(run: Run): Record<string, unknown> {
     created_at: run.created_at,
     subject: run.subject,
     passed: run.passed,
-    n_trials: run.trials.length,
+    n_trials: run.n_trials,
     trials: run.trials.map(trialJson),
   };
 }

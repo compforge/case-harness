@@ -117,6 +117,33 @@ describe("TypeScript perf harness", () => {
       workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
       loads: [rampHold("closed", 1, 0, 1, { max_requests: 0 })],
     })).toThrow("max_requests");
+    expect(() => new Engine({
+      subject: { name: "chat", target: {} },
+      workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
+      loads: [rampHold("closed", 1, 0, 1, { warmup_s: -1 })],
+    })).toThrow("warmup_s");
+  });
+
+  test("preserves both primary and cleanup errors", async () => {
+    const engine = new Engine({
+      subject: { name: "chat", target: {} },
+      workload: {
+        setup: async () => { throw new Error("setup failed"); },
+        fire: async () => ({ status: 200, duration_ms: 1 }),
+        cleanup: async () => { throw new Error("cleanup failed"); },
+      },
+      loads: [rampHold("closed", 1, 0, 1)],
+    });
+    try {
+      await engine.run();
+      throw new Error("expected perf trial to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors.map((item) => String(item))).toEqual([
+        "Error: setup failed",
+        "Error: cleanup failed",
+      ]);
+    }
   });
 
   test("empty raw outcome stream contains no invalid blank record", () => {
@@ -127,6 +154,7 @@ describe("TypeScript perf harness", () => {
       created_at: new Date(0).toISOString(),
       subject: "chat",
       passed: false,
+      n_trials: 0,
       trials: [],
     })).toBe("");
   });

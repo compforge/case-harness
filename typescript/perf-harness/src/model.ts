@@ -126,6 +126,9 @@ export interface TrialRecord {
   finished_at: string;
   windows: Window[];
   stop: TrialStop;
+  slo: unknown[];
+  registry: Record<string, unknown>;
+  probe_errors: Record<string, unknown>;
   outcomes: TimedOutcome[];
 }
 
@@ -136,5 +139,6 @@ export interface Run {
   created_at: string;
   subject: string;
   passed: boolean;
+  n_trials: number;
   trials: TrialRecord[];
 }

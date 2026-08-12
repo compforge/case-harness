@@ -52,9 +52,13 @@ export function validateLoadProfile(load: LoadProfile): void {
       || load.abort_on_error_rate > 1)) {
     throw new Error("load.abort_on_error_rate must be in (0, 1]");
   }
-  if (load.graceful_stop_s !== undefined
-    && (!Number.isFinite(load.graceful_stop_s) || load.graceful_stop_s < 0)) {
-    throw new Error("load.graceful_stop_s must be finite and >= 0");
+  for (const [name, value] of [
+    ["warmup_s", load.warmup_s],
+    ["graceful_stop_s", load.graceful_stop_s],
+  ] as const) {
+    if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+      throw new Error(`load.${name} must be finite and >= 0`);
+    }
   }
 }
 

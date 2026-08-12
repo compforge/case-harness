@@ -106,6 +106,9 @@ export class Engine {
           finished_at: finished.toISOString(),
           windows: buildWindows(arm.load, driven.outcomes, driven.stop.snapshot?.at_s ?? driven.elapsed_s),
           stop: driven.stop,
+          slo: [],
+          registry: {},
+          probe_errors: {},
           outcomes: driven.outcomes,
         };
         trials.push(trial);
@@ -119,6 +122,11 @@ export class Engine {
           await this.#experiment.workload.cleanup?.(context);
         } catch (cleanupError) {
           if (!primaryError) throw cleanupError;
+          throw new AggregateError(
+            [primaryError, cleanupError],
+            "perf trial failed and cleanup also failed",
+            { cause: primaryError },
+          );
         }
       }
     }
@@ -130,6 +138,7 @@ export class Engine {
       subject: this.#experiment.subject.name,
       passed: trials.length === arms(this.#experiment).length
         && trials.every((trial) => trial.stop.reason === "deadline" || trial.stop.reason === "request_limit"),
+      n_trials: trials.length,
       trials,
     };
   }
