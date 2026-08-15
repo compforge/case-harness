@@ -54,8 +54,8 @@ def test_repeated_tool_call_evaluator_returns_measurements_and_evidence():
     evaluation = evaluate(trajectory, [RepeatedToolCallEvaluator()])
 
     result = evaluation.results[0]
-    assert result.score == 0.667
-    assert result.verdict == "fail"
+    assert result.score is None
+    assert result.verdict == "warning"
     assert result.measurements == {
         "tool_call_count": 3,
         "repeated_call_count": 1,
@@ -115,7 +115,8 @@ def test_model_round_tool_calls_are_fallback_when_tool_spans_are_absent():
 
     result = RepeatedToolCallEvaluator().evaluate(trajectory)
 
-    assert result.score == 0.5
+    assert result.score is None
+    assert result.verdict == "warning"
     assert result.step_ids == ("s2",)
 
 

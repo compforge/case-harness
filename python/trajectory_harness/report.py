@@ -194,7 +194,50 @@ def _execution_section(
                     sort_default=(4, "desc"),
                 )
             )
+        affected = _failure_rows(run)
+        if affected:
+            blocks.append(
+                Table(
+                    columns=[
+                        "Trajectory",
+                        "Impact",
+                        "Failure",
+                        "Code",
+                        "Message",
+                    ],
+                    rows=affected,
+                )
+            )
     return Section(heading="Execution and failures", blocks=blocks)
+
+
+def _failure_rows(run: EvaluationRun) -> list[list[str]]:
+    rows = []
+    for item in run.items:
+        trajectory = item.trajectory
+        for step in trajectory.steps:
+            if step.failure:
+                rows.append(
+                    [
+                        trajectory.trajectory_id,
+                        f"step:{step.step_id}",
+                        step.failure.key,
+                        step.failure.code or "—",
+                        step.failure.message or "—",
+                    ]
+                )
+        if trajectory.execution and trajectory.execution.failure:
+            failure = trajectory.execution.failure
+            rows.append(
+                [
+                    trajectory.trajectory_id,
+                    "execution",
+                    failure.key,
+                    failure.code or "—",
+                    failure.message or "—",
+                ]
+            )
+    return rows
 
 
 def _evaluators_section(runs: Sequence[EvaluationRun]) -> Section:

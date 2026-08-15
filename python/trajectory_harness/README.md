@@ -1,7 +1,7 @@
 # trajectory_harness
 
-Normalize agent recordings, evaluate their decisions, aggregate dataset-level metrics,
-and render comparable trajectory reports.
+Normalize agent and workflow recordings, evaluate their decisions, aggregate dataset-level
+metrics, and render comparable trajectory reports.
 
 ```python
 from datetime import datetime, timezone
@@ -50,10 +50,34 @@ payloads follow the OTel GenAI `role + parts` schema. A failed operation carries
 normalized `Failure(kind, phase, error_type)`; for example `llm.request.timeout` or
 `tool.prepare.dependency_missing`.
 
+A trajectory may contain one agent loop or a pipeline of several agent loops and deterministic
+operations. `Step.parent_step_id` preserves that execution hierarchy; domain evaluators select
+the relevant subtrees through step `operation`, `name`, and `attributes`. The common model does
+not introduce a separate stage abstraction.
+
+Recurring LLM failures use the shared `llm_failure(phase, error_type)` constructor.
+Its common phases are `routing`, `request`, and `response_parse`; common error types
+include `timeout`, `rate_limit`, `client_error`, `server_error`, `network_error`,
+`invalid_response`, and `unknown`. Loaders still own source-specific parsing and may
+use open strings for domain-specific tool, agent, and workflow failures.
+
 Common evaluators ship with the Harness. Domain evaluators use the same contract and set
 `EvaluatorSpec.kind="domain"` plus their owner. Evaluators produce per-trajectory
 measurements; `aggregate_metrics` turns execution facts, failures, and those measurements
 into dataset-level metrics. It does not manufacture a weighted overall score.
+Optimization patterns are signals, not execution failures: for example, exact repeated tool
+calls produce a `warning` and a repeat-rate measurement so a consumer can investigate
+batching or reuse without declaring every repetition incorrect.
+Evaluator verdicts remain separate from runtime `Failure`: a domain rule may return
+`verdict="fail"`, while `status="error"` is reserved for an evaluator that could not run.
+
+The common evaluator catalog grows around reusable signals from the three parts of an agent
+loop: system prompt behavior, tool-set use, and loop mechanisms such as context and stopping.
+This mapping is diagnostic rather than causal: one signal may point to several design surfaces,
+while business-specific contracts and cross-loop pipeline judgments remain domain evaluators.
+The HTML report keeps low-cardinality failure metrics and lists the affected trajectory IDs,
+so consumers can correlate failures with case attributes without turning case IDs into metric
+dimensions.
 
 `trajectory_harness` owns the trajectory-specific report sections and HTML entry point.
 Report functions can aggregate full runs or accept persisted `Metric` values for historical

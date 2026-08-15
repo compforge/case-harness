@@ -69,17 +69,15 @@ class RepeatedToolCallEvaluator:
             "repeated_call_count": len(duplicate_steps),
             "repeated_call_rate": repeated_rate,
         }
-        score = round(1 - repeated_rate, 3)
         if duplicate_steps:
             return EvaluationResult(
                 evaluator_id=self.spec.evaluator_id,
                 status="evaluated",
-                score=score,
-                verdict="fail",
+                verdict="warning",
                 measurements=measurements,
                 explanation=(
                     f"{len(duplicate_steps)} of {len(calls)} tool calls repeat an earlier "
-                    "tool name and arguments."
+                    "tool name and arguments; inspect whether batching or reuse would help."
                 ),
                 step_ids=tuple(duplicate_steps),
             )
