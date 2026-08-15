@@ -6,25 +6,48 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from trajectory_harness.evaluate import Evaluation
+from trajectory_harness.evaluate import (
+    EvaluationResult,
+    EvaluatorSpec,
+    MeasurementSpec,
+)
 from trajectory_harness.model import Step, Trajectory
 
 
 @dataclass(frozen=True, slots=True)
 class RepeatedToolCallEvaluator:
-    name: str = "repeated_tool_call"
-    weight: float = 1.0
+    spec: EvaluatorSpec = EvaluatorSpec(
+        evaluator_id="repeated_tool_call",
+        title="Repeated tool calls",
+        description="Detect exact repeats of an earlier tool name and arguments.",
+        kind="common",
+        owner="trajectory_harness",
+        measurements=(
+            MeasurementSpec("tool_call_count", "count", "Observed tool calls."),
+            MeasurementSpec(
+                "repeated_call_count",
+                "count",
+                "Calls repeating an earlier name and arguments.",
+                "lower_is_better",
+            ),
+            MeasurementSpec(
+                "repeated_call_rate",
+                "ratio",
+                "Repeated calls divided by observed tool calls.",
+                "lower_is_better",
+            ),
+        ),
+    )
 
     def evaluate(
         self, trajectory: Trajectory, reference: Trajectory | None = None
-    ) -> Evaluation:
+    ) -> EvaluationResult:
         del reference
         calls = _tool_calls(trajectory.steps)
         if not calls:
-            return Evaluation(
-                name=self.name,
-                score=None,
-                label="not_evaluated",
+            return EvaluationResult(
+                evaluator_id=self.spec.evaluator_id,
+                status="not_applicable",
                 explanation="Trajectory contains no tool calls.",
             )
 
@@ -40,22 +63,32 @@ class RepeatedToolCallEvaluator:
             else:
                 seen.add(signature)
 
-        score = round(1 - len(duplicate_steps) / len(calls), 3)
+        repeated_rate = round(len(duplicate_steps) / len(calls), 3)
+        measurements = {
+            "tool_call_count": len(calls),
+            "repeated_call_count": len(duplicate_steps),
+            "repeated_call_rate": repeated_rate,
+        }
+        score = round(1 - repeated_rate, 3)
         if duplicate_steps:
-            return Evaluation(
-                name=self.name,
+            return EvaluationResult(
+                evaluator_id=self.spec.evaluator_id,
+                status="evaluated",
                 score=score,
-                label="fail",
+                verdict="fail",
+                measurements=measurements,
                 explanation=(
                     f"{len(duplicate_steps)} of {len(calls)} tool calls repeat an earlier "
                     "tool name and arguments."
                 ),
                 step_ids=tuple(duplicate_steps),
             )
-        return Evaluation(
-            name=self.name,
+        return EvaluationResult(
+            evaluator_id=self.spec.evaluator_id,
+            status="evaluated",
             score=1.0,
-            label="pass",
+            verdict="pass",
+            measurements=measurements,
             explanation=f"All {len(calls)} tool calls are distinct.",
         )
 

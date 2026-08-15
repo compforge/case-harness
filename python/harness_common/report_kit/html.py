@@ -201,17 +201,18 @@ def _chart_html(c: Chart, idx: int) -> str:
         # addressing ids; the tip says what they ARE). The formatter is a JS
         # function — injected via sentinel replacement since the option is JSON.
         legend["tooltip"] = {"show": True, "formatter": "__RK_TIP_FORMATTER__"}
+    x_axis = {
+        "type": c.x_kind,
+        "name": c.x_label,
+        "nameLocation": "middle",
+        "nameGap": 28,
+    }
     option = {
         "title": {"text": c.title, "left": "center", "textStyle": {"fontSize": 13}},
         "tooltip": {"trigger": "axis"},
         "legend": legend,
         "grid": {"top": 64, "left": 56, "right": 56, "bottom": 48},
-        "xAxis": {
-            "type": "value",
-            "name": c.x_label,
-            "nameLocation": "middle",
-            "nameGap": 28,
-        },
+        "xAxis": x_axis,
         "yAxis": y_axis,
         "dataZoom": [{"type": "inside"}, {"type": "slider", "height": 16, "bottom": 8}],
         "series": series,
