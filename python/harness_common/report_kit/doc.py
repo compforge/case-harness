@@ -16,6 +16,7 @@ chart, the one thing markdown can't carry). Everything is plain data.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 
 @dataclass
@@ -81,7 +82,7 @@ class LineSeries:
     are addressing ids like ``metrics.sse_ok{…}``; the tip says what that IS)."""
 
     name: str
-    points: list[tuple[float, float]]
+    points: list[tuple[float | str, float]]
     color: str = ""
     tip: str = ""
 
@@ -98,11 +99,15 @@ class Chart:
     overlaying a different-unit context signal (e.g. load pressure) on a resource
     chart. Use sparingly: dual axes invite false correlation reads, so the right side
     should be context, not a co-equal measurement.
+
+    ``x_kind="time"`` accepts ISO timestamps for reports sampled at irregular times;
+    value axes remain available for elapsed or numeric samples.
     """
 
     title: str
     series: list[LineSeries]
     x_label: str = "t (s)"
+    x_kind: Literal["value", "time"] = "value"
     y_label: str = ""
     right_series: list[LineSeries] = field(default_factory=list)
     y2_label: str = ""

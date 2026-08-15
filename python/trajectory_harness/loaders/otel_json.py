@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from trajectory_harness.model import Step, Trajectory
+from trajectory_harness.model import Failure, FailureKind, Step, Trajectory
 
 _INPUT_MESSAGES = "gen_ai.input.messages"
 _OUTPUT_MESSAGES = "gen_ai.output.messages"
@@ -16,6 +16,9 @@ _TOOL_NAME = "gen_ai.tool.name"
 _TOOL_ID = "gen_ai.tool.call.id"
 _TOOL_ARGUMENTS = "gen_ai.tool.call.arguments"
 _TOOL_RESULT = "gen_ai.tool.call.result"
+_ERROR_TYPE = "error.type"
+_EXCEPTION_TYPE = "exception.type"
+_EXCEPTION_MESSAGE = "exception.message"
 
 
 class OTelJsonLoader:
@@ -96,6 +99,7 @@ class OTelJsonLoader:
     ) -> Step | None:
         attrs = _attributes(raw.get("attributes", []))
         _promote_message_events(raw, attrs)
+        _promote_exception_events(raw, attrs)
         attrs = {**resource, **attrs}
 
         operation = str(attrs.get(_OPERATION) or "")
@@ -125,6 +129,7 @@ class OTelJsonLoader:
         end_ns = int(
             raw.get("endTimeUnixNano") or raw.get("end_time_unix_nano") or start_ns
         )
+        status = _status(raw, attrs)
         return Step(
             step_id=str(raw.get("spanId") or raw.get("span_id") or ""),
             parent_step_id=(
@@ -136,7 +141,8 @@ class OTelJsonLoader:
             name=_step_name(raw, attrs, operation),
             start_ms=start_ns / 1_000_000,
             duration_ms=max(0, end_ns - start_ns) / 1_000_000,
-            status=_status(raw, attrs),
+            status=status,
+            failure=_failure(raw, attrs, operation) if status == "error" else None,
             input_messages=input_messages,
             output_messages=output_messages,
             attributes=attrs,
@@ -185,6 +191,16 @@ def _promote_message_events(raw: dict[str, Any], attrs: dict[str, Any]) -> None:
     for event in raw.get("events", []):
         event_attrs = _attributes(event.get("attributes", []))
         for key in (_INPUT_MESSAGES, _OUTPUT_MESSAGES):
+            if key in event_attrs and key not in attrs:
+                attrs[key] = event_attrs[key]
+
+
+def _promote_exception_events(raw: dict[str, Any], attrs: dict[str, Any]) -> None:
+    for event in raw.get("events", []):
+        if event.get("name") != "exception":
+            continue
+        event_attrs = _attributes(event.get("attributes", []))
+        for key in (_EXCEPTION_TYPE, _EXCEPTION_MESSAGE):
             if key in event_attrs and key not in attrs:
                 attrs[key] = event_attrs[key]
 
@@ -292,7 +308,7 @@ def _step_name(raw: dict[str, Any], attrs: dict[str, Any], operation: str) -> st
 
 
 def _status(raw: dict[str, Any], attrs: dict[str, Any]) -> str:
-    if attrs.get("error.type"):
+    if attrs.get(_ERROR_TYPE) or attrs.get(_EXCEPTION_TYPE):
         return "error"
     status = raw.get("status") or {}
     code = status.get("code") if isinstance(status, dict) else status
@@ -301,3 +317,48 @@ def _status(raw: dict[str, Any], attrs: dict[str, Any]) -> str:
     if code in (1, "1", "STATUS_CODE_OK", "OK"):
         return "ok"
     return ""
+
+
+def _failure(raw: dict[str, Any], attrs: dict[str, Any], operation: str) -> Failure:
+    status = raw.get("status") or {}
+    message = status.get("message", "") if isinstance(status, dict) else ""
+    error_type = str(attrs.get(_ERROR_TYPE) or attrs.get(_EXCEPTION_TYPE) or "unknown")
+    return Failure(
+        kind=_failure_kind(operation),
+        phase=_failure_phase(operation),
+        error_type=error_type,
+        code=str(attrs.get(_EXCEPTION_TYPE) or ""),
+        message=str(attrs.get(_EXCEPTION_MESSAGE) or message or ""),
+    )
+
+
+def _failure_kind(operation: str) -> FailureKind:
+    if operation == "execute_tool":
+        return "tool"
+    if operation in {
+        "inference",
+        "chat",
+        "generate_content",
+        "text_completion",
+        "embeddings",
+    }:
+        return "llm"
+    if "workflow" in operation:
+        return "workflow"
+    if operation in {"create_agent", "invoke_agent", "plan"}:
+        return "agent"
+    return "unknown"
+
+
+def _failure_phase(operation: str) -> str:
+    if operation == "execute_tool":
+        return "execute"
+    if operation in {
+        "inference",
+        "chat",
+        "generate_content",
+        "text_completion",
+        "embeddings",
+    }:
+        return "request"
+    return operation

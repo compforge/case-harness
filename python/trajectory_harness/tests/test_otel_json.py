@@ -123,3 +123,34 @@ def test_promotes_message_attributes_from_events(tmp_path):
     trajectory = OTelJsonLoader().load(path)[0]
 
     assert trajectory.steps[0].output_messages[0]["parts"][0]["content"] == "done"
+
+
+def test_normalizes_otel_error_type_on_the_failed_operation(tmp_path):
+    path = tmp_path / "trace.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "traceId": "trace-1",
+                "spanId": "model-1",
+                "name": "chat",
+                "startTimeUnixNano": "0",
+                "endTimeUnixNano": "1",
+                "attributes": [
+                    _attr("gen_ai.operation.name", "chat"),
+                    _attr("error.type", "timeout"),
+                ],
+                "status": {
+                    "code": "STATUS_CODE_ERROR",
+                    "message": "provider deadline exceeded",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    step = OTelJsonLoader().load(path)[0].steps[0]
+
+    assert step.failure is not None
+    assert step.failure.key == "llm.request.timeout"
+    assert step.failure.message == "provider deadline exceeded"
