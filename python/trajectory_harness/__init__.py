@@ -1,6 +1,7 @@
 """Normalize, evaluate, aggregate, and report agent trajectories."""
 
 from trajectory_harness.evaluate import EvaluationResult as EvaluationResult
+from trajectory_harness.evaluate import DiagnosticSignal as DiagnosticSignal
 from trajectory_harness.evaluate import Evaluator as Evaluator
 from trajectory_harness.evaluate import EvaluatorSpec as EvaluatorSpec
 from trajectory_harness.evaluate import MeasurementSpec as MeasurementSpec

@@ -8,6 +8,7 @@ from typing import Any
 
 from trajectory_harness.evaluate import (
     EvaluationResult,
+    DiagnosticSignal,
     EvaluatorSpec,
     MeasurementSpec,
 )
@@ -70,16 +71,30 @@ class RepeatedToolCallEvaluator:
             "repeated_call_rate": repeated_rate,
         }
         if duplicate_steps:
+            summary = (
+                f"{len(duplicate_steps)} of {len(calls)} tool calls repeat an earlier "
+                "tool name and arguments."
+            )
             return EvaluationResult(
                 evaluator_id=self.spec.evaluator_id,
                 status="evaluated",
                 verdict="warning",
                 measurements=measurements,
-                explanation=(
-                    f"{len(duplicate_steps)} of {len(calls)} tool calls repeat an earlier "
-                    "tool name and arguments; inspect whether batching or reuse would help."
-                ),
+                explanation=f"{summary} Inspect whether batching or reuse would help.",
                 step_ids=tuple(duplicate_steps),
+                signals=(
+                    DiagnosticSignal(
+                        code="repeated_tool_call",
+                        severity="warning",
+                        summary=summary,
+                        step_ids=tuple(duplicate_steps),
+                        hypotheses=(
+                            "The tool may be missing a batch operation.",
+                            "The tool description may not encourage batching or result reuse.",
+                            "The agent loop may lack an effective repeat-call stopping strategy.",
+                        ),
+                    ),
+                ),
             )
         return EvaluationResult(
             evaluator_id=self.spec.evaluator_id,

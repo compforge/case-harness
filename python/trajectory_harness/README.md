@@ -39,7 +39,7 @@ Source
   -> TrajectoryLoader
   -> Trajectory (Step + Failure + ExecutionResult)
   -> Evaluator
-  -> EvaluationResult (verdict + measurements)
+  -> EvaluationResult (verdict + measurements + signals)
   -> EvaluationRun
   -> Metric
   -> Report / HTML
@@ -66,8 +66,9 @@ Common evaluators ship with the Harness. Domain evaluators use the same contract
 measurements; `aggregate_metrics` turns execution facts, failures, and those measurements
 into dataset-level metrics. It does not manufacture a weighted overall score.
 Optimization patterns are signals, not execution failures: for example, exact repeated tool
-calls produce a `warning` and a repeat-rate measurement so a consumer can investigate
-batching or reuse without declaring every repetition incorrect.
+calls produce a `warning`, a repeat-rate measurement, and a `DiagnosticSignal`. The signal
+records the observed pattern and evidence separately from hypotheses such as missing batching,
+unclear tool guidance, or an ineffective repeat-call stopping strategy.
 Evaluator verdicts remain separate from runtime `Failure`: a domain rule may return
 `verdict="fail"`, while `status="error"` is reserved for an evaluator that could not run.
 

@@ -18,7 +18,7 @@ Source
   -> TrajectoryLoader
   -> Trajectory (Step + Failure + ExecutionResult)
   -> Evaluator
-  -> EvaluationResult (verdict + measurements)
+  -> EvaluationResult (verdict + measurements + signals)
   -> EvaluationRun (Dataset + evaluated trajectories)
   -> Metric
   -> Report / HTML
@@ -37,9 +37,9 @@ Trajectory 是这些 loop 配置及其编排共同作用后的运行证据，不
 标识 agent、workflow、LLM 和 tool 等操作。具体业务可以据此选择某个 Step 子树或整条 Trajectory
 进行评估，无需让通用 Harness 理解 Review 1、Review 2 等领域阶段。
 
-Evaluator 逐步沉淀可复用的判定和 Measurement，观察执行是否完成、工具是否失败、调用是否反复或
-预算是否异常，再由实验或业务 Policy 判断应修改 prompt、tool、loop mechanism 还是 pipeline 编排。
-单个行为模式通常只是 signal；除非存在明确契约，不能直接把它定性成 Failure。
+Evaluator 逐步沉淀可复用的判定、Measurement 和 Signal，观察执行是否完成、工具是否失败、调用
+是否反复或预算是否异常，再由实验或业务 Policy 判断应修改 prompt、tool、loop mechanism 还是
+pipeline 编排。单个行为模式通常只是 Signal；除非存在明确契约，不能直接把它定性成 Failure。
 
 ### 1.1 Tool set 的两个评估层级
 
@@ -133,9 +133,9 @@ trajectory_harness 持续沉淀可跨业务复用的 Evaluator，其信号可以
 | tool set | tool 成功率、无效参数、换参重试、连续重复调用、通用执行器绕行 | 领域工具集是否缺失、重叠或不符合任务契约 |
 | loop mechanism | 预算耗尽、timeout、压缩压力、停止不收敛、完成率 | 具体轮次、时间、压缩和停止策略是否合理 |
 
-这个对应是多对多的诊断索引，不是根因归属。例如连续重复调用同一 tool，可能是工具缺少
-批量参数，也可能是 prompt 未要求复用结果，或 loop 没有合适的缓存机制。Evaluator 只输出
-可复现的信号和证据，根因由对照实验或业务 Policy 确认。
+这个对应是多对多的诊断索引，不是根因归属。例如连续重复调用同一 tool 是 Signal；它可能暗示
+工具缺少批量参数、prompt 未要求复用结果，或 loop 没有合适的停止机制，这些候选解释记录为
+`hypotheses`。Evaluator 只输出可复现的现象、证据和假设，根因由对照实验或业务 Policy 确认。
 
 新的通用 Evaluator 应在 `evaluators/` 中按一种稳定信号一个实现沉淀；依赖行业工具清单、
 业务阶段或特定结果契约的判断留在 domain Evaluator。pipeline 可以包含多个 loop，跨 loop 的
@@ -150,16 +150,19 @@ trajectory_harness 持续沉淀可跨业务复用的 Evaluator，其信号可以
 - `score`：可选的归一化分数。
 - `measurements`：该轨迹上的原始数值。
 - `explanation / step_ids`：可读解释与证据锚点。
+- `signals`：Evaluator 观察到的零到多个现象；每个 Signal 包含稳定 `code`、`severity`、摘要、
+  `step_ids` 证据及可能原因 `hypotheses`。
 
 `not_applicable` 不按 0 分处理；Evaluator 异常使用 `status=error`，属于评估执行健康，不是
 轨迹质量。Harness 不默认加权不同 Evaluator 的 score；如业务需要准入门槛或综合分，应显式
 提供 Policy。
 
 Failure 与 Evaluator 判定是两条独立轴：`Step.failure / ExecutionResult.failure` 只记录运行时
-已经发生的失败事实；Evaluator 发现的行为模式只写入 `EvaluationResult`。存在改进可能但尚不能
-判错时使用 `verdict=warning`；业务契约明确认为该行为不合格时使用 `verdict=fail`。这里不使用
-`verdict=error`，因为 `status=error` 专门表示 Evaluator 自身执行异常。报告分别展示 Failure 与
-Evaluator 结果，不能把 warning/fail 反写成轨迹 Failure。
+已经发生的失败事实；Evaluator 发现的行为模式写入 `EvaluationResult.signals`，可能原因只是
+Hypothesis，不是已确认 Issue。存在改进可能但尚不能判错时使用 `verdict=warning`；业务契约明确
+认为该行为不合格时使用 `verdict=fail`。这里不使用 `verdict=error`，因为 `status=error` 专门表示
+Evaluator 自身执行异常。报告分别展示 Failure 与 Evaluator 结果，不能把 warning/fail 反写成
+轨迹 Failure。
 
 Failure 在评估前已经由 Loader 确定，Evaluator 不修改它。EvaluationRun 把 Failure、Trajectory
 身份和 Dataset 重新连接，既可聚合“哪些 slice 的 `llm.request.timeout` 比例更高”，也可在报告中
