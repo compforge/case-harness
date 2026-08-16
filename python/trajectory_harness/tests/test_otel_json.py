@@ -189,6 +189,9 @@ def test_preserves_nested_agent_workflow_step_tree(tmp_path):
     trajectory = OTelJsonLoader().load(path)[0]
     steps = {step.step_id: step for step in trajectory.steps}
 
+    assert len(steps) == 5
+    assert "workflow-1" in steps
+    assert steps["workflow-1"].name == "unit_review"
     assert steps["planner"].parent_step_id == "workflow-1"
     assert steps["planner-model"].parent_step_id == "planner"
     assert steps["executor"].parent_step_id == "workflow-1"
