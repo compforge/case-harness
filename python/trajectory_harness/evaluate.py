@@ -10,6 +10,7 @@ from trajectory_harness.model import Trajectory
 EvaluatorKind = Literal["common", "domain"]
 EvaluationStatus = Literal["evaluated", "not_applicable", "error"]
 Verdict = Literal["pass", "fail", "warning"]
+SignalSeverity = Literal["info", "warning", "error"]
 MetricDirection = Literal["higher_is_better", "lower_is_better", "neutral"]
 Aggregation = Literal["mean", "p50", "p95"]
 Measurement = float | int | bool
@@ -39,8 +40,28 @@ class EvaluatorSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class DiagnosticSignal:
+    """One observed pattern and the problems it may indicate."""
+
+    code: str
+    severity: SignalSeverity
+    summary: str
+    step_ids: tuple[str, ...] = ()
+    hypotheses: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict:
+        return {
+            "code": self.code,
+            "severity": self.severity,
+            "summary": self.summary,
+            "step_ids": list(self.step_ids),
+            "hypotheses": list(self.hypotheses),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluationResult:
-    """One evaluator's conclusion and raw measurements for one trajectory."""
+    """One evaluator's conclusion, measurements, and diagnostic signals."""
 
     evaluator_id: str
     status: EvaluationStatus
@@ -49,6 +70,7 @@ class EvaluationResult:
     measurements: dict[str, Measurement] = field(default_factory=dict)
     explanation: str = ""
     step_ids: tuple[str, ...] = ()
+    signals: tuple[DiagnosticSignal, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -59,6 +81,7 @@ class EvaluationResult:
             "measurements": dict(self.measurements),
             "explanation": self.explanation,
             "step_ids": list(self.step_ids),
+            "signals": [signal.to_dict() for signal in self.signals],
         }
 
 

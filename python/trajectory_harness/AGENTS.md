@@ -2,8 +2,9 @@
 
 ## 项目定位与边界
 
-trajectory_harness 评估 agent 的**决策与行动序列**：是否反复调用同一工具、绕路、遗漏必要
-步骤，或在某一步做了错误决定。它不替代 eval_harness 的最终回答质量评分，也不替代
+trajectory_harness 评估 agent/workflow 的**决策与行动序列**：是否反复调用同一工具、绕路、
+遗漏必要步骤，或在某一步做了错误决定。一条 Trajectory 可以是单个 agent loop，也可以是多个
+loop 与确定性操作构成的 pipeline。它不替代 eval_harness 的最终回答质量评分，也不替代
 trace_harness 对物理 span、耗时与错误传播的归因。
 
 外部 session / trace 先经 `TrajectoryLoader` 投影为稳定的 `Trajectory`，Evaluator 只消费
@@ -16,7 +17,7 @@ trace_harness 对物理 span、耗时与错误传播的归因。
 trajectory_harness/
 ├── model.py             # Trajectory / Step / Failure / ExecutionResult
 ├── loaders/             # 外部记录 → Trajectory；base 契约 + OTel JSON 默认实现
-├── evaluate.py          # EvaluatorSpec / EvaluationResult 与 evaluate 编排函数
+├── evaluate.py          # EvaluatorSpec / EvaluationResult / DiagnosticSignal 与编排函数
 ├── metrics.py           # DatasetRef / EvaluationRun / Metric 与通用聚合
 ├── report.py            # 轨迹领域 Report 构建与 HTML 入口
 ├── evaluators/          # 确定性与模型 evaluator；一个文件一种判定
@@ -29,10 +30,18 @@ trajectory_harness/
   但核心模型不依赖某个 OTel SDK 或仍在演进的生成类型。
 - **只有 Loader 知道来源格式**：session/OTLP/框架私有字段止于 Loader；Evaluator 只读
   `Trajectory`。
+- **多阶段仍是 Step tree**：`parent_step_id` 保留 agent/workflow 的执行层级；领域 Evaluator
+  通过 `operation / name / attributes` 选择子树，通用模型不引入 Stage。
 - **Failure 是执行事实**：具体操作失败放在 `Step.failure`，最终主要失败放在
   `ExecutionResult.failure`；分类使用 `kind / phase / error_type` 三个正交维度。
+- **Evaluator 信号不回填 Failure**：`EvaluationResult` 是 Evaluator 的执行结果，行为线索写入
+  `signals`，并用 `hypotheses` 表达可能原因；业务契约不合格使用 `verdict=fail`，`status=error`
+  只表示 Evaluator 自身异常。
 - **Evaluator 统一输出证据**：无法适用和 Evaluator 自身报错通过 `status` 表达，不能伪装为
-  0 分；`verdict / score / measurements / explanation / step_ids` 分别承载判定、测量和证据。
+  0 分；`verdict / score / measurements` 承载整体判定和测量，Signal 用自己的 `step_ids` 锚定
+  现象证据。
+- **通用 Evaluator 沉淀信号**：围绕 system prompt、tool set 和 loop mechanism 积累可复用
+  的行为信号，但不把信号直接归因到某一组成；业务契约和跨 loop 编排由 domain Evaluator 负责。
 - **Metric 只表示批量聚合**：单轨迹的原始值叫 Measurement；Metric 必须属于一个
   `EvaluationRun + DatasetRef`，才能跨版本和时间比较。
 - **HTML 由 trajectory_harness 对外提供**：本包决定 Dataset、Failure、Evaluator、Metric

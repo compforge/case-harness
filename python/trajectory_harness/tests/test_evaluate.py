@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from trajectory_harness import (
     EvaluationResult,
+    DiagnosticSignal,
     EvaluatorSpec,
     ExecutionResult,
     ExecutionSuccessEvaluator,
@@ -54,14 +55,28 @@ def test_repeated_tool_call_evaluator_returns_measurements_and_evidence():
     evaluation = evaluate(trajectory, [RepeatedToolCallEvaluator()])
 
     result = evaluation.results[0]
-    assert result.score == 0.667
-    assert result.verdict == "fail"
+    assert result.score is None
+    assert result.verdict == "warning"
     assert result.measurements == {
         "tool_call_count": 3,
         "repeated_call_count": 1,
         "repeated_call_rate": 0.333,
     }
     assert result.step_ids == ("s3",)
+    assert result.signals == (
+        DiagnosticSignal(
+            code="repeated_tool_call",
+            severity="warning",
+            summary="1 of 3 tool calls repeat an earlier tool name and arguments.",
+            step_ids=("s3",),
+            hypotheses=(
+                "The tool may be missing a batch operation.",
+                "The tool description may not encourage batching or result reuse.",
+                "The agent loop may lack an effective repeat-call stopping strategy.",
+            ),
+        ),
+    )
+    assert result.to_dict()["signals"][0]["step_ids"] == ["s3"]
 
 
 def test_evaluator_is_not_applicable_when_trajectory_has_no_tool_calls():
@@ -115,7 +130,8 @@ def test_model_round_tool_calls_are_fallback_when_tool_spans_are_absent():
 
     result = RepeatedToolCallEvaluator().evaluate(trajectory)
 
-    assert result.score == 0.5
+    assert result.score is None
+    assert result.verdict == "warning"
     assert result.step_ids == ("s2",)
 
 

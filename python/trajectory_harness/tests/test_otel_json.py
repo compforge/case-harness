@@ -125,6 +125,81 @@ def test_promotes_message_attributes_from_events(tmp_path):
     assert trajectory.steps[0].output_messages[0]["parts"][0]["content"] == "done"
 
 
+def test_preserves_nested_agent_workflow_step_tree(tmp_path):
+    spans = [
+        {
+            "traceId": "trace-1",
+            "spanId": "workflow-1",
+            "name": "unit review",
+            "startTimeUnixNano": "0",
+            "endTimeUnixNano": "10000000",
+            "attributes": [
+                _attr("gen_ai.operation.name", "invoke_workflow"),
+                _attr("gen_ai.workflow.name", "unit_review"),
+            ],
+        },
+        {
+            "traceId": "trace-1",
+            "spanId": "planner",
+            "parentSpanId": "workflow-1",
+            "name": "plan",
+            "startTimeUnixNano": "1000000",
+            "endTimeUnixNano": "4000000",
+            "attributes": [
+                _attr("gen_ai.operation.name", "invoke_agent"),
+                _attr("gen_ai.agent.name", "planner"),
+            ],
+        },
+        {
+            "traceId": "trace-1",
+            "spanId": "planner-model",
+            "parentSpanId": "planner",
+            "name": "chat",
+            "startTimeUnixNano": "2000000",
+            "endTimeUnixNano": "3000000",
+            "attributes": [_attr("gen_ai.operation.name", "chat")],
+        },
+        {
+            "traceId": "trace-1",
+            "spanId": "executor",
+            "parentSpanId": "workflow-1",
+            "name": "execute",
+            "startTimeUnixNano": "5000000",
+            "endTimeUnixNano": "9000000",
+            "attributes": [
+                _attr("gen_ai.operation.name", "invoke_agent"),
+                _attr("gen_ai.agent.name", "executor"),
+            ],
+        },
+        {
+            "traceId": "trace-1",
+            "spanId": "executor-model",
+            "parentSpanId": "executor",
+            "name": "chat",
+            "startTimeUnixNano": "6000000",
+            "endTimeUnixNano": "8000000",
+            "attributes": [_attr("gen_ai.operation.name", "chat")],
+        },
+    ]
+    path = tmp_path / "trace.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(span) for span in spans) + "\n", encoding="utf-8"
+    )
+
+    trajectory = OTelJsonLoader().load(path)[0]
+    steps = {step.step_id: step for step in trajectory.steps}
+
+    assert len(steps) == 5
+    assert "workflow-1" in steps
+    assert steps["workflow-1"].name == "unit_review"
+    assert steps["planner"].parent_step_id == "workflow-1"
+    assert steps["planner-model"].parent_step_id == "planner"
+    assert steps["executor"].parent_step_id == "workflow-1"
+    assert steps["executor-model"].parent_step_id == "executor"
+    assert steps["planner"].name == "planner"
+    assert steps["executor"].name == "executor"
+
+
 def test_normalizes_otel_error_type_on_the_failed_operation(tmp_path):
     path = tmp_path / "trace.jsonl"
     path.write_text(

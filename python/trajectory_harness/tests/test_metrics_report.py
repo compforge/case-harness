@@ -83,6 +83,8 @@ def test_html_report_contains_catalog_failures_and_categorical_trends():
     assert "Weekly trajectory quality" in html
     assert "execution_success" in html
     assert "timeout" in html
+    assert "trajectory-candidate" in html
+    assert "APITimeoutError" in html
     assert '"type": "time"' in html
     assert "2026-08-01T00:00:00+00:00" in html
     assert "2026-08-03T00:00:00+00:00" in html
