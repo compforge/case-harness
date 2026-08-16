@@ -18,7 +18,9 @@ from trajectory_harness.evaluators.tool_success import (
 )
 from trajectory_harness.failures import LLMErrorType as LLMErrorType
 from trajectory_harness.failures import LLMFailurePhase as LLMFailurePhase
+from trajectory_harness.failures import LLMTimeoutPhase as LLMTimeoutPhase
 from trajectory_harness.failures import llm_failure as llm_failure
+from trajectory_harness.failures import llm_timeout as llm_timeout
 from trajectory_harness.loaders.base import TrajectoryLoader as TrajectoryLoader
 from trajectory_harness.loaders.otel_json import OTelJsonLoader as OTelJsonLoader
 from trajectory_harness.metrics import DatasetRef as DatasetRef

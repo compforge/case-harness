@@ -55,11 +55,13 @@ operations. `Step.parent_step_id` preserves that execution hierarchy; domain eva
 the relevant subtrees through step `operation`, `name`, and `attributes`. The common model does
 not introduce a separate stage abstraction.
 
-Recurring LLM failures use the shared `llm_failure(phase, error_type)` constructor.
-Its common phases are `routing`, `request`, and `response_parse`; common error types
-include `timeout`, `rate_limit`, `client_error`, `server_error`, `network_error`,
-`invalid_response`, and `unknown`. Loaders still own source-specific parsing and may
-use open strings for domain-specific tool, agent, and workflow failures.
+Recurring LLM failures use the shared `llm_failure(phase, error_type)` constructor;
+`llm_timeout(phase)` narrows timeouts to observed boundaries such as `connect`,
+`first_chunk`, or `inter_chunk`. Use `request` when a non-streaming source exposes only
+an overall deadline. Common error types include `timeout`, `rate_limit`, `client_error`,
+`server_error`, `network_error`, `invalid_response`, and `unknown`. Loaders still own
+source-specific parsing and may use open strings for domain-specific tool, agent, and
+workflow failures.
 
 Common evaluators ship with the Harness. Domain evaluators use the same contract and set
 `EvaluatorSpec.kind="domain"` plus their owner. Evaluators produce per-trajectory
