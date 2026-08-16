@@ -16,6 +16,7 @@ trace_harness 对物理 span、耗时与错误传播的归因。
 ```
 trajectory_harness/
 ├── model.py             # Trajectory / Step / Failure / ExecutionResult
+├── failures.py          # LLM 等通用低基数 Failure taxonomy 与构造函数
 ├── loaders/             # 外部记录 → Trajectory；base 契约 + OTel JSON 默认实现
 ├── evaluate.py          # EvaluatorSpec / EvaluationResult / DiagnosticSignal 与编排函数
 ├── metrics.py           # DatasetRef / EvaluationRun / Metric 与通用聚合

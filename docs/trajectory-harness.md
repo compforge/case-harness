@@ -84,10 +84,37 @@ Failure(
 )
 ```
 
-常见 LLM 失败由 `llm_failure(phase, error_type)` 统一构造。公共 phase 为
-`routing / request / response_parse`，公共 error type 包括 `timeout / rate_limit /
-client_error / server_error / network_error / invalid_response / unknown`。Harness
+常见 LLM 失败由 `llm_failure(phase, error_type)` 统一构造，timeout 可用
+`llm_timeout(phase)` 缩窄到已观测的请求进度边界。公共 error type 包括 `timeout /
+rate_limit / client_error / server_error / network_error / invalid_response / unknown`。Harness
 只拥有稳定词汇，不猜测 provider 错误文本；原始错误到 Failure 的分类仍由 Loader 完成。
+
+LLM timeout phase 使用客户端可观测的边界，不反推服务端内部根因：
+
+| phase | 含义 |
+|-------|------|
+| `routing` | 路由、端点选择或多次 attempt 共享的总预算耗尽 |
+| `connection_pool` | 未在时限内取得客户端连接池连接 |
+| `connect` | DNS / TCP / TLS 等建连过程超时 |
+| `request_write` | 请求 header/body 尚未写完 |
+| `first_chunk` | 流式请求写完后，首个非空响应 chunk 未在时限内到达 |
+| `inter_chunk` | 已收到输出后，下一个响应 chunk 未在时限内到达 |
+| `request` | 整体 request/route deadline 耗尽，而来源无法提供更细进度 |
+
+`first_chunk` 对齐 OpenTelemetry 客户端的
+[`gen_ai.client.operation.time_to_first_chunk`](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/gen-ai/gen-ai-metrics.md)；
+HTTP 传输层的 pool/connect/write/read 划分与
+[HTTPX timeout](https://www.python-httpx.org/advanced/timeouts/) 一致。已经开始流式输出后的“无进展”
+对应 [inter-chunk latency（ICL）](https://docs.nvidia.com/aiperf/reference/ai-perf-metrics-reference)
+的观测边界以及 Envoy 的
+[`per_try_idle_timeout`](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/route/v3/route_components.proto.html)
+语义。
+
+TTFT、ITL/TPOT 和 end-to-end latency 是 Measurement，不是天然的 Failure 类型。TTFT 包含网络、
+排队、prefill 和首 token 生成；ITL/TPOT 是输出 token 间延迟的聚合值。只有调用方对这些
+边界实际执行 deadline 时，才产生 `first_chunk` 或 `inter_chunk` timeout Failure；“TPOT 偏高”
+本身应由 Evaluator 输出 Measurement/Signal。vLLM 服务端进一步暴露 queue、prefill 和 decode 时间，
+这些数据可作为 Step attributes 帮助归因，但客户端 Loader 不应凭 TTFT 猜测其中哪一段超时。
 
 分类维度保持正交：
 
