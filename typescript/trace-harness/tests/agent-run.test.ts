@@ -1,0 +1,197 @@
+import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  agentRunSnapshot,
+  createAgentRunIR,
+  genAiSpecs,
+  normalizeJaegerSpans,
+  TraceHarness,
+  type AgentRunIR,
+  type TraceContext,
+} from "../src";
+
+function fixtureDocuments(): Array<Record<string, unknown>> {
+  const path = resolve(import.meta.dir, "../../../conformance/trace/fixtures/genai-basic.jsonl");
+  return readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+}
+
+class FixtureAgentRunExtractor {
+  extract(context: TraceContext): AgentRunIR {
+    const byName = new Map(context.nodes.map((node) => [node.name, node]));
+    const agent = byName.get("invoke_agent main")!;
+    const planner = byName.get("chat planner")!;
+    const tool = byName.get("execute_tool web_search")!;
+    const synth = byName.get("chat synth")!;
+    return createAgentRunIR(context.trace_id, [{
+      id: "run-main",
+      name: "main-agent",
+      start_ms: agent.start_ms,
+      duration_ms: agent.duration_ms,
+      status: "error",
+      attributes: {},
+      source_node_ids: [agent.node_id],
+      items: [{
+        kind: "operation",
+        id: "initialize-1",
+        name: "run.initialize",
+        start_ms: agent.start_ms,
+        duration_ms: 100,
+        status: "completed",
+        attributes: {},
+        source_node_ids: [agent.node_id],
+      }, {
+        kind: "agent-turn",
+        id: "turn-plan",
+        name: "Plan and search",
+        start_ms: planner.start_ms,
+        duration_ms: 4750,
+        status: "",
+        attributes: {},
+        source_node_ids: [],
+        items: [{
+          kind: "model-call",
+          id: "model-plan",
+          name: "planner",
+          model: "model-alpha-seed-2",
+          start_ms: planner.start_ms,
+          duration_ms: planner.duration_ms,
+          status: "completed",
+          input: [{ role: "user", content: "Find a source" }],
+          output: { tool_calls: [{ name: "web_search" }] },
+          attributes: { input_tokens: 1820, output_tokens: 640 },
+          source_node_ids: [planner.node_id],
+        }, {
+          kind: "tool-call",
+          id: "tool-search",
+          name: "web_search",
+          tool_call_id: "call-search-1",
+          start_ms: tool.start_ms,
+          duration_ms: tool.duration_ms,
+          status: "completed",
+          input: { query: "example" },
+          output: { matches: 1 },
+          attributes: {},
+          source_node_ids: [tool.node_id],
+        }, {
+          kind: "operation",
+          id: "compact-1",
+          name: "context.compact",
+          start_ms: 1700000004800,
+          duration_ms: 50,
+          status: "completed",
+          input: { messages: 12 },
+          output: { messages: 4 },
+          attributes: {},
+          source_node_ids: [agent.node_id],
+        }],
+      }, {
+        kind: "operation",
+        id: "checkpoint-1",
+        name: "framework.checkpoint",
+        start_ms: 1700000004850,
+        duration_ms: 25,
+        status: "completed",
+        attributes: {},
+        source_node_ids: [agent.node_id],
+      }, {
+        kind: "agent-turn",
+        id: "turn-answer",
+        name: "Answer",
+        start_ms: 1700000004875,
+        duration_ms: 2525,
+        status: "",
+        attributes: {},
+        source_node_ids: [],
+        items: [{
+          kind: "operation",
+          id: "wrap-up-1",
+          name: "turn.wrap_up",
+          start_ms: 1700000004875,
+          duration_ms: 25,
+          status: "completed",
+          attributes: {},
+          source_node_ids: [agent.node_id],
+        }, {
+          kind: "model-call",
+          id: "model-answer",
+          name: "synthesizer",
+          model: "model-alpha-seed-2",
+          start_ms: synth.start_ms,
+          duration_ms: synth.duration_ms,
+          status: "error",
+          input: [{ role: "user", content: "Answer with the source" }],
+          attributes: {},
+          source_node_ids: [synth.node_id],
+        }],
+      }, {
+        kind: "operation",
+        id: "finalize-1",
+        name: "run.finalize",
+        start_ms: 1700000007400,
+        duration_ms: 600,
+        status: "completed",
+        attributes: {},
+        source_node_ids: [agent.node_id],
+      }],
+    }]);
+  }
+}
+
+describe("AgentRun IR", () => {
+  const harness = () => new TraceHarness({
+    specs: genAiSpecs(),
+    agentRunExtractor: new FixtureAgentRunExtractor(),
+  });
+
+  test("matches the shared AgentRun IR conformance case", async () => {
+    const instance = harness();
+    const context = instance.assemble(normalizeJaegerSpans(fixtureDocuments()));
+    const expected = await Bun.file(new URL(
+      "../../../conformance/trace/cases/genai-basic.agent-run.json",
+      import.meta.url,
+    )).json();
+
+    expect(agentRunSnapshot(instance.extractAgentRuns(context)!)).toEqual(expected);
+  });
+
+  test("renders the extracted turns, calls, and operations", () => {
+    const instance = harness();
+    const context = instance.assemble(normalizeJaegerSpans(fixtureDocuments()));
+    const html = instance.renderInteractive(context, instance.diagnose(context));
+
+    expect(html).toContain('data-perspective="agent"');
+    expect(html).toContain("agent-run:run-main");
+    expect(html).toContain("run.initialize");
+    expect(html).toContain("context.compact");
+    expect(html).toContain("turn.wrap_up");
+    expect(html).toContain("framework.checkpoint");
+    expect(html).toContain("run.finalize");
+  });
+
+  test("hides the Agent view when no extractor is contributed", () => {
+    const instance = new TraceHarness({ specs: genAiSpecs() });
+    const context = instance.assemble(normalizeJaegerSpans(fixtureDocuments()));
+
+    expect(instance.renderInteractive(context)).not.toContain('data-perspective="agent"');
+  });
+
+  test("rejects source references outside the node tree", () => {
+    const instance = new TraceHarness({
+      specs: genAiSpecs(),
+      agentRunExtractor: {
+        extract: (context) => createAgentRunIR(context.trace_id, [{
+          id: "broken",
+          name: "broken",
+          start_ms: 0,
+          duration_ms: 0,
+          source_node_ids: ["missing-node"],
+          items: [],
+        }]),
+      },
+    });
+    const context = instance.assemble(normalizeJaegerSpans(fixtureDocuments()));
+
+    expect(() => instance.extractAgentRuns(context)).toThrow("unknown node IDs");
+  });
+});

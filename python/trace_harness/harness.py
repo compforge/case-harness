@@ -20,10 +20,12 @@ from trace_harness.feature.feature import Feature
 from trace_harness.feature.registry import FeatureRegistry
 from trace_harness.ingest.assemble import assemble as assemble_spans
 from trace_harness.ingest.sources.jaeger_file import load_jaeger_file
+from trace_harness.model.agent import AgentRunIR, validate_agent_run_ir
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Finding, Node
 from trace_harness.model.span import NormSpan
 from trace_harness.model.spec import KindSpec, SpecSet
+from trace_harness.model.viewtree import NodeTreeExtractor
 from trace_harness.view.engine import render as render_display_tree
 from trace_harness.view.engine import render_callstack as render_callstack_view
 from trace_harness.view.engine import render_md as render_markdown
@@ -41,6 +43,7 @@ class TraceContributions:
     features: tuple[Feature, ...] = field(default_factory=tuple)
     detectors: tuple[Detector, ...] = field(default_factory=tuple)
     facets: tuple[Facet, ...] = field(default_factory=tuple)
+    agent_run_extractor: NodeTreeExtractor[AgentRunIR] | None = None
 
 
 def merge_trace_contributions(*items: TraceContributions) -> TraceContributions:
@@ -50,6 +53,10 @@ def merge_trace_contributions(*items: TraceContributions) -> TraceContributions:
         features=tuple(feature for item in items for feature in item.features),
         detectors=tuple(detector for item in items for detector in item.detectors),
         facets=tuple(facet for item in items for facet in item.facets),
+        agent_run_extractor=next(
+            (item.agent_run_extractor for item in items if item.agent_run_extractor is not None),
+            None,
+        ),
     )
 
 
@@ -91,6 +98,12 @@ class TraceHarness:
             registry=self.features,
         )
 
+    def extract_agent_runs(self, context: TraceContext) -> AgentRunIR | None:
+        extractor = self.contributions.agent_run_extractor
+        if extractor is None:
+            return None
+        return validate_agent_run_ir(extractor.extract(context), context)
+
     def render_display(
         self,
         context: TraceContext,
@@ -115,6 +128,7 @@ class TraceHarness:
             findings,
             facet_registry=self.facets,
             feature_registry=self.features,
+            agent_run_ir=self.extract_agent_runs(context),
         )
 
     def render_md(

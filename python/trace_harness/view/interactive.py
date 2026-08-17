@@ -1,9 +1,8 @@
 """交互式 trace 页面——菜单 + 功能区，单文件零网络，trace 深看的人用视图。
 
-页面有两个正交维度，共享同一棵 Node Tree：
-- perspective：完整 / Agent，决定看什么；
-- layout：调用栈 / 火焰图，决定怎么画。调用栈是左树右详情，火焰图是时间轴 icicle，
-  点任意 cell 跳回调用栈并选中该 node（自动展开祖先链）
+页面有两个正交维度：
+- perspective：完整 Node Tree / 业务提取的 AgentRun IR，决定看什么；
+- layout：调用栈 / 火焰图，决定怎么画。调用栈是左树右详情，火焰图是时间轴 icicle。
 
 HTML 只此一个交互页：非交互的 HTML 无保留价值（要静态/可粘贴版用 md），故旧的
 view/html.py（report_kit 静态表格）已删。**刻意不走 report_kit**——交互能力超出中立文档 IR
@@ -27,8 +26,10 @@ import json
 from trace_harness.feature import lazy_features
 from trace_harness.feature.builtins import BUILTIN_FEATURES
 from trace_harness.feature.registry import FeatureRegistry
+from trace_harness.model.agent import AgentRunIR
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Finding, Node
+from trace_harness.view.agent_run import agent_run_roots
 from trace_harness.view.display import DisplayNode
 from trace_harness.view.engine import render as _engine_render
 from trace_harness.view.facet import RenderConfig
@@ -157,7 +158,8 @@ nav.switch button.active{background:#2563eb;color:#fff}
 .tw{display:inline-block;width:14px;color:#9ca3af;cursor:pointer;text-align:center;flex:none}
 .kind{font-size:10px;border-radius:3px;padding:0 5px;flex:none;color:#fff;background:#9ca3af}
 .kind.agent{background:#7c3aed}.kind.framework{background:#2563eb}.kind.model-call{background:#059669}
-.kind.tool-call{background:#d97706}.kind.action{background:#0891b2}.kind.node{background:#2563eb}
+.kind.tool-call{background:#d97706}.kind.action,.kind.operation{background:#0891b2}.kind.node{background:#2563eb}
+.kind.agent-run{background:#7c3aed}.kind.agent-turn{background:#4f46e5}
 .kind.service{background:#6b7280}
 .dur{color:#6b7280;flex:none}
 .brief{color:#0d9488;font-size:11px;overflow:hidden;text-overflow:ellipsis}
@@ -192,8 +194,8 @@ dl.attrs dd{margin:2px 0 0;background:#fff;border:1px solid #e5e7eb;border-radiu
 _JS = """
 const TREES=__TREES__,SPANS=__SPANS__;
 const SEV={error:'✗',warn:'▲',info:'·'};
-const KCOLOR={agent:'#7c3aed',framework:'#2563eb',node:'#2563eb','model-call':'#059669',
-  'tool-call':'#d97706',action:'#0891b2',service:'#6b7280'};
+const KCOLOR={agent:'#7c3aed','agent-run':'#7c3aed','agent-turn':'#4f46e5',framework:'#2563eb',
+  node:'#2563eb','model-call':'#059669','tool-call':'#d97706',action:'#0891b2',operation:'#0891b2',service:'#6b7280'};
 const treeEl=document.getElementById('tree'),paneEl=document.getElementById('pane');
 let perspective='full',layout='tree',tree=TREES.full,selectedId=location.hash.slice(1);
 let byId={},parentOf={},boxOf={},twOf={},flameBuilt=false;
@@ -352,24 +354,24 @@ def render_interactive(
     *,
     facet_registry: FacetRegistry | None = None,
     feature_registry: FeatureRegistry | None = None,
+    agent_run_ir: AgentRunIR | None = None,
 ) -> str:
     """渲染为单文件交互 HTML（菜单：调用栈=左树右详情 / 火焰图）。findings 为 diagnose 输出，可省。"""
     findings = findings or {}
     facet_registry = facet_registry or FacetRegistry(builtin_facets())
     feature_registry = feature_registry or FeatureRegistry(BUILTIN_FEATURES)
     byid = {n.node_id: n for n in ctx.nodes}
-    # 同一棵 Node Tree 经不同 perspective 生成 DisplayNode；layout 在前端独立选择 tree/flame。
-    trees_payload = {}
-    for perspective in ("full", "agent"):
-        roots = _engine_render(
-            ctx.view(),
-            findings,
-            registry=facet_registry,
-            config=RenderConfig(perspective=perspective),
-        )
-        trees_payload[perspective] = {
-            "roots": [_disp_payload(ctx, d, byid, feature_registry) for d in roots]
-        }
+    roots = _engine_render(
+        ctx.view(),
+        findings,
+        registry=facet_registry,
+        config=RenderConfig(perspective="full"),
+    )
+    trees_payload = {
+        "full": {"roots": [_disp_payload(ctx, d, byid, feature_registry) for d in roots]}
+    }
+    if agent_run_ir is not None and agent_run_ir.runs:
+        trees_payload["agent"] = {"roots": agent_run_roots(ctx, agent_run_ir, findings)}
     referenced = {sid for n in ctx.nodes for sid in n.span_ids}
     spans_payload = {sid: _span_payload(ctx, sid) for sid in referenced if sid in ctx.spans}
 
@@ -380,13 +382,16 @@ def render_interactive(
     js = _JS.replace("__TREES__", _embed(trees_payload)).replace("__SPANS__", _embed(spans_payload))
     title = html_mod.escape(ctx.trace_id)
     n_err = sum(1 for n in ctx.nodes if n.has_error)
+    agent_button = (
+        '<button data-perspective="agent">Agent</button>' if "agent" in trees_payload else ""
+    )
     return f"""<!doctype html>
 <html lang="zh"><head><meta charset="utf-8">
 <title>trace {title}</title>
 <style>{_CSS}</style></head>
 <body>
 <header><h1>trace <b>{title}</b> · {len(ctx.nodes)} nodes / {len(ctx.spans)} spans · errors {n_err}</h1>
-<nav class="switch"><span>侧重点</span><button data-perspective="full" class="active">完整</button><button data-perspective="agent">Agent</button></nav>
+<nav class="switch"><span>侧重点</span><button data-perspective="full" class="active">完整</button>{agent_button}</nav>
 <nav class="switch"><span>形态</span><button data-layout="tree" class="active">调用栈</button><button data-layout="flame">火焰图</button></nav>
 <button id="expand">全部展开</button><button id="fold">全部折叠</button></header>
 <div class="wrap" id="view-stack">

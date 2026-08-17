@@ -4,10 +4,12 @@ import { DetectorRegistry, type Detector } from "./analyze/registry";
 import { builtinFeatures, lazyFeatures, type Feature } from "./feature";
 import { FeatureRegistry } from "./feature/registry";
 import { assemble } from "./ingest/assemble";
+import { validateAgentRunIR, type AgentRunIR } from "./model/agent";
 import type { TraceContext } from "./model/context";
 import type { Finding, Node } from "./model/node";
 import type { NormSpan } from "./model/span";
 import { SpecSet, type KindSpec } from "./model/spec";
+import type { NodeTreeExtractor } from "./model/viewtree";
 import type { DisplayNode } from "./view/display";
 import { renderDisplay } from "./view/engine";
 import type { Facet, RenderConfig } from "./view/facet";
@@ -20,6 +22,7 @@ export interface TraceContributions {
   features?: Iterable<Feature>;
   detectors?: Iterable<Detector>;
   facets?: Iterable<Facet>;
+  agentRunExtractor?: NodeTreeExtractor<AgentRunIR>;
 }
 
 export function mergeTraceContributions(...items: TraceContributions[]): TraceContributions {
@@ -28,6 +31,7 @@ export function mergeTraceContributions(...items: TraceContributions[]): TraceCo
     features: items.flatMap((item) => [...(item.features ?? [])]),
     detectors: items.flatMap((item) => [...(item.detectors ?? [])]),
     facets: items.flatMap((item) => [...(item.facets ?? [])]),
+    agentRunExtractor: items.find((item) => item.agentRunExtractor)?.agentRunExtractor,
   };
 }
 
@@ -71,6 +75,11 @@ export class TraceHarness {
     );
   }
 
+  extractAgentRuns(context: TraceContext): AgentRunIR | undefined {
+    const extractor = this.contributions.agentRunExtractor;
+    return extractor ? validateAgentRunIR(extractor.extract(context), context) : undefined;
+  }
+
   renderDisplay(
     context: TraceContext,
     findings: Record<string, Finding[]> = {},
@@ -86,6 +95,7 @@ export class TraceHarness {
     return renderInteractive(context, findings, {
       featureRegistry: this.features,
       facetRegistry: this.facets,
+      agentRunIR: this.extractAgentRuns(context),
     });
   }
 }

@@ -54,7 +54,7 @@ describe("Python trace_harness parity fixture", () => {
     expect(html).toContain("调用栈");
     expect(html).toContain("火焰图");
     expect(html).toContain('data-perspective="full"');
-    expect(html).toContain('data-perspective="agent"');
+    expect(html).not.toContain('data-perspective="agent"');
     expect(html).toContain('data-layout="tree"');
     expect(html).toContain('data-layout="flame"');
     expect(html).toContain("chat planner");

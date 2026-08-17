@@ -17,8 +17,8 @@ Python runtime 的环境中完成 trace 建模与渲染。规范、IR schema 与
 1. `Node` 是分析本体，父子树只在 view 阶段构建。
 2. 只有 `KindSpec.matches/claims` 改变结构；Feature、diagnose 和 render 不得 re-parent。
 3. 通用包不写具体业务域知识；业务通过 scoped `TraceContributions` 贡献
-   spec、Feature、Detector 和 Facet，不依赖模块导入副作用。Facet 只声明 brief/layout，
-   不接管树递归和输出序列化。
+   spec、Feature、Detector、Facet 和 `agentRunExtractor`，不依赖模块导入副作用。
+   Extractor 从完整 Node Tree 产出 AgentRun IR；不接管树递归和输出序列化。
 4. Python 与 TypeScript 的公开 IR 字段保持同名，便于 fixture 与产物交叉验证。
 
 ## References

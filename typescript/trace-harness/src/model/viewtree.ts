@@ -1,4 +1,10 @@
 import type { Node } from "./node";
+import type { TraceContext } from "./context";
+
+export interface NodeTreeExtractor<T> {
+  /** Deterministically extract one concern-specific IR from the complete node tree. */
+  extract(context: TraceContext): T;
+}
 
 export class ViewTree {
   readonly roots: Node[];

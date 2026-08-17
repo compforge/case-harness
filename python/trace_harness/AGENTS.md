@@ -29,6 +29,7 @@ trace_harness/
 │   ├── spec.py       #   KindSpec(matches/claims/build + metrics/rules/obs_hole + project) + SpecSet + merge
 │   ├── context.py    #   TraceContext：单 trace 建模单元(内存事实源)，dispatch 挂这；view() 惰性建树
 │   ├── viewtree.py   #   视图期惰性索引(仅渲染/火焰/最近祖先用，分析侧从不持树)
+│   ├── agent.py      #   AgentRun IR + 校验/序列化；Operation 可按真实归属进 AgentRun 或 AgentTurn
 │   └── ir.py         #   TraceView + nodes.json dump/load：模型的可序列化形态(渲染面契约·域无关)
 ├── kinds/            # 唯一领域代码(通用 genai；域专属 AS kinds 留消费方，spec.merge 叠加)
 │   ├── base.py       #   generic 残余 spec + duration 基线度量
@@ -52,6 +53,7 @@ trace_harness/
 │   ├── engine.py     #   render(view,findings)→DisplayNode + 序列化 to_md_lines/render_md/render_callstack：dispatch facet·执行 ChildOp·finding 按 node_id 绑(折叠上浮)；signal-aware collapse(信号免疫·≥error 浮出) + 同构 Group 合并 ×N
 │   ├── display.py    #   DisplayNode：脱 ctx/kind 的显示树(md/html/treecli 共用)
 │   ├── perspective.py #  同一 DisplayNode 树的 full/agent 侧重点投影；上下文路径压缩但不改 Node 父子边
+│   ├── agent_run.py  #   AgentRun IR → 通用交互层级 payload，保留 Node/span 溯源
 │   ├── facets/       #   harness 通用 facet：Service / Agent / ToolCall / ModelCall(默认 Hide http 子)；biz facet 随域包显式贡献
 │   ├── callstack.py  #   findings_block + render_callstack(legacy 无 facet 原样树)；md/show/html 已切 engine·facet
 │   ├── explore.py    #   render_explore：treecli 渲染核(缩略图 + expand + 同构兄弟折叠)
@@ -73,6 +75,7 @@ source ─ingest───→ NormSpan 集
        ─feature──→ node 树（+ eager Feature 烤 facts，结构不变）  ← 至此 node 树 / nodes.json 完整
        ─diagnose→ findings（可选；按 node_id 挂 node）
        ─render──→ facet 分派 → DisplayNode → text / html / treecli
+       ─extract─→ NodeTreeExtractor<AgentRunIR> → AgentRun renderer
 跨 trace：corpus 把多个 node 树拍成三表 + 算子（contrast / signature / fleet）。
 ```
 
@@ -100,6 +103,8 @@ corpus parquet 走可选 extra `case-harness[trace-corpus]`（pyarrow），缺�
   biz 的折叠手柄、可展开虚拟节点，且**折叠对信号免疫**（≥error 自动浮出，绝不藏问题）。
 - **biz 可定展示意图、不可另造 renderer**：域包通过 `TraceContributions.facets` 声明 node 的
   brief/layout；树遍历、DisplayNode 组装、Finding 绑定和 text/HTML 序列化由统一 engine 完成。
+- **AgentRun 是第二层 IR**：域包通过 `agent_run_extractor` 从完整 Node Tree 提取
+  run/turn/model/tool/operation；trace_harness 负责 IR 校验和渲染，不内置任何 Agent Framework 的分轮或关联猜测。
 
 ## References
 
