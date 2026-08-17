@@ -11,11 +11,36 @@ import { builtinFacets } from "./facets";
 import { FacetRegistry } from "./registry";
 
 const ATTR_TRUNCATE = 4000;
+const JSON_DECODE_LIMIT = 4;
 
 function htmlEscape(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
   })[char]!);
+}
+
+function structuredJson(value: unknown): unknown | undefined {
+  let candidate = value;
+  for (let depth = 0; depth < JSON_DECODE_LIMIT && typeof candidate === "string"; depth += 1) {
+    const text = candidate.trim();
+    if (!text) return undefined;
+    try {
+      candidate = JSON.parse(text) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+  return candidate !== null && typeof candidate === "object" ? candidate : undefined;
+}
+
+function attrPayload(value: unknown): Record<string, unknown> {
+  const json = structuredJson(value);
+  if (json !== undefined) return { kind: "json", value: json };
+  let text = typeof value === "string" ? value : (JSON.stringify(value) ?? String(value));
+  if (text.length > ATTR_TRUNCATE) {
+    text = `${text.slice(0, ATTR_TRUNCATE)}\n…[已截断，共 ${text.length} 字符；完整原文按 span_id 下钻]`;
+  }
+  return { kind: "text", value: text };
 }
 
 function displayPayload(
@@ -94,13 +119,9 @@ function displayPayload(
 
 function spanPayload(context: TraceContext, spanId: string): Record<string, unknown> {
   const span = context.spans.get(spanId)!;
-  const attrs = Object.fromEntries(Object.entries(span.attrs).map(([key, value]) => {
-    let text = typeof value === "string" ? value : JSON.stringify(value);
-    if (text.length > ATTR_TRUNCATE) {
-      text = `${text.slice(0, ATTR_TRUNCATE)}\n…[已截断，共 ${text.length} 字符；完整原文按 span_id 下钻]`;
-    }
-    return [key, text];
-  }));
+  const attrs = Object.fromEntries(
+    Object.entries(span.attrs).map(([key, value]) => [key, attrPayload(value)]),
+  );
   return {
     service: span.service ?? "",
     operation: span.name,
@@ -131,7 +152,8 @@ nav.switch button.active{background:#2563eb;color:#fff}
 table.facts{border-collapse:collapse;margin-bottom:14px}table.facts td{border:1px solid #e5e7eb;padding:3px 10px;font-size:12px}table.facts td:first-child{background:#f9fafb;color:#374151}
 .feat{margin:0 0 10px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;overflow:hidden}.feat-h{display:flex;justify-content:space-between;align-items:center;padding:5px 10px;font-size:12px;background:#f9fafb;color:#374151;cursor:pointer}.feat-body{margin:0;padding:8px 10px;font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow:auto;display:none}.feat.open .feat-body{display:block}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}.chip{font-size:11px;border:1px solid #d1d5db;border-radius:4px;padding:2px 8px;cursor:pointer;background:#fff}.chip.sel{background:#e0edff;border-color:#3b82f6}.chip.errc{border-color:#dc2626;color:#b91c1c}.tag{color:#6b7280}
-dl.attrs{margin:0}dl.attrs dt{font-size:11px;color:#6b7280;margin-top:10px}dl.attrs dd{margin:2px 0 0;background:#fff;border:1px solid #e5e7eb;border-radius:4px;padding:6px 8px;white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:340px;overflow:auto}
+dl.attrs{margin:0}dl.attrs dt{font-size:11px;color:#6b7280;margin-top:10px}dl.attrs dd{margin:2px 0 0;background:#fff;border:1px solid #e5e7eb;border-radius:4px;padding:6px 8px;white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:340px;overflow:auto}dl.attrs dd.json{white-space:normal;word-break:normal;padding:7px 10px}
+.json-node>summary{cursor:pointer;display:list-item;color:#6b7280;white-space:nowrap}.json-node>summary:hover{color:#111827}.json-children{margin-left:7px;padding-left:13px;border-left:1px solid #e5e7eb}.json-leaf{display:flex;align-items:baseline;gap:5px;min-width:0}.json-key{color:#1d4ed8}.json-string{color:#047857;white-space:pre-wrap;word-break:break-word}.json-number{color:#7c3aed}.json-boolean{color:#b45309}.json-null{color:#9ca3af}.json-count{color:#9ca3af;font-size:10px;margin-left:5px}
 .faxis{position:relative;height:18px;color:#6b7280;font-size:10px;border-bottom:1px solid #e5e7eb;margin-bottom:6px}.faxis span{position:absolute;transform:translateX(-50%);white-space:nowrap}.flame{position:relative}
 .fcell{position:absolute;height:18px;border-radius:2px;font-size:10px;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:1px 4px;cursor:pointer;border:1px solid rgba(255,255,255,.55)}.fcell:hover{filter:brightness(1.18)}.fcell.err{box-shadow:inset 0 0 0 2px #dc2626}
 .empty{padding:24px;color:#6b7280;font-size:12px}
@@ -149,9 +171,13 @@ const tw=document.createElement('span');tw.className='tw';tw.textContent=n.child
 function facts(n){const rows=Object.entries(n.facts||{});return rows.length?'<table class="facts">'+rows.map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+esc(v)+'</td></tr>').join('')+'</table>':'';}
 function findings(n){const marks={error:'✗',warn:'▲',info:'·'};return(n.findings||[]).length?'<div class="findings">'+n.findings.map(f=>'<div class="f-'+esc(f.severity)+'">'+(marks[f.severity]||'·')+' ['+esc(f.source)+'] '+esc(f.note)+'</div>').join('')+'</div>':'';}
 function features(n){const rows=Object.entries(n.features||{});return rows.length?'<div class="meta">特征：</div>'+rows.map(([k,v])=>'<div class="feat"><div class="feat-h">'+esc(k)+'</div><pre class="feat-body">'+esc(v)+'</pre></div>').join(''):'';}
+function jsonContainer(v){return v!==null&&typeof v==='object';}
+function jsonScalar(v){const value=document.createElement('span');if(v===null){value.className='json-null';value.textContent='null';}else if(typeof v==='string'){value.className='json-string';value.textContent=JSON.stringify(v);}else{value.className='json-'+typeof v;value.textContent=String(v);}return value;}
+function jsonTree(value,label,depth){const details=document.createElement('details');details.className='json-node';details.open=depth===0;const summary=document.createElement('summary');if(label!==undefined){const key=document.createElement('span');key.className='json-key';key.textContent=JSON.stringify(String(label))+': ';summary.appendChild(key);}const array=Array.isArray(value),keys=Object.keys(value),shape=document.createElement('span');shape.textContent=array?'[…]':'{…}';summary.appendChild(shape);const count=document.createElement('span');count.className='json-count';count.textContent=array?keys.length+' items':keys.length+' fields';summary.appendChild(count);details.appendChild(summary);let rendered=false;const render=()=>{if(rendered)return;rendered=true;const children=document.createElement('div');children.className='json-children';for(const key of keys){const child=value[key];if(jsonContainer(child)){children.appendChild(jsonTree(child,array?Number(key):key,depth+1));continue;}const line=document.createElement('div');line.className='json-leaf';const name=document.createElement('span');name.className='json-key';name.textContent=(array?key:JSON.stringify(key))+':';line.append(name,jsonScalar(child));children.appendChild(line);}details.appendChild(children);};if(details.open)render();details.addEventListener('toggle',()=>{if(details.open)render();});return details;}
+function attrValue(payload){const dd=document.createElement('dd');if(payload&&payload.kind==='json'&&jsonContainer(payload.value)){dd.className='json';dd.appendChild(jsonTree(payload.value,undefined,0));}else{dd.textContent=payload&&payload.kind==='text'?payload.value:String(payload??'');}return dd;}
 function unfold(id){let p=parentOf[id];while(p){const b=boxOf[p];if(b&&b.style.display==='none'){b.style.display='';twOf[p].textContent='▾';}p=parentOf[p];}}
 function select(id){document.querySelectorAll('.row.sel').forEach(r=>r.classList.remove('sel'));unfold(id);const row=document.querySelector('.row[data-id="'+CSS.escape(id)+'"]');if(row){row.classList.add('sel');row.scrollIntoView({block:'nearest'});}const n=byId[id];if(!n)return;selectedId=id;location.hash=id;paneEl.innerHTML='<h2>'+esc(n.name)+'</h2><div class="meta">'+esc(n.kind)+' · '+fmtMs(n.duration_ms)+(n.service?' · '+esc(n.service):'')+(n.has_error?' · <b style="color:#dc2626">ERROR：'+esc(n.error)+'</b>':'')+'</div>'+findings(n)+facts(n)+features(n)+'<div class="meta">溯源 span（'+n.span_ids.length+'）：</div><div class="chips">'+n.span_ids.map(sid=>'<span class="chip'+((n.error_span_ids||[]).includes(sid)?' errc':'')+'" data-sid="'+esc(sid)+'">'+(sid===n.primary_span_id?'primary':'卫星')+' · '+esc((SPANS[sid]||{}).operation||sid)+'</span>').join('')+'</div><div id="attrs"></div>';paneEl.querySelectorAll('.chip').forEach(c=>c.onclick=()=>showSpan(c.dataset.sid));paneEl.querySelectorAll('.feat-h').forEach(h=>h.onclick=()=>h.parentElement.classList.toggle('open'));const sid=(n.error_span_ids||[])[0]||n.primary_span_id;if(sid)showSpan(sid);else document.getElementById('attrs').innerHTML='<div class="meta">视图压缩节点，无独立 span</div>';}
-function showSpan(sid){paneEl.querySelectorAll('.chip').forEach(c=>c.classList.toggle('sel',c.dataset.sid===sid));const sp=SPANS[sid],box=document.getElementById('attrs');if(!sp){box.innerHTML='<div class="meta">span 不在快照内</div>';return;}box.innerHTML='<div class="meta">span '+esc(sid)+' · '+esc(sp.operation)+' · '+fmtMs(sp.duration_ms)+'</div><dl class="attrs">'+Object.entries(sp.attrs).map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd>').join('')+'</dl>';}
+function showSpan(sid){paneEl.querySelectorAll('.chip').forEach(c=>c.classList.toggle('sel',c.dataset.sid===sid));const sp=SPANS[sid],box=document.getElementById('attrs');box.replaceChildren();if(!sp){const missing=document.createElement('div');missing.className='meta';missing.textContent='span 不在快照内';box.appendChild(missing);return;}const meta=document.createElement('div');meta.className='meta';meta.textContent='span '+sid+' · '+sp.operation+' · '+fmtMs(sp.duration_ms);box.appendChild(meta);const attrs=document.createElement('dl');attrs.className='attrs';for(const [key,value] of Object.entries(sp.attrs)){const name=document.createElement('dt');name.textContent=key;attrs.append(name,attrValue(value));}box.appendChild(attrs);}
 function firstError(ns){for(const n of ns){if(n.has_error&&n.kind)return n.node_id;const child=firstError(n.children);if(child)return child;}return null;}
 function firstReal(ns){for(const n of ns){if(n.kind)return n.node_id;const child=firstReal(n.children);if(child)return child;}return null;}
 function renderTree(){tree=TREES[perspective]||{roots:[]};treeEl.replaceChildren();byId={};parentOf={};boxOf={};twOf={};flameBuilt=false;tree.roots.forEach(r=>treeEl.appendChild(renderInto(r,0,null)));if(!tree.roots.length){treeEl.innerHTML='<div class="empty">当前侧重点没有可展示节点</div>';paneEl.innerHTML='<div class="empty">切换到“完整”查看全部节点</div>';if(layout==='flame')buildFlame();return;}const wanted=selectedId&&byId[selectedId]?selectedId:null;select(wanted||firstError(tree.roots)||firstReal(tree.roots)||tree.roots[0].node_id);if(layout==='flame')buildFlame();}

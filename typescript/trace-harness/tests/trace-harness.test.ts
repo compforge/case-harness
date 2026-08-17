@@ -61,6 +61,27 @@ describe("Python trace_harness parity fixture", () => {
     expect(html).toContain("http_status");
     expect(html).toContain("errors 2");
   });
+
+  test("renders object and stringified JSON attributes as trees with text fallback", () => {
+    const documents = fixtureDocuments();
+    const tags = documents[0]!.tags as Array<Record<string, unknown>>;
+    tags.push(
+      { key: "json.object", value: { nested: [1, true, null] } },
+      { key: "json.encoded", value: JSON.stringify({ answer: "ok" }) },
+      { key: "json.double_encoded", value: JSON.stringify(JSON.stringify({ answer: "ok" })) },
+      { key: "text.plain", value: "not json" },
+    );
+
+    const context = assemble(normalizeJaegerSpans(documents), genAiSpecs());
+    const html = renderInteractive(context);
+
+    expect(html).toContain('"json.object":{"kind":"json","value":{"nested":[1,true,null]}}');
+    expect(html).toContain('"json.encoded":{"kind":"json","value":{"answer":"ok"}}');
+    expect(html).toContain('"json.double_encoded":{"kind":"json","value":{"answer":"ok"}}');
+    expect(html).toContain('"text.plain":{"kind":"text","value":"not json"}');
+    expect(html).toContain("function jsonTree(value,label,depth)");
+    expect(html).toContain("json-children");
+  });
 });
 
 describe("trace perspectives", () => {
