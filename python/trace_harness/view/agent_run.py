@@ -122,7 +122,7 @@ def _turn_payload(
 ) -> dict[str, Any]:
     children = [_item_payload(context, item, findings) for item in turn.items]
     sources = turn.source_node_ids or tuple(
-        dict.fromkeys(node_id for item in turn.items for node_id in item.source_node_ids)
+        dict.fromkeys(node_id for item in turn.items for node_id in _item_sources(item))
     )
     return {
         "node_id": f"agent-turn:{turn.id}",

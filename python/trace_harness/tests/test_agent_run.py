@@ -20,6 +20,7 @@ from trace_harness import (
 )
 from trace_harness.ingest.sources.jaeger_file import load_jaeger_file
 from trace_harness.kinds import genai
+from trace_harness.view.agent_run import agent_run_roots
 
 ROOT = Path(__file__).parents[3]
 RAW = ROOT / "conformance" / "trace" / "fixtures" / "genai-basic.jsonl"
@@ -217,6 +218,52 @@ def test_interactive_agent_view_is_owned_by_agent_run_renderer():
     assert "tool-search" in html
     assert "agent-run:run-worker" in html
     assert "worker-model" in html
+
+
+def test_turn_source_fallback_includes_nested_operation_sources():
+    harness = _harness()
+    context = harness.assemble(load_jaeger_file(RAW))
+    agent = next(node for node in context.nodes if node.name == "invoke_agent main")
+    nested = Operation(
+        id="nested",
+        name="nested",
+        start_ms=agent.start_ms,
+        duration_ms=1,
+        source_node_ids=(agent.node_id,),
+    )
+    ir = AgentRunIR(
+        trace_id=context.trace_id,
+        runs=(
+            AgentRun(
+                id="run",
+                name="run",
+                start_ms=agent.start_ms,
+                duration_ms=1,
+                items=(
+                    AgentTurn(
+                        id="turn",
+                        name="turn",
+                        start_ms=agent.start_ms,
+                        duration_ms=1,
+                        items=(
+                            Operation(
+                                id="outer",
+                                name="outer",
+                                start_ms=agent.start_ms,
+                                duration_ms=1,
+                                operations=(nested,),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    turn = agent_run_roots(context, ir, {})[0]["children"][0]
+
+    assert turn["facts"]["source_nodes"] == agent.node_id
+    assert turn["span_ids"] == list(agent.span_ids)
 
 
 def test_interactive_hides_agent_view_without_an_extractor():
