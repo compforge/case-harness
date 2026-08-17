@@ -77,10 +77,10 @@ def test_render_interactive_via_engine_smoke():
     from trace_harness.view.interactive import render_interactive
 
     h = render_interactive(_ctx())
-    # 交互页也走 engine 的 DisplayNode（facet 折叠）+ 保留交互 JS（折叠/展开）+ 双视图
+    # 交互页也走 engine 的 DisplayNode（facet 折叠）+ 保留交互 JS（折叠/展开）。
     assert h.startswith("<!doctype html>")
     assert "renderInto" in h and "调用栈" in h and "火焰图" in h
-    assert 'data-perspective="full"' in h and 'data-perspective="agent"' in h
+    assert 'data-perspective="full"' in h and 'data-perspective="agent"' not in h
     assert 'data-layout="tree"' in h and 'data-layout="flame"' in h
 
 

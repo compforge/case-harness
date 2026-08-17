@@ -7,14 +7,15 @@
 ## 0. 作用域与扩展边界
 
 `TraceHarness` 是一套 trace 分析配置的作用域 owner；每个实例独立持有
-specs / features / detectors / facets。业务包或 Plugin 对外提供
+specs / features / detectors / facets / agent_run_extractor。业务包或 Plugin 对外提供
 `TraceContributions`，Host 在构造 harness 时显式合并。因此 import 顺序、包管理器
 hoist 结果、bundle 中是否出现两份 harness，都不再决定业务语义。
 
-四类贡献的分工是：spec/feature 把各业务 span 标准化为统一 Analysis IR；detector 在 IR
+五类贡献的分工是：spec/feature 把各业务 span 标准化为统一 Analysis IR；detector 在 IR
 上产出 Finding；facet 只声明该业务的展示意图（哪些 node 是骨架、哪些折叠/分组、行摘要
-是什么）。树递归、DisplayNode 组装、Finding 上色和 text/HTML 序列化始终由 harness 的
-统一 renderer 执行，业务不能替换整套渲染算法。
+是什么）；`agent_run_extractor` 作为 NodeTree 上的业务语义 pass，产出 AgentRun IR。
+树递归、DisplayNode 组装、Finding 上色、AgentRun IR 校验和 text/HTML 序列化始终由
+harness 执行，业务不能替换整套渲染算法。
 
 `TraceContributions` 只承载确定性扩展；probe 会写 evidence，仍是 Host 在
 `diagnose(..., probes=True)` 调用点显式开启，不随 Plugin 导入自动执行。
@@ -87,6 +88,8 @@ trace 时机器自动指出的已知原因越多，人和模型只处理注册�
   list[Node] + 父子边     —— node = 1..N 物理 span 熔成的一次逻辑调用，带命名 facts 列
   TraceContext（nodes 事实 + lazy 原文池 + specs 注册表 + evidence_dir）
   tree 只是 render/flame 要递归时按父子边「视图期惰性重建」的辅助索引，不是必经层
+  NodeTreeExtractor<AgentRunIR> 由业务识别 run/turn/call/operation，通用包不猜框架语义
+  AgentRun IR → 统一 renderer（可回溯 source_node_ids 与 span）
         ↓
 【node 流水线 · 开放注册】
   四类判读生产者 → Finding 流：spec.rules / 拓扑 detectors / outlier+trend / probes(落盘证据)
@@ -130,8 +133,10 @@ KindSpec（semantic bundle）
 | Node | **分析本体**：逻辑事件 = 1..N 个物理 span（primary + 卫星）熔成的一次逻辑调用，贫血 dataclass，带命名 facts 列（"度量填值 / 原文填指针"二分）+ parent 边 |
 | facts 列 | KindSpec.build 从 raw 抽出的、已命名的轻量度量——业务字段隔离边界，下游只见列名 |
 | Tree | **视图期惰性索引**，仅 render/flame/最近祖先等递归场景按父子边现搭；非分析必经层、非中心对象 |
-| TraceHarness | scoped 分析执行器；独立持有 specs/features/detectors/facets，并执行统一 render policy |
-| TraceContributions | 业务包或 Plugin 显式贡献的 IR 标准化、detect 与声明式 render 扩展集 |
+| NodeTreeExtractor | 从完整 Node Tree 中确定性提取某个关注面 IR 的业务 pass |
+| AgentRun IR | `AgentRun.items = AgentTurn / Operation`，`AgentTurn.items = ModelCall / ToolCall / Operation` 的 agent 语义中间表示 |
+| TraceHarness | scoped 分析执行器；独立持有 contributions，并执行 IR 校验与统一 render policy |
+| TraceContributions | 业务包或 Plugin 显式贡献的 IR 标准化、detect、关注面提取与声明式 render 扩展集 |
 | TraceContext | 一次分析的承载对象：nodes 事实 + lazy 原文池 + specs + 运行时 |
 | Finding | 统一的判读输出：node_id + source + severity + note（错误/离群/趋势/拓扑/probe 同流），render 读 Finding 上色 |
 | KindSpec | 一个 kind 的语义包（≈ Canopy feature lambda 的载体），三 facet；注册进 SpecSet |
@@ -149,6 +154,7 @@ KindSpec（semantic bundle）
 cli single <trace_id|file> [--series kind:metric] [--curl span] [--html out]
   → Source.fetch → build_context（不自动判读）
   → harness.diagnose(ctx, probes=…)   # 按需；probe 是唯一有副作用的环节，默认关
+  → harness.extract_agent_runs(ctx)       # 有业务 extractor 时产出 AgentRun IR
   → harness.render_* / render_series
 ```
 

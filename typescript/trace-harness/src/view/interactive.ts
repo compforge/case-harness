@@ -1,9 +1,11 @@
 import { lazyFeatures } from "../feature";
 import { builtinFeatures } from "../feature/builtins";
 import { FeatureRegistry } from "../feature/registry";
+import type { AgentRunIR } from "../model/agent";
 import type { TraceContext } from "../model/context";
 import type { Finding, Node } from "../model/node";
 import type { DisplayNode } from "./display";
+import { agentRunRoots } from "./agent-run";
 import { renderDisplay } from "./engine";
 import { builtinFacets } from "./facets";
 import { FacetRegistry } from "./registry";
@@ -122,7 +124,7 @@ nav.switch button.active{background:#2563eb;color:#fff}
 .pane{flex:1;overflow:auto;padding:16px}.row{white-space:nowrap;cursor:pointer;font-size:12px;padding:2px 8px;border-left:3px solid transparent;display:flex;align-items:baseline;gap:6px}
 .row:hover{background:#f1f5f9}.row.sel{background:#e0edff;border-left-color:#3b82f6}.row.err{color:#b91c1c}.row.err.sel{background:#fee2e2;border-left-color:#dc2626}
 .tw{display:inline-block;width:14px;color:#9ca3af;cursor:pointer;text-align:center;flex:none}.kind{font-size:10px;border-radius:3px;padding:0 5px;flex:none;color:#fff;background:#9ca3af}
-.kind.agent{background:#7c3aed}.kind.framework,.kind.node{background:#2563eb}.kind.model-call{background:#059669}.kind.tool-call{background:#d97706}.kind.action{background:#0891b2}.kind.service{background:#6b7280}
+.kind.agent,.kind.agent-run{background:#7c3aed}.kind.agent-turn{background:#4f46e5}.kind.framework,.kind.node{background:#2563eb}.kind.model-call{background:#059669}.kind.tool-call{background:#d97706}.kind.action,.kind.operation{background:#0891b2}.kind.service{background:#6b7280}
 .dur{color:#6b7280;flex:none}.brief{color:#0d9488;font-size:11px;overflow:hidden;text-overflow:ellipsis}.errdot{color:#dc2626;font-weight:bold;flex:none}
 .pane h2{font-size:14px;margin:0 0 4px}.meta{color:#6b7280;font-size:12px;margin-bottom:12px}.findings{margin:0 0 14px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:4px;background:#fff}
 .findings div{font-size:12px;margin:2px 0}.findings .f-error{color:#b91c1c}.findings .f-warn{color:#b45309}.findings .f-info{color:#6b7280}
@@ -136,7 +138,7 @@ dl.attrs{margin:0}dl.attrs dt{font-size:11px;color:#6b7280;margin-top:10px}dl.at
 `;
 
 const SCRIPT = String.raw`
-const TREES=__TREES__,SPANS=__SPANS__,KCOLOR={agent:'#7c3aed',framework:'#2563eb',node:'#2563eb','model-call':'#059669','tool-call':'#d97706',action:'#0891b2',service:'#6b7280'};
+const TREES=__TREES__,SPANS=__SPANS__,KCOLOR={agent:'#7c3aed','agent-run':'#7c3aed','agent-turn':'#4f46e5',framework:'#2563eb',node:'#2563eb','model-call':'#059669','tool-call':'#d97706',action:'#0891b2',operation:'#0891b2',service:'#6b7280'};
 const treeEl=document.getElementById('tree'),paneEl=document.getElementById('pane');
 let perspective='full',layout='tree',tree=TREES.full,selectedId=location.hash.slice(1);
 let byId={},parentOf={},boxOf={},twOf={},flameBuilt=false;
@@ -168,18 +170,21 @@ export function renderInteractive(
   options: {
     featureRegistry?: FeatureRegistry;
     facetRegistry?: FacetRegistry;
+    agentRunIR?: AgentRunIR;
   } = {},
 ): string {
   const featureRegistry = options.featureRegistry ?? new FeatureRegistry(builtinFeatures());
   const facetRegistry = options.facetRegistry ?? new FacetRegistry(builtinFacets());
   const byId = new Map(context.nodes.map((node) => [node.node_id, node]));
-  const trees = Object.fromEntries((["full", "agent"] as const).map((perspective) => [
-    perspective,
-    {
-      roots: renderDisplay(context.view(), findings, facetRegistry, { perspective })
+  const trees: Record<string, { roots: Array<Record<string, unknown>> }> = {
+    full: {
+      roots: renderDisplay(context.view(), findings, facetRegistry, { perspective: "full" })
         .map((root) => displayPayload(context, root, byId, featureRegistry)),
     },
-  ]));
+  };
+  if (options.agentRunIR?.runs.length) {
+    trees.agent = { roots: agentRunRoots(context, options.agentRunIR, findings) };
+  }
   const referenced = new Set(context.nodes.flatMap((node) => node.span_ids));
   const spans = Object.fromEntries(
     [...referenced].filter((spanId) => context.spans.has(spanId)).map((spanId) => [spanId, spanPayload(context, spanId)]),
@@ -188,9 +193,10 @@ export function renderInteractive(
   const script = SCRIPT.replace("__TREES__", embed(trees)).replace("__SPANS__", embed(spans));
   const title = htmlEscape(context.trace_id);
   const errorCount = context.nodes.filter((node) => node.has_error).length;
+  const agentButton = trees.agent ? '<button data-perspective="agent">Agent</button>' : "";
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>trace ${title}</title><style>${CSS}</style></head>
 <body><header><h1>trace <b>${title}</b> · ${context.nodes.length} nodes / ${context.spans.size} spans · errors ${errorCount}</h1>
-<nav class="switch"><span>侧重点</span><button data-perspective="full" class="active">完整</button><button data-perspective="agent">Agent</button></nav>
+<nav class="switch"><span>侧重点</span><button data-perspective="full" class="active">完整</button>${agentButton}</nav>
 <nav class="switch"><span>形态</span><button data-layout="tree" class="active">调用栈</button><button data-layout="flame">火焰图</button></nav><button id="expand">全部展开</button><button id="fold">全部折叠</button></header>
 <div class="wrap" id="view-stack"><div class="tree" id="tree"></div><div class="pane" id="pane"></div></div>
 <div id="view-flame"><div class="faxis" id="faxis"></div><div class="flame" id="flame"></div></div><script>${script}</script></body></html>\n`;

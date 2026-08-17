@@ -9,8 +9,20 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 
 from trace_harness.model.node import Node
+
+if TYPE_CHECKING:
+    from trace_harness.model.context import TraceContext
+
+T_co = TypeVar("T_co", covariant=True)
+
+
+class NodeTreeExtractor(Protocol, Generic[T_co]):
+    """A deterministic pass that extracts one concern-specific IR from a complete node tree."""
+
+    def extract(self, context: TraceContext) -> T_co: ...
 
 
 def iter_nodes(nodes: list[Node]) -> Iterator[Node]:

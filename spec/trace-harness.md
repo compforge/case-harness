@@ -20,6 +20,7 @@ One configured harness executes these stages in order:
 raw spans -> normalize -> assemble -> eager features -> diagnose -> render
                                       \-> lazy features on explicit demand
                                       \-> probes on explicit host demand
+                                      \-> NodeTreeExtractor -> AgentRun IR -> render
 ```
 
 1. `normalize` maps backend-specific span documents to `NormSpan` without assigning a semantic
@@ -34,7 +35,10 @@ raw spans -> normalize -> assemble -> eager features -> diagnose -> render
    declare presentation intent such as perspective level, row projection, and child layout; the
    harness owns traversal, display-tree construction, and output serialization. A renderer MAY
    expose lazy features in node details.
-5. A probe MAY write evidence, but MUST run only after the host explicitly enables it. Importing
+5. An `agent_run_extractor` MAY read the complete node tree and raw trace context, apply one
+   Agent Framework's correlation rules, and emit AgentRun IR. The harness validates and renders
+   the resulting IR; it MUST NOT guess framework-specific turn, tool, or operation semantics.
+6. A probe MAY write evidence, but MUST run only after the host explicitly enables it. Importing
    a package, constructing a harness, assembling, diagnosing without probes, and rendering MUST
    NOT create evidence files.
 
@@ -58,13 +62,47 @@ Implementations MUST order nodes by `(start_ms, node_id)` and findings by
 `(scope, ref, source, severity, note)` when producing the canonical JSON projection. Runtime
 collections do not otherwise need to use this order.
 
-## 4. Scoped composition
+## 4. AgentRun IR
+
+The canonical concern-specific projection is `trace-harness/agent-run@1`, defined by
+[`agent-run.schema.json`](../schema/trace/v1/agent-run.schema.json).
+
+```text
+AgentRun.items
+  ├─ Operation
+  └─ AgentTurn.items
+       ├─ ModelCall
+       ├─ ToolCall
+       └─ Operation
+```
+
+- `AgentRun` is one agent execution extracted from a broader node tree.
+- `AgentRun.items` preserves the order of turns and run-level operations before, between, or after
+  the agent loop.
+- `AgentTurn.items` preserves the order of model calls, tool calls, and turn-level operations.
+- `ModelCall` and `ToolCall` carry their structured input and output.
+- `Operation` represents known non-call work such as initialization, context compaction, wrap-up,
+  or finalization, and unknown framework extensions without forcing them into model or tool
+  semantics. It MAY belong directly to an `AgentRun` or to an `AgentTurn`.
+- `source_node_ids` preserve provenance and enable drill-down to the source node and spans.
+
+`NodeTreeExtractor<T>` is the deterministic transformation boundary from the complete in-memory
+node tree to one concern-specific IR. A domain package MAY contribute a
+`NodeTreeExtractor<AgentRunIR>`. Extractors own run and turn boundaries, model/tool correlation,
+operation naming, and any reconstruction from framework events. The harness owns IR validation,
+serialization, and rendering.
+
+AgentRun IDs, turn IDs, and operation/call IDs MUST be unique across one AgentRun IR. Runs,
+run items, and turn items MUST be ordered by `start_ms`; durations MUST be non-negative; every
+`source_node_ids` entry MUST reference a node in the source tree.
+
+## 5. Scoped composition
 
 `TraceHarness` is the state owner for one executable analysis configuration. It is reusable across
 traces and MUST isolate its configuration from every other harness instance.
 
 `TraceContributions` is the extension boundary used by a domain package or Plugin. It contains
-four pure extension slots:
+five pure extension slots:
 
 | Slot | Consumed by | Ordering rule |
 | --- | --- | --- |
@@ -72,33 +110,36 @@ four pure extension slots:
 | `features` | eager bake and lazy detail | first applicable producer of a name wins |
 | `detectors` | diagnose | declaration order within each post-order node |
 | `facets` | render | highest priority wins; declaration order breaks ties; an undefined perspective level falls through |
+| `agent_run_extractor` | AgentRun IR extraction | first contributed extractor wins |
 
 Built-in contributions are copied into each harness before consumer contributions. A contribution
 MUST NOT be installed by relying on module import side effects. Implementations MUST NOT expose an
 ambient mutable registry as a contribution mechanism.
 
-A facet MUST NOT replace the renderer or recurse through the analysis tree itself. This keeps
+A facet or AgentRun extractor MUST NOT replace the renderer. A facet MUST NOT recurse through the
+analysis tree itself. This keeps
 cross-domain presentation policy in the harness while still allowing each domain to state which
 nodes are primary, context, detail, summarized, grouped, or hidden. Findings remain renderer
 inputs, so generic and domain detectors can affect emphasis without implementing presentation
-code. The generic `agent` perspective treats GenAI `agent`, `model-call`, and `tool-call` nodes as
-primary; a domain facet MAY mark additional workflow-node kinds as primary or context.
+code. The generic node-tree `agent` perspective remains a structure-preserving DisplayNode view;
+it is not AgentRun IR and MUST NOT substitute for framework turn semantics.
 
 Merging contributions preserves declaration order. It does not execute them.
 
-## 5. Host and Plugin boundary
+## 6. Host and Plugin boundary
 
 A host MAY receive `TraceContributions` from a Plugin and combine them with generic contributions.
 The host remains responsible for data access and side effects.
 
-- A deterministic offline host such as `doctor trace` SHOULD use specs, features, detectors, and
-  facets, then emit Analysis IR or a report from the same scoped harness.
+- A deterministic offline host such as `doctor trace` SHOULD use specs, features, detectors,
+  facets, and any contributed AgentRun extractor, then emit IR or a report from the same scoped
+  harness.
 - An interactive investigation host MAY additionally expose lazy features such as `curl` or
   `messages`.
 - Evidence probes are host capabilities, not ambient Plugin contributions, and MUST be enabled at
   the call site.
 
-## 6. Conformance
+## 7. Conformance
 
 Shared fixtures live under [`conformance/trace`](../conformance/trace). Every implementation
 SHOULD:
@@ -108,5 +149,8 @@ SHOULD:
 3. compare its canonical Analysis IR exactly with the shared expected JSON;
 4. verify that features, detectors, facets, and lazy features contributed to one harness do not
    affect another harness in the same process.
+
+Implementations that expose AgentRun IR SHOULD also run the shared AgentRun conformance case and
+compare its canonical JSON exactly.
 
 Numeric JSON equality follows JSON number semantics; `8000` and `8000.0` are equivalent.
