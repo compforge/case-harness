@@ -23,5 +23,7 @@ Domain-specific behavior stays in the consumer and is passed explicitly as scope
 `TraceContributions` (`specs`, `features`, `detectors`, declarative `facets`, and an optional
 `agentRunExtractor`). The extractor implements `NodeTreeExtractor<AgentRunIR>` and owns the
 framework-specific run/turn/call correlation. The harness validates the AgentRun IR and owns both
-NodeTree and AgentRun rendering. The language-neutral contract is
+NodeTree and recursive AgentRun rendering, including nested operations and runs owned by a ToolCall
+or Operation.
+The language-neutral contract is
 [`spec/trace-harness.md`](../../spec/trace-harness.md).

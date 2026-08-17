@@ -22,10 +22,13 @@ export interface ModelCall extends TurnItemBase {
 export interface ToolCall extends TurnItemBase {
   kind: "tool-call";
   tool_call_id?: string;
+  agent_runs?: AgentRun[];
 }
 
 export interface Operation extends TurnItemBase {
   kind: "operation";
+  operations?: Operation[];
+  agent_runs?: AgentRun[];
 }
 
 export type TurnItem = ModelCall | ToolCall | Operation;
@@ -86,14 +89,71 @@ export function validateAgentRunIR(ir: AgentRunIR, context: TraceContext): Agent
       throw new Error(`${owner} has invalid duration_ms: ${durationMs}`);
     }
   };
-  let previousRunStart = Number.NEGATIVE_INFINITY;
-  for (const run of ir.runs) {
+  const within = (
+    parentOwner: string,
+    parentStartMs: number,
+    parentDurationMs: number,
+    childOwner: string,
+    childStartMs: number,
+    childDurationMs: number,
+  ) => {
+    if (childStartMs < parentStartMs || childStartMs + childDurationMs > parentStartMs + parentDurationMs) {
+      throw new Error(`${childOwner} falls outside ${parentOwner} time window`);
+    }
+  };
+  const checkRuns = (
+    owner: string,
+    runs: AgentRun[],
+    fieldName: string,
+    parentWindow?: [number, number],
+  ) => {
+    let previousStart = Number.NEGATIVE_INFINITY;
+    for (const run of runs) {
+      if (run.start_ms < previousStart) throw new Error(`${owner}.${fieldName} must be ordered by start_ms`);
+      previousStart = run.start_ms;
+      checkRun(run);
+      if (parentWindow) {
+        within(owner, ...parentWindow, `AgentRun ${run.id}`, run.start_ms, run.duration_ms);
+      }
+    }
+  };
+  const checkItem = (item: TurnItem) => {
+    if (itemIds.has(item.id)) throw new Error(`duplicate turn item id: ${item.id}`);
+    itemIds.add(item.id);
+    timing(`${item.kind} ${item.id}`, item.start_ms, item.duration_ms);
+    sourceRefs(`${item.kind} ${item.id}`, item.source_node_ids);
+    if (item.kind === "operation") {
+      let previousStart = Number.NEGATIVE_INFINITY;
+      for (const child of item.operations ?? []) {
+        if (child.start_ms < previousStart) {
+          throw new Error(`Operation ${item.id}.operations must be ordered by start_ms`);
+        }
+        previousStart = child.start_ms;
+        checkItem(child);
+        within(
+          `Operation ${item.id}`,
+          item.start_ms,
+          item.duration_ms,
+          `Operation ${child.id}`,
+          child.start_ms,
+          child.duration_ms,
+        );
+      }
+    }
+    if (item.kind === "tool-call" || item.kind === "operation") {
+      checkRuns(
+        `${item.kind} ${item.id}`,
+        item.agent_runs ?? [],
+        "agent_runs",
+        [item.start_ms, item.duration_ms],
+      );
+    }
+  };
+  const checkRun = (run: AgentRun) => {
     if (runIds.has(run.id)) throw new Error(`duplicate AgentRun id: ${run.id}`);
     runIds.add(run.id);
     timing(`AgentRun ${run.id}`, run.start_ms, run.duration_ms);
     sourceRefs(`AgentRun ${run.id}`, run.source_node_ids);
-    if (run.start_ms < previousRunStart) throw new Error("AgentRunIR.runs must be ordered by start_ms");
-    previousRunStart = run.start_ms;
     let previousRunItemStart = Number.NEGATIVE_INFINITY;
     for (const runItem of run.items) {
       if (runItem.start_ms < previousRunItemStart) {
@@ -101,10 +161,15 @@ export function validateAgentRunIR(ir: AgentRunIR, context: TraceContext): Agent
       }
       previousRunItemStart = runItem.start_ms;
       if (runItem.kind === "operation") {
-        if (itemIds.has(runItem.id)) throw new Error(`duplicate operation id: ${runItem.id}`);
-        itemIds.add(runItem.id);
-        timing(`operation ${runItem.id}`, runItem.start_ms, runItem.duration_ms);
-        sourceRefs(`operation ${runItem.id}`, runItem.source_node_ids);
+        checkItem(runItem);
+        within(
+          `AgentRun ${run.id}`,
+          run.start_ms,
+          run.duration_ms,
+          `operation ${runItem.id}`,
+          runItem.start_ms,
+          runItem.duration_ms,
+        );
         continue;
       }
       const turn = runItem;
@@ -112,19 +177,33 @@ export function validateAgentRunIR(ir: AgentRunIR, context: TraceContext): Agent
       turnIds.add(turn.id);
       timing(`AgentTurn ${turn.id}`, turn.start_ms, turn.duration_ms);
       sourceRefs(`AgentTurn ${turn.id}`, turn.source_node_ids);
+      within(
+        `AgentRun ${run.id}`,
+        run.start_ms,
+        run.duration_ms,
+        `AgentTurn ${turn.id}`,
+        turn.start_ms,
+        turn.duration_ms,
+      );
       let previousItemStart = Number.NEGATIVE_INFINITY;
       for (const item of turn.items) {
-        if (itemIds.has(item.id)) throw new Error(`duplicate turn item id: ${item.id}`);
-        itemIds.add(item.id);
-        timing(`${item.kind} ${item.id}`, item.start_ms, item.duration_ms);
-        sourceRefs(`${item.kind} ${item.id}`, item.source_node_ids);
         if (item.start_ms < previousItemStart) {
           throw new Error(`AgentTurn ${turn.id} items must be ordered by start_ms`);
         }
         previousItemStart = item.start_ms;
+        checkItem(item);
+        within(
+          `AgentTurn ${turn.id}`,
+          turn.start_ms,
+          turn.duration_ms,
+          `${item.kind} ${item.id}`,
+          item.start_ms,
+          item.duration_ms,
+        );
       }
     }
-  }
+  };
+  checkRuns("AgentRunIR", ir.runs, "runs");
   return ir;
 }
 
@@ -132,25 +211,29 @@ export function agentRunSnapshot(ir: AgentRunIR): Record<string, unknown> {
   return {
     schema: AGENT_RUN_SCHEMA,
     trace_id: ir.trace_id,
-    runs: ir.runs.map((run) => ({
-      id: run.id,
-      name: run.name,
-      start_ms: run.start_ms,
-      duration_ms: run.duration_ms,
-      status: run.status ?? "",
-      attributes: run.attributes ?? {},
-      source_node_ids: [...(run.source_node_ids ?? [])],
-      items: run.items.map((runItem) => runItem.kind === "operation" ? itemSnapshot(runItem) : ({
-        kind: runItem.kind,
-        id: runItem.id,
-        name: runItem.name ?? "",
-        start_ms: runItem.start_ms,
-        duration_ms: runItem.duration_ms,
-        status: runItem.status ?? "",
-        attributes: runItem.attributes ?? {},
-        source_node_ids: [...(runItem.source_node_ids ?? [])],
-        items: runItem.items.map(itemSnapshot),
-      })),
+    runs: ir.runs.map(runSnapshot),
+  };
+}
+
+function runSnapshot(run: AgentRun): Record<string, unknown> {
+  return {
+    id: run.id,
+    name: run.name,
+    start_ms: run.start_ms,
+    duration_ms: run.duration_ms,
+    status: run.status ?? "",
+    attributes: run.attributes ?? {},
+    source_node_ids: [...(run.source_node_ids ?? [])],
+    items: run.items.map((runItem) => runItem.kind === "operation" ? itemSnapshot(runItem) : ({
+      kind: runItem.kind,
+      id: runItem.id,
+      name: runItem.name ?? "",
+      start_ms: runItem.start_ms,
+      duration_ms: runItem.duration_ms,
+      status: runItem.status ?? "",
+      attributes: runItem.attributes ?? {},
+      source_node_ids: [...(runItem.source_node_ids ?? [])],
+      items: runItem.items.map(itemSnapshot),
     })),
   };
 }
@@ -168,6 +251,13 @@ function itemSnapshot(item: TurnItem): Record<string, unknown> {
     attributes: item.attributes ?? {},
     source_node_ids: [...(item.source_node_ids ?? [])],
     ...(item.kind === "model-call" ? { model: item.model ?? null } : {}),
-    ...(item.kind === "tool-call" ? { tool_call_id: item.tool_call_id ?? null } : {}),
+    ...(item.kind === "tool-call" ? {
+      tool_call_id: item.tool_call_id ?? null,
+      agent_runs: (item.agent_runs ?? []).map(runSnapshot),
+    } : {}),
+    ...(item.kind === "operation" ? {
+      operations: (item.operations ?? []).map(itemSnapshot),
+      agent_runs: (item.agent_runs ?? []).map(runSnapshot),
+    } : {}),
   };
 }

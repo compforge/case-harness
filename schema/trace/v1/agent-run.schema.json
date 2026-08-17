@@ -41,7 +41,7 @@
       "type": "object",
       "required": [
         "kind", "id", "name", "start_ms", "duration_ms", "status", "input", "output",
-        "attributes", "source_node_ids", "tool_call_id"
+        "attributes", "source_node_ids", "tool_call_id", "agent_runs"
       ],
       "properties": {
         "kind": {"const": "tool-call"},
@@ -54,7 +54,8 @@
         "output": {},
         "attributes": {"$ref": "#/$defs/attributes"},
         "source_node_ids": {"$ref": "#/$defs/source_node_ids"},
-        "tool_call_id": {"type": ["string", "null"]}
+        "tool_call_id": {"type": ["string", "null"]},
+        "agent_runs": {"type": "array", "items": {"$ref": "#/$defs/agent_run"}}
       },
       "additionalProperties": false
     },
@@ -62,7 +63,7 @@
       "type": "object",
       "required": [
         "kind", "id", "name", "start_ms", "duration_ms", "status", "input", "output",
-        "attributes", "source_node_ids"
+        "attributes", "source_node_ids", "operations", "agent_runs"
       ],
       "properties": {
         "kind": {"const": "operation"},
@@ -74,7 +75,9 @@
         "input": {},
         "output": {},
         "attributes": {"$ref": "#/$defs/attributes"},
-        "source_node_ids": {"$ref": "#/$defs/source_node_ids"}
+        "source_node_ids": {"$ref": "#/$defs/source_node_ids"},
+        "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
+        "agent_runs": {"type": "array", "items": {"$ref": "#/$defs/agent_run"}}
       },
       "additionalProperties": false
     },

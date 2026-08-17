@@ -134,7 +134,7 @@ KindSpec（semantic bundle）
 | facts 列 | KindSpec.build 从 raw 抽出的、已命名的轻量度量——业务字段隔离边界，下游只见列名 |
 | Tree | **视图期惰性索引**，仅 render/flame/最近祖先等递归场景按父子边现搭；非分析必经层、非中心对象 |
 | NodeTreeExtractor | 从完整 Node Tree 中确定性提取某个关注面 IR 的业务 pass |
-| AgentRun IR | `AgentRun.items = AgentTurn / Operation`，`AgentTurn.items = ModelCall / ToolCall / Operation` 的 agent 语义中间表示 |
+| AgentRun IR | `AgentRun.items = AgentTurn / Operation`，`AgentTurn.items = ModelCall / ToolCall / Operation`；Operation 可递归嵌套 Operation，ToolCall/Operation 可包含嵌套 AgentRun 的 agent 语义中间表示 |
 | TraceHarness | scoped 分析执行器；独立持有 contributions，并执行 IR 校验与统一 render policy |
 | TraceContributions | 业务包或 Plugin 显式贡献的 IR 标准化、detect、关注面提取与声明式 render 扩展集 |
 | TraceContext | 一次分析的承载对象：nodes 事实 + lazy 原文池 + specs + 运行时 |

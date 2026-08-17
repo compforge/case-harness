@@ -69,11 +69,13 @@ The canonical concern-specific projection is `trace-harness/agent-run@1`, define
 
 ```text
 AgentRun.items
-  ├─ Operation
+  ├─ Operation ─operations─→ Operation*
+  │             └agent_runs─→ AgentRun*
   └─ AgentTurn.items
        ├─ ModelCall
-       ├─ ToolCall
-       └─ Operation
+       ├─ ToolCall ─agent_runs─→ AgentRun*
+       └─ Operation ─operations─→ Operation*
+                    └agent_runs─→ AgentRun*
 ```
 
 - `AgentRun` is one agent execution extracted from a broader node tree.
@@ -83,7 +85,11 @@ AgentRun.items
 - `ModelCall` and `ToolCall` carry their structured input and output.
 - `Operation` represents known non-call work such as initialization, context compaction, wrap-up,
   or finalization, and unknown framework extensions without forcing them into model or tool
-  semantics. It MAY belong directly to an `AgentRun` or to an `AgentTurn`.
+  semantics. It MAY belong directly to an `AgentRun`, to an `AgentTurn`, or recursively to another
+  `Operation` through ordered `operations`.
+- A `ToolCall` or `Operation` MAY contain ordered `agent_runs`. The call site and nested execution
+  remain distinct: the parent keeps invocation input/output while each nested `AgentRun` keeps its
+  own turns and operations. An opaque invocation uses an empty `agent_runs` collection.
 - `source_node_ids` preserve provenance and enable drill-down to the source node and spans.
 
 `NodeTreeExtractor<T>` is the deterministic transformation boundary from the complete in-memory
@@ -93,8 +99,9 @@ operation naming, and any reconstruction from framework events. The harness owns
 serialization, and rendering.
 
 AgentRun IDs, turn IDs, and operation/call IDs MUST be unique across one AgentRun IR. Runs,
-run items, and turn items MUST be ordered by `start_ms`; durations MUST be non-negative; every
-`source_node_ids` entry MUST reference a node in the source tree.
+run items, turn items, nested `operations`, and nested `agent_runs` MUST be ordered by `start_ms`;
+durations MUST be non-negative; each parent time window MUST contain its child items and nested
+runs; every `source_node_ids` entry MUST reference a node in the source tree.
 
 ## 5. Scoped composition
 

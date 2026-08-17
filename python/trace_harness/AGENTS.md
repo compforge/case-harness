@@ -29,7 +29,7 @@ trace_harness/
 │   ├── spec.py       #   KindSpec(matches/claims/build + metrics/rules/obs_hole + project) + SpecSet + merge
 │   ├── context.py    #   TraceContext：单 trace 建模单元(内存事实源)，dispatch 挂这；view() 惰性建树
 │   ├── viewtree.py   #   视图期惰性索引(仅渲染/火焰/最近祖先用，分析侧从不持树)
-│   ├── agent.py      #   AgentRun IR + 校验/序列化；Operation 可按真实归属进 AgentRun 或 AgentTurn
+│   ├── agent.py      #   AgentRun IR + 递归校验/序列化；Operation/AgentRun 均可递归嵌套
 │   └── ir.py         #   TraceView + nodes.json dump/load：模型的可序列化形态(渲染面契约·域无关)
 ├── kinds/            # 唯一领域代码(通用 genai；域专属 AS kinds 留消费方，spec.merge 叠加)
 │   ├── base.py       #   generic 残余 spec + duration 基线度量
@@ -104,7 +104,7 @@ corpus parquet 走可选 extra `case-harness[trace-corpus]`（pyarrow），缺�
 - **biz 可定展示意图、不可另造 renderer**：域包通过 `TraceContributions.facets` 声明 node 的
   brief/layout；树遍历、DisplayNode 组装、Finding 绑定和 text/HTML 序列化由统一 engine 完成。
 - **AgentRun 是第二层 IR**：域包通过 `agent_run_extractor` 从完整 Node Tree 提取
-  run/turn/model/tool/operation；trace_harness 负责 IR 校验和渲染，不内置任何 Agent Framework 的分轮或关联猜测。
+  run/turn/model/tool/operation 及调用点内的嵌套 run；trace_harness 负责 IR 校验和递归渲染，不内置任何 Agent Framework 的分轮或关联猜测。
 
 ## References
 

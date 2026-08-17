@@ -20,6 +20,7 @@ from trace_harness import (
 )
 from trace_harness.ingest.sources.jaeger_file import load_jaeger_file
 from trace_harness.kinds import genai
+from trace_harness.view.agent_run import agent_run_roots
 
 ROOT = Path(__file__).parents[3]
 RAW = ROOT / "conformance" / "trace" / "fixtures" / "genai-basic.jsonl"
@@ -53,6 +54,16 @@ class _FixtureAgentRunExtractor:
                             duration_ms=100,
                             status="completed",
                             source_node_ids=(agent.node_id,),
+                            operations=(
+                                Operation(
+                                    id="load-context-1",
+                                    name="context.load",
+                                    start_ms=agent.start_ms + 10,
+                                    duration_ms=50,
+                                    status="completed",
+                                    source_node_ids=(agent.node_id,),
+                                ),
+                            ),
                         ),
                         AgentTurn(
                             id="turn-plan",
@@ -82,6 +93,34 @@ class _FixtureAgentRunExtractor:
                                     input={"query": "example"},
                                     output={"matches": 1},
                                     source_node_ids=(tool.node_id,),
+                                    agent_runs=(
+                                        AgentRun(
+                                            id="run-worker",
+                                            name="research-worker",
+                                            start_ms=1700000003650,
+                                            duration_ms=1100,
+                                            source_node_ids=(tool.node_id,),
+                                            items=(
+                                                AgentTurn(
+                                                    id="turn-worker",
+                                                    name="Research",
+                                                    start_ms=1700000003650,
+                                                    duration_ms=1100,
+                                                    items=(
+                                                        ModelCall(
+                                                            id="model-worker",
+                                                            name="worker-model",
+                                                            start_ms=1700000003650,
+                                                            duration_ms=1100,
+                                                            model="model-alpha-seed-2",
+                                                            status="completed",
+                                                            source_node_ids=(tool.node_id,),
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                    ),
                                 ),
                                 Operation(
                                     id="compact-1",
@@ -171,11 +210,60 @@ def test_interactive_agent_view_is_owned_by_agent_run_renderer():
     assert 'data-perspective="agent"' in html
     assert "agent-run:run-main" in html
     assert "run.initialize" in html
+    assert "context.load" in html
     assert "context.compact" in html
     assert "turn.wrap_up" in html
     assert "framework.checkpoint" in html
     assert "run.finalize" in html
     assert "tool-search" in html
+    assert "agent-run:run-worker" in html
+    assert "worker-model" in html
+
+
+def test_turn_source_fallback_includes_nested_operation_sources():
+    harness = _harness()
+    context = harness.assemble(load_jaeger_file(RAW))
+    agent = next(node for node in context.nodes if node.name == "invoke_agent main")
+    nested = Operation(
+        id="nested",
+        name="nested",
+        start_ms=agent.start_ms,
+        duration_ms=1,
+        source_node_ids=(agent.node_id,),
+    )
+    ir = AgentRunIR(
+        trace_id=context.trace_id,
+        runs=(
+            AgentRun(
+                id="run",
+                name="run",
+                start_ms=agent.start_ms,
+                duration_ms=1,
+                items=(
+                    AgentTurn(
+                        id="turn",
+                        name="turn",
+                        start_ms=agent.start_ms,
+                        duration_ms=1,
+                        items=(
+                            Operation(
+                                id="outer",
+                                name="outer",
+                                start_ms=agent.start_ms,
+                                duration_ms=1,
+                                operations=(nested,),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    turn = agent_run_roots(context, ir, {})[0]["children"][0]
+
+    assert turn["facts"]["source_nodes"] == agent.node_id
+    assert turn["span_ids"] == list(agent.span_ids)
 
 
 def test_interactive_hides_agent_view_without_an_extractor():
@@ -206,4 +294,72 @@ def test_extractor_output_rejects_unknown_node_references():
     context = harness.assemble(load_jaeger_file(RAW))
 
     with pytest.raises(ValueError, match="unknown node IDs"):
+        harness.extract_agent_runs(context)
+
+
+def test_extractor_output_rejects_items_outside_parent_time_window():
+    class BrokenExtractor:
+        def extract(self, context):
+            return AgentRunIR(
+                trace_id=context.trace_id,
+                runs=(
+                    AgentRun(
+                        id="broken",
+                        name="broken",
+                        start_ms=100,
+                        duration_ms=100,
+                        items=(
+                            Operation(
+                                id="outside",
+                                name="outside",
+                                start_ms=50,
+                                duration_ms=10,
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
+    harness = _harness(BrokenExtractor())
+    context = harness.assemble(load_jaeger_file(RAW))
+
+    with pytest.raises(ValueError, match="outside AgentRun broken time window"):
+        harness.extract_agent_runs(context)
+
+
+def test_extractor_output_rejects_nested_operations_outside_parent_time_window():
+    class BrokenExtractor:
+        def extract(self, context):
+            return AgentRunIR(
+                trace_id=context.trace_id,
+                runs=(
+                    AgentRun(
+                        id="broken",
+                        name="broken",
+                        start_ms=0,
+                        duration_ms=300,
+                        items=(
+                            Operation(
+                                id="outer",
+                                name="outer",
+                                start_ms=100,
+                                duration_ms=100,
+                                operations=(
+                                    Operation(
+                                        id="nested-outside",
+                                        name="nested-outside",
+                                        start_ms=50,
+                                        duration_ms=10,
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
+    harness = _harness(BrokenExtractor())
+    context = harness.assemble(load_jaeger_file(RAW))
+
+    with pytest.raises(ValueError, match="outside Operation outer time window"):
         harness.extract_agent_runs(context)
