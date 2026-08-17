@@ -79,8 +79,9 @@ describe("Python trace_harness parity fixture", () => {
     expect(html).toContain('"json.encoded":{"kind":"json","value":{"answer":"ok"}}');
     expect(html).toContain('"json.double_encoded":{"kind":"json","value":{"answer":"ok"}}');
     expect(html).toContain('"text.plain":{"kind":"text","value":"not json"}');
-    expect(html).toContain("function jsonTree(value,label,depth)");
-    expect(html).toContain("json-children");
+    expect(html).toContain("var module, window, define, renderjson=");
+    expect(html).toContain("dd.appendChild(renderjson(payload.value))");
+    expect(html).not.toContain("function jsonTree(value,label,depth)");
   });
 });
 
