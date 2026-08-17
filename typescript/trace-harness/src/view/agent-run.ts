@@ -1,4 +1,4 @@
-import type { AgentRunIR, AgentTurn, TurnItem } from "../model/agent";
+import type { AgentRun, AgentRunIR, AgentTurn, TurnItem } from "../model/agent";
 import type { TraceContext } from "../model/context";
 import type { Finding, Node } from "../model/node";
 
@@ -50,28 +50,39 @@ function itemPayload(
   findings: Record<string, Finding[]>,
 ): Record<string, unknown> {
   const itemFacts = facts(item.status, item.attributes, item.source_node_ids);
-  let brief = "";
+  const brief: string[] = [];
   if (item.kind === "model-call" && item.model) {
     itemFacts.model = item.model;
-    brief = `model=${item.model}`;
+    brief.push(`model=${item.model}`);
   } else if (item.kind === "tool-call" && item.tool_call_id) {
     itemFacts.tool_call_id = item.tool_call_id;
-    brief = `call=${item.tool_call_id}`;
+    brief.push(`call=${item.tool_call_id}`);
   }
+  const agentRuns = item.kind === "tool-call" || item.kind === "operation" ? item.agent_runs ?? [] : [];
+  const operations = item.kind === "operation" ? item.operations ?? [] : [];
+  if (operations.length) brief.push(`${operations.length} operation${operations.length === 1 ? "" : "s"}`);
+  if (agentRuns.length) brief.push(`${agentRuns.length} agent run${agentRuns.length === 1 ? "" : "s"}`);
+  const children = [
+    ...operations.map((operation) => itemPayload(context, operation, findings)),
+    ...agentRuns.map((run) => runPayload(context, run, findings)),
+  ].sort((left, right) => (
+    Number(left.start_ms) - Number(right.start_ms)
+    || String(left.node_id).localeCompare(String(right.node_id))
+  ));
   return {
     node_id: `agent-item:${item.kind}:${item.id}`,
     kind: item.kind,
     name: item.name,
     start_ms: item.start_ms,
     duration_ms: item.duration_ms,
-    brief,
+    brief: brief.join(" · "),
     facts: itemFacts,
     features: Object.fromEntries([
       ...(item.input === undefined ? [] : [["input", text(item.input)]]),
       ...(item.output === undefined ? [] : [["output", text(item.output)]]),
     ]),
     folded: 0,
-    children: [],
+    children,
     ...sourcePayload(context, item.source_node_ids, findings, item.status),
   };
 }
@@ -83,7 +94,9 @@ function turnPayload(
   findings: Record<string, Finding[]>,
 ): Record<string, unknown> {
   const children = turn.items.map((item) => itemPayload(context, item, findings));
-  const sources = turn.source_node_ids ?? [...new Set(turn.items.flatMap((item) => item.source_node_ids ?? []))];
+  const sources = turn.source_node_ids?.length
+    ? turn.source_node_ids
+    : [...new Set(turn.items.flatMap(itemSources))];
   return {
     node_id: `agent-turn:${turn.id}`,
     kind: "agent-turn",
@@ -99,37 +112,58 @@ function turnPayload(
   };
 }
 
+function itemSources(item: TurnItem): string[] {
+  const agentRuns = item.kind === "tool-call" || item.kind === "operation" ? item.agent_runs ?? [] : [];
+  const operations = item.kind === "operation" ? item.operations ?? [] : [];
+  return [...new Set([
+    ...(item.source_node_ids ?? []),
+    ...operations.flatMap(itemSources),
+    ...agentRuns.flatMap(runSources),
+  ])];
+}
+
+function runSources(run: AgentRun): string[] {
+  if (run.source_node_ids?.length) return run.source_node_ids;
+  return [...new Set(run.items.flatMap((item) => (
+    item.kind === "operation"
+      ? itemSources(item)
+      : item.items.flatMap(itemSources)
+  )))];
+}
+
+function runPayload(
+  context: TraceContext,
+  run: AgentRun,
+  findings: Record<string, Finding[]>,
+): Record<string, unknown> {
+  let turnIndex = 0;
+  const children = run.items.map((item) => {
+    if (item.kind === "operation") return itemPayload(context, item, findings);
+    const payload = turnPayload(context, item, turnIndex, findings);
+    turnIndex += 1;
+    return payload;
+  });
+  const sources = runSources(run);
+  const operationCount = run.items.filter((item) => item.kind === "operation").length;
+  return {
+    node_id: `agent-run:${run.id}`,
+    kind: "agent-run",
+    name: run.name,
+    start_ms: run.start_ms,
+    duration_ms: run.duration_ms,
+    brief: `${turnIndex} turns · ${operationCount} operations`,
+    facts: facts(run.status, run.attributes, sources),
+    features: {},
+    folded: 0,
+    children,
+    ...sourcePayload(context, sources, findings, run.status),
+  };
+}
+
 export function agentRunRoots(
   context: TraceContext,
   ir: AgentRunIR,
   findings: Record<string, Finding[]>,
 ): Array<Record<string, unknown>> {
-  return ir.runs.map((run) => {
-    let turnIndex = 0;
-    const children = run.items.map((item) => {
-      if (item.kind === "operation") return itemPayload(context, item, findings);
-      const payload = turnPayload(context, item, turnIndex, findings);
-      turnIndex += 1;
-      return payload;
-    });
-    const sources = run.source_node_ids ?? [...new Set(run.items.flatMap((item) => (
-      item.kind === "operation"
-        ? item.source_node_ids ?? []
-        : item.items.flatMap((turnItem) => turnItem.source_node_ids ?? [])
-    )))];
-    const operationCount = run.items.filter((item) => item.kind === "operation").length;
-    return {
-      node_id: `agent-run:${run.id}`,
-      kind: "agent-run",
-      name: run.name,
-      start_ms: run.start_ms,
-      duration_ms: run.duration_ms,
-      brief: `${turnIndex} turns · ${operationCount} operations`,
-      facts: facts(run.status, run.attributes, sources),
-      features: {},
-      folded: 0,
-      children,
-      ...sourcePayload(context, sources, findings, run.status),
-    };
-  });
+  return ir.runs.map((run) => runPayload(context, run, findings));
 }

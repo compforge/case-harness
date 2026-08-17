@@ -40,6 +40,16 @@ class FixtureAgentRunExtractor {
         status: "completed",
         attributes: {},
         source_node_ids: [agent.node_id],
+        operations: [{
+          kind: "operation",
+          id: "load-context-1",
+          name: "context.load",
+          start_ms: agent.start_ms + 10,
+          duration_ms: 50,
+          status: "completed",
+          attributes: {},
+          source_node_ids: [agent.node_id],
+        }],
       }, {
         kind: "agent-turn",
         id: "turn-plan",
@@ -73,6 +83,36 @@ class FixtureAgentRunExtractor {
           output: { matches: 1 },
           attributes: {},
           source_node_ids: [tool.node_id],
+          agent_runs: [{
+            id: "run-worker",
+            name: "research-worker",
+            start_ms: 1700000003650,
+            duration_ms: 1100,
+            status: "",
+            attributes: {},
+            source_node_ids: [tool.node_id],
+            items: [{
+              kind: "agent-turn",
+              id: "turn-worker",
+              name: "Research",
+              start_ms: 1700000003650,
+              duration_ms: 1100,
+              status: "",
+              attributes: {},
+              source_node_ids: [],
+              items: [{
+                kind: "model-call",
+                id: "model-worker",
+                name: "worker-model",
+                model: "model-alpha-seed-2",
+                start_ms: 1700000003650,
+                duration_ms: 1100,
+                status: "completed",
+                attributes: {},
+                source_node_ids: [tool.node_id],
+              }],
+            }],
+          }],
         }, {
           kind: "operation",
           id: "compact-1",
@@ -163,10 +203,13 @@ describe("AgentRun IR", () => {
     expect(html).toContain('data-perspective="agent"');
     expect(html).toContain("agent-run:run-main");
     expect(html).toContain("run.initialize");
+    expect(html).toContain("context.load");
     expect(html).toContain("context.compact");
     expect(html).toContain("turn.wrap_up");
     expect(html).toContain("framework.checkpoint");
     expect(html).toContain("run.finalize");
+    expect(html).toContain("agent-run:run-worker");
+    expect(html).toContain("worker-model");
   });
 
   test("hides the Agent view when no extractor is contributed", () => {
@@ -193,5 +236,60 @@ describe("AgentRun IR", () => {
     const context = instance.assemble(normalizeJaegerSpans(fixtureDocuments()));
 
     expect(() => instance.extractAgentRuns(context)).toThrow("unknown node IDs");
+  });
+
+  test("rejects items outside their parent time window", () => {
+    const instance = new TraceHarness({
+      specs: genAiSpecs(),
+      agentRunExtractor: {
+        extract: (context) => createAgentRunIR(context.trace_id, [{
+          id: "broken",
+          name: "broken",
+          start_ms: 100,
+          duration_ms: 100,
+          items: [{
+            kind: "operation",
+            id: "outside",
+            name: "outside",
+            start_ms: 50,
+            duration_ms: 10,
+          }],
+        }]),
+      },
+    });
+    const context = instance.assemble(normalizeJaegerSpans(fixtureDocuments()));
+
+    expect(() => instance.extractAgentRuns(context)).toThrow("outside AgentRun broken time window");
+  });
+
+  test("rejects nested operations outside their parent time window", () => {
+    const instance = new TraceHarness({
+      specs: genAiSpecs(),
+      agentRunExtractor: {
+        extract: (context) => createAgentRunIR(context.trace_id, [{
+          id: "broken",
+          name: "broken",
+          start_ms: 0,
+          duration_ms: 300,
+          items: [{
+            kind: "operation",
+            id: "outer",
+            name: "outer",
+            start_ms: 100,
+            duration_ms: 100,
+            operations: [{
+              kind: "operation",
+              id: "nested-outside",
+              name: "nested-outside",
+              start_ms: 50,
+              duration_ms: 10,
+            }],
+          }],
+        }]),
+      },
+    });
+    const context = instance.assemble(normalizeJaegerSpans(fixtureDocuments()));
+
+    expect(() => instance.extractAgentRuns(context)).toThrow("outside Operation outer time window");
   });
 });

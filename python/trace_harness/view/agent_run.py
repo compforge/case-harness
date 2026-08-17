@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from trace_harness.model.agent import (
+    AgentRun,
     AgentRunIR,
     AgentTurn,
     ModelCall,
@@ -75,29 +76,40 @@ def _item_payload(
     findings: dict[str, list[Finding]],
 ) -> dict[str, Any]:
     facts = _facts(item.status, item.attributes, item.source_node_ids)
-    brief = ""
+    brief_parts = []
     if isinstance(item, ModelCall) and item.model:
         facts = {"model": item.model, **facts}
-        brief = f"model={item.model}"
+        brief_parts.append(f"model={item.model}")
     elif isinstance(item, ToolCall) and item.tool_call_id:
         facts = {"tool_call_id": item.tool_call_id, **facts}
-        brief = f"call={item.tool_call_id}"
+        brief_parts.append(f"call={item.tool_call_id}")
+    agent_runs = item.agent_runs if isinstance(item, ToolCall | Operation) else ()
+    operations = item.operations if isinstance(item, Operation) else ()
+    if operations:
+        brief_parts.append(f"{len(operations)} operation{'s' if len(operations) != 1 else ''}")
+    if agent_runs:
+        brief_parts.append(f"{len(agent_runs)} agent run{'s' if len(agent_runs) != 1 else ''}")
     features = {}
     if item.input is not None:
         features["input"] = _text(item.input)
     if item.output is not None:
         features["output"] = _text(item.output)
+    children = [
+        *(_item_payload(context, child, findings) for child in operations),
+        *(_run_payload(context, run, findings) for run in agent_runs),
+    ]
+    children.sort(key=lambda child: (child["start_ms"], child["node_id"]))
     return {
         "node_id": f"agent-item:{item.kind}:{item.id}",
         "kind": item.kind,
         "name": item.name,
         "start_ms": item.start_ms,
         "duration_ms": item.duration_ms,
-        "brief": brief,
+        "brief": " · ".join(brief_parts),
         "facts": facts,
         "features": features,
         "folded": 0,
-        "children": [],
+        "children": children,
         **_source_payload(context, item.source_node_ids, findings, item.status),
     }
 
@@ -127,51 +139,72 @@ def _turn_payload(
     }
 
 
+def _item_sources(item: TurnItem) -> tuple[str, ...]:
+    nested_runs = item.agent_runs if isinstance(item, ToolCall | Operation) else ()
+    operations = item.operations if isinstance(item, Operation) else ()
+    return tuple(
+        dict.fromkeys(
+            (
+                *item.source_node_ids,
+                *(node_id for child in operations for node_id in _item_sources(child)),
+                *(node_id for run in nested_runs for node_id in _run_sources(run)),
+            )
+        )
+    )
+
+
+def _run_sources(run: AgentRun) -> tuple[str, ...]:
+    if run.source_node_ids:
+        return run.source_node_ids
+    return tuple(
+        dict.fromkeys(
+            node_id
+            for item in run.items
+            for node_id in (
+                _item_sources(item)
+                if isinstance(item, Operation)
+                else tuple(
+                    node_id for turn_item in item.items for node_id in _item_sources(turn_item)
+                )
+            )
+        )
+    )
+
+
+def _run_payload(
+    context: TraceContext,
+    run: AgentRun,
+    findings: dict[str, list[Finding]],
+) -> dict[str, Any]:
+    children = []
+    turn_index = 0
+    for item in run.items:
+        if isinstance(item, Operation):
+            children.append(_item_payload(context, item, findings))
+        else:
+            children.append(_turn_payload(context, item, turn_index, findings))
+            turn_index += 1
+    sources = _run_sources(run)
+    operation_count = sum(isinstance(item, Operation) for item in run.items)
+    return {
+        "node_id": f"agent-run:{run.id}",
+        "kind": "agent-run",
+        "name": run.name,
+        "start_ms": run.start_ms,
+        "duration_ms": run.duration_ms,
+        "brief": f"{turn_index} turns · {operation_count} operations",
+        "facts": _facts(run.status, run.attributes, sources),
+        "features": {},
+        "folded": 0,
+        "children": children,
+        **_source_payload(context, sources, findings, run.status),
+    }
+
+
 def agent_run_roots(
     context: TraceContext,
     ir: AgentRunIR,
     findings: dict[str, list[Finding]],
 ) -> list[dict[str, Any]]:
     """Render AgentRun IR into the viewer's language-neutral hierarchical payload."""
-    roots = []
-    for run in ir.runs:
-        children = []
-        turn_index = 0
-        for item in run.items:
-            if isinstance(item, Operation):
-                children.append(_item_payload(context, item, findings))
-            else:
-                children.append(_turn_payload(context, item, turn_index, findings))
-                turn_index += 1
-        sources = run.source_node_ids or tuple(
-            dict.fromkeys(
-                node_id
-                for item in run.items
-                for node_id in (
-                    item.source_node_ids
-                    if isinstance(item, Operation)
-                    else tuple(
-                        nested_node_id
-                        for turn_item in item.items
-                        for nested_node_id in turn_item.source_node_ids
-                    )
-                )
-            )
-        )
-        operation_count = sum(isinstance(item, Operation) for item in run.items)
-        roots.append(
-            {
-                "node_id": f"agent-run:{run.id}",
-                "kind": "agent-run",
-                "name": run.name,
-                "start_ms": run.start_ms,
-                "duration_ms": run.duration_ms,
-                "brief": f"{turn_index} turns · {operation_count} operations",
-                "facts": _facts(run.status, run.attributes, sources),
-                "features": {},
-                "folded": 0,
-                "children": children,
-                **_source_payload(context, sources, findings, run.status),
-            }
-        )
-    return roots
+    return [_run_payload(context, run, findings) for run in ir.runs]

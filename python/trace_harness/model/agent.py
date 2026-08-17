@@ -38,6 +38,7 @@ class ToolCall:
     output: Any = None
     attributes: dict[str, Any] = field(default_factory=dict)
     source_node_ids: tuple[str, ...] = ()
+    agent_runs: tuple[AgentRun, ...] = ()
     kind: Literal["tool-call"] = field(default="tool-call", init=False)
 
 
@@ -52,6 +53,8 @@ class Operation:
     output: Any = None
     attributes: dict[str, Any] = field(default_factory=dict)
     source_node_ids: tuple[str, ...] = ()
+    operations: tuple[Operation, ...] = ()
+    agent_runs: tuple[AgentRun, ...] = ()
     kind: Literal["operation"] = field(default="operation", init=False)
 
 
@@ -123,32 +126,91 @@ def validate_agent_run_ir(ir: AgentRunIR, context: TraceContext) -> AgentRunIR:
         ):
             raise ValueError(f"{owner} has invalid duration_ms: {duration_ms!r}")
 
-    previous_run_start: float | None = None
-    for run in ir.runs:
+    def check_within(
+        parent_owner: str,
+        parent_start_ms: float,
+        parent_duration_ms: float,
+        child_owner: str,
+        child_start_ms: float,
+        child_duration_ms: float,
+    ) -> None:
+        if (
+            child_start_ms < parent_start_ms
+            or child_start_ms + child_duration_ms > parent_start_ms + parent_duration_ms
+        ):
+            raise ValueError(f"{child_owner} falls outside {parent_owner} time window")
+
+    def check_runs(
+        owner: str,
+        runs: tuple[AgentRun, ...],
+        field_name: str,
+        parent_window: tuple[float, float] | None = None,
+    ) -> None:
+        previous_start: float | None = None
+        for run in runs:
+            if previous_start is not None and run.start_ms < previous_start:
+                raise ValueError(f"{owner}.{field_name} must be ordered by start_ms")
+            previous_start = run.start_ms
+            check_run(run)
+            if parent_window is not None:
+                check_within(
+                    owner,
+                    *parent_window,
+                    f"AgentRun {run.id}",
+                    run.start_ms,
+                    run.duration_ms,
+                )
+
+    def check_item(item: TurnItem) -> None:
+        if item.id in item_ids:
+            raise ValueError(f"duplicate turn item id: {item.id}")
+        item_ids.add(item.id)
+        check_timing(f"{type(item).__name__} {item.id}", item.start_ms, item.duration_ms)
+        check_source_refs(f"{type(item).__name__} {item.id}", item.source_node_ids)
+        if isinstance(item, Operation):
+            previous_start: float | None = None
+            for child in item.operations:
+                if previous_start is not None and child.start_ms < previous_start:
+                    raise ValueError(f"Operation {item.id}.operations must be ordered by start_ms")
+                previous_start = child.start_ms
+                check_item(child)
+                check_within(
+                    f"Operation {item.id}",
+                    item.start_ms,
+                    item.duration_ms,
+                    f"Operation {child.id}",
+                    child.start_ms,
+                    child.duration_ms,
+                )
+        if isinstance(item, ToolCall | Operation):
+            check_runs(
+                f"{type(item).__name__} {item.id}",
+                item.agent_runs,
+                "agent_runs",
+                (item.start_ms, item.duration_ms),
+            )
+
+    def check_run(run: AgentRun) -> None:
         if run.id in run_ids:
             raise ValueError(f"duplicate AgentRun id: {run.id}")
         run_ids.add(run.id)
         check_timing(f"AgentRun {run.id}", run.start_ms, run.duration_ms)
         check_source_refs(f"AgentRun {run.id}", run.source_node_ids)
-        if previous_run_start is not None and run.start_ms < previous_run_start:
-            raise ValueError("AgentRunIR.runs must be ordered by start_ms")
-        previous_run_start = run.start_ms
-
         previous_run_item_start: float | None = None
         for run_item in run.items:
             if previous_run_item_start is not None and run_item.start_ms < previous_run_item_start:
                 raise ValueError(f"AgentRun {run.id} items must be ordered by start_ms")
             previous_run_item_start = run_item.start_ms
             if isinstance(run_item, Operation):
-                if run_item.id in item_ids:
-                    raise ValueError(f"duplicate operation id: {run_item.id}")
-                item_ids.add(run_item.id)
-                check_timing(
+                check_item(run_item)
+                check_within(
+                    f"AgentRun {run.id}",
+                    run.start_ms,
+                    run.duration_ms,
                     f"Operation {run_item.id}",
                     run_item.start_ms,
                     run_item.duration_ms,
                 )
-                check_source_refs(f"Operation {run_item.id}", run_item.source_node_ids)
                 continue
 
             turn = run_item
@@ -157,17 +219,31 @@ def validate_agent_run_ir(ir: AgentRunIR, context: TraceContext) -> AgentRunIR:
             turn_ids.add(turn.id)
             check_timing(f"AgentTurn {turn.id}", turn.start_ms, turn.duration_ms)
             check_source_refs(f"AgentTurn {turn.id}", turn.source_node_ids)
+            check_within(
+                f"AgentRun {run.id}",
+                run.start_ms,
+                run.duration_ms,
+                f"AgentTurn {turn.id}",
+                turn.start_ms,
+                turn.duration_ms,
+            )
 
             previous_item_start: float | None = None
             for item in turn.items:
-                if item.id in item_ids:
-                    raise ValueError(f"duplicate turn item id: {item.id}")
-                item_ids.add(item.id)
-                check_timing(f"{type(item).__name__} {item.id}", item.start_ms, item.duration_ms)
-                check_source_refs(f"{type(item).__name__} {item.id}", item.source_node_ids)
                 if previous_item_start is not None and item.start_ms < previous_item_start:
                     raise ValueError(f"AgentTurn {turn.id} items must be ordered by start_ms")
                 previous_item_start = item.start_ms
+                check_item(item)
+                check_within(
+                    f"AgentTurn {turn.id}",
+                    turn.start_ms,
+                    turn.duration_ms,
+                    f"{type(item).__name__} {item.id}",
+                    item.start_ms,
+                    item.duration_ms,
+                )
+
+    check_runs("AgentRunIR", ir.runs, "runs")
     return ir
 
 
@@ -188,7 +264,39 @@ def _item_snapshot(item: TurnItem) -> dict[str, Any]:
         payload["model"] = item.model
     elif isinstance(item, ToolCall):
         payload["tool_call_id"] = item.tool_call_id
+    if isinstance(item, ToolCall | Operation):
+        if isinstance(item, Operation):
+            payload["operations"] = [_item_snapshot(child) for child in item.operations]
+        payload["agent_runs"] = [_run_snapshot(run) for run in item.agent_runs]
     return payload
+
+
+def _run_snapshot(run: AgentRun) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "name": run.name,
+        "start_ms": run.start_ms,
+        "duration_ms": run.duration_ms,
+        "status": run.status,
+        "attributes": run.attributes,
+        "source_node_ids": list(run.source_node_ids),
+        "items": [
+            _item_snapshot(item)
+            if isinstance(item, Operation)
+            else {
+                "kind": item.kind,
+                "id": item.id,
+                "name": item.name,
+                "start_ms": item.start_ms,
+                "duration_ms": item.duration_ms,
+                "status": item.status,
+                "attributes": item.attributes,
+                "source_node_ids": list(item.source_node_ids),
+                "items": [_item_snapshot(turn_item) for turn_item in item.items],
+            }
+            for item in run.items
+        ],
+    }
 
 
 def agent_run_snapshot(ir: AgentRunIR) -> dict[str, Any]:
@@ -196,32 +304,5 @@ def agent_run_snapshot(ir: AgentRunIR) -> dict[str, Any]:
     return {
         "schema": ir.schema,
         "trace_id": ir.trace_id,
-        "runs": [
-            {
-                "id": run.id,
-                "name": run.name,
-                "start_ms": run.start_ms,
-                "duration_ms": run.duration_ms,
-                "status": run.status,
-                "attributes": run.attributes,
-                "source_node_ids": list(run.source_node_ids),
-                "items": [
-                    _item_snapshot(item)
-                    if isinstance(item, Operation)
-                    else {
-                        "kind": item.kind,
-                        "id": item.id,
-                        "name": item.name,
-                        "start_ms": item.start_ms,
-                        "duration_ms": item.duration_ms,
-                        "status": item.status,
-                        "attributes": item.attributes,
-                        "source_node_ids": list(item.source_node_ids),
-                        "items": [_item_snapshot(turn_item) for turn_item in item.items],
-                    }
-                    for item in run.items
-                ],
-            }
-            for run in ir.runs
-        ],
+        "runs": [_run_snapshot(run) for run in ir.runs],
     }
