@@ -225,10 +225,12 @@ function compactName(n,budget){const candidates=Array.isArray(n.name_variants)&&
   const limit=Math.max(0,Math.floor(budget));
   for(const candidate of candidates){if(nameLength(candidate)<=limit)return candidate;}
   return fitName(candidates[candidates.length-1],limit);}
+// 父节点 duration 通常包含整棵子树；只有 leaf 参与高度映射，避免同一耗时被父子重复表达。
 function maxLeafDuration(ns){let max=1;for(const n of ns){max=Math.max(max,n.children.length
     ?maxLeafDuration(n.children):n.duration_ms||0);}return max;}
 function timeHeight(ms,maxMs){const ratio=Math.sqrt(Math.max(0,ms||0)/Math.max(1,maxMs));
   const base=22,max=base*4;return Math.round(base+(max-base)*ratio);}
+// 高度决定可用行数，实际栏宽与缩进深度决定每行字符预算。
 function agentNameLayout(depth,rowHeight){const treeWidth=treeEl.clientWidth||Math.min(760,window.innerWidth*.52);
   const width=Math.max(84,treeWidth-depth*16-210),lines=Math.max(1,Math.min(4,Math.floor(rowHeight/22)));
   return{width,lines,budget:Math.max(12,Math.floor(width/7))*lines};}
