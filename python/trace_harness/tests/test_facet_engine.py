@@ -97,7 +97,7 @@ def test_node_tree_tool_name_uses_shared_budget_compaction():
     h = render_interactive(ctx)
 
     assert '"name_variants": ["shell · stream_query.py", "stream_query.py", "shell"]' in h
-    assert "compactName(n,48)" in h
+    assert "compactName(n,nameLayout?nameLayout.budget:48)" in h
     assert "compactName(n,Math.max" in h
 
 

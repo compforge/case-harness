@@ -218,8 +218,11 @@ def test_interactive_agent_view_is_owned_by_agent_run_renderer():
     assert "tool-search" in html
     assert "agent-run:run-worker" in html
     assert "worker-model" in html
-    assert "compactName(n,48)" in html
+    assert "agentNameLayout(depth,rowHeight)" in html
+    assert "compactName(n,nameLayout?nameLayout.budget:48)" in html
     assert "timeHeight(n.duration_ms,stackMaxDuration)" in html
+    assert "const timedLeaf=perspective==='agent'&&!n.children.length" in html
+    assert "maxLeafDuration(tree.roots)" in html
     assert "const base=22,max=base*4" in html
 
 

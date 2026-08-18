@@ -211,8 +211,11 @@ describe("AgentRun IR", () => {
     expect(html).toContain("run.finalize");
     expect(html).toContain("agent-run:run-worker");
     expect(html).toContain("worker-model");
-    expect(html).toContain("compactName(n,48)");
+    expect(html).toContain("agentNameLayout(depth,rowHeight)");
+    expect(html).toContain("compactName(n,nameLayout?nameLayout.budget:48)");
     expect(html).toContain("timeHeight(n.duration_ms,stackMaxDuration)");
+    expect(html).toContain("const timedLeaf=perspective==='agent'&&!n.children.length");
+    expect(html).toContain("maxLeafDuration(tree.roots)");
     expect(html).toContain("const base=22,max=base*4");
     expect(html).not.toContain("call=call-search-1");
     expect(html).toContain('"tool_call_id":"call-search-1"');

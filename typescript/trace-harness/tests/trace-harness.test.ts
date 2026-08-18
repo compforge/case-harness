@@ -95,7 +95,7 @@ describe("Python trace_harness parity fixture", () => {
     const html = renderInteractive(context);
 
     expect(html).toContain('"name_variants":["shell · stream_query.py","stream_query.py","shell"]');
-    expect(html).toContain("compactName(n,48)");
+    expect(html).toContain("compactName(n,nameLayout?nameLayout.budget:48)");
     expect(html).toContain("compactName(n,Math.max");
   });
 });

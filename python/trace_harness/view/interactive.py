@@ -225,9 +225,13 @@ function compactName(n,budget){const candidates=Array.isArray(n.name_variants)&&
   const limit=Math.max(0,Math.floor(budget));
   for(const candidate of candidates){if(nameLength(candidate)<=limit)return candidate;}
   return fitName(candidates[candidates.length-1],limit);}
-function maxDuration(ns){let max=1;for(const n of ns){max=Math.max(max,n.duration_ms||0,maxDuration(n.children||[]));}return max;}
+function maxLeafDuration(ns){let max=1;for(const n of ns){max=Math.max(max,n.children.length
+    ?maxLeafDuration(n.children):n.duration_ms||0);}return max;}
 function timeHeight(ms,maxMs){const ratio=Math.sqrt(Math.max(0,ms||0)/Math.max(1,maxMs));
   const base=22,max=base*4;return Math.round(base+(max-base)*ratio);}
+function agentNameLayout(depth,rowHeight){const treeWidth=treeEl.clientWidth||Math.min(760,window.innerWidth*.52);
+  const width=Math.max(84,treeWidth-depth*16-210),lines=Math.max(1,Math.min(4,Math.floor(rowHeight/22)));
+  return{width,lines,budget:Math.max(12,Math.floor(width/7))*lines};}
 function renderInto(n,depth,parent){const box=document.createElement('div');
   renderRowInto(box,n,depth,parent);return box;}
 function renderRowInto(box,n,depth,parent){
@@ -235,11 +239,17 @@ function renderRowInto(box,n,depth,parent){
   const row=document.createElement('div');
   row.className='row'+(n.has_error?' err':'');row.dataset.id=n.node_id;
   row.style.paddingLeft=(depth*16+8)+'px';
-  if(perspective==='agent'){row.style.minHeight=timeHeight(n.duration_ms,stackMaxDuration)+'px';row.style.alignItems='center';}
+  const timedLeaf=perspective==='agent'&&!n.children.length;
+  const rowHeight=timedLeaf?timeHeight(n.duration_ms,stackMaxDuration):22;
+  const nameLayout=perspective==='agent'?agentNameLayout(depth,rowHeight):null;
+  if(nameLayout){row.style.minHeight=rowHeight+'px';row.style.alignItems='center';}
   const tw=document.createElement('span');tw.className='tw';
   tw.textContent=n.children.length?'▾':'·';row.appendChild(tw);
   if(n.kind){const k=document.createElement('span');k.className='kind '+kindClass(n.kind);k.textContent=n.kind;row.appendChild(k);}
-  const nm=document.createElement('span');nm.textContent=compactName(n,48);row.appendChild(nm);
+  const nm=document.createElement('span');nm.textContent=compactName(n,nameLayout?nameLayout.budget:48);
+  if(nameLayout){nm.style.maxWidth=nameLayout.width+'px';nm.style.maxHeight=(nameLayout.lines*18)+'px';
+    nm.style.lineHeight='18px';nm.style.whiteSpace='normal';nm.style.overflowWrap='anywhere';nm.style.overflow='hidden';}
+  row.appendChild(nm);
   const d=document.createElement('span');d.className='dur';d.textContent=fmtMs(n.duration_ms);row.appendChild(d);
   if(n.brief){const be=document.createElement('span');be.className='brief';be.textContent='('+n.brief+')';row.appendChild(be);}
   if(n.has_error){const e=document.createElement('span');e.className='errdot';e.textContent='[ERROR]';row.appendChild(e);}
@@ -336,7 +346,7 @@ function firstReal(ns){for(const n of ns){if(n.kind)return n.node_id;
   const k=firstReal(n.children);if(k)return k;}return null;}
 function renderTree(){
   tree=TREES[perspective]||{roots:[]};treeEl.replaceChildren();
-  stackMaxDuration=perspective==='agent'?maxDuration(tree.roots):1;
+  stackMaxDuration=perspective==='agent'?maxLeafDuration(tree.roots):1;
   byId={};parentOf={};boxOf={};twOf={};flameBuilt=false;
   tree.roots.forEach(r=>treeEl.appendChild(renderInto(r,0,null)));
   if(!tree.roots.length){treeEl.innerHTML='<div class="empty">当前侧重点没有可展示节点</div>';
