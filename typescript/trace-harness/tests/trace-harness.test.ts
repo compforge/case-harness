@@ -7,10 +7,13 @@ import {
   buildView,
   DefaultFacet,
   diagnose,
+  DisplayName,
+  type DisplayNode,
   type FeatureContext,
   genAiSpecs,
   Node,
   normalizeJaegerSpans,
+  nameProjections,
   renderInteractive,
   renderDisplay,
   TraceHarness,
@@ -60,6 +63,12 @@ describe("Python trace_harness parity fixture", () => {
     expect(html).toContain("chat planner");
     expect(html).toContain("http_status");
     expect(html).toContain("errors 2");
+    expect(html).toContain('role="separator"');
+    expect(html).toContain("requestAnimationFrame(applyTreeWidth)");
+    expect(html).toContain("refreshTreeNames()");
+    const browserScript = html.match(/<script>([\s\S]*)<\/script>/)?.[1];
+    expect(browserScript).toBeDefined();
+    expect(() => new Function(browserScript!)).not.toThrow();
   });
 
   test("renders object and stringified JSON attributes as trees with text fallback", () => {
@@ -95,8 +104,24 @@ describe("Python trace_harness parity fixture", () => {
     const html = renderInteractive(context);
 
     expect(html).toContain('"name_variants":["shell · stream_query.py","stream_query.py","shell"]');
-    expect(html).toContain("compactName(n,nameLayout?nameLayout.budget:48)");
-    expect(html).toContain("compactName(n,Math.max");
+    expect(html).toContain("applyNameLayout(row,n,depth,rowHeight)");
+    expect(html).toContain("nameForBudget(n,Math.max");
+    expect(html).toContain("actual-1/rawLength");
+  });
+
+  test("treats the name ratio as a target without requiring an exact output ratio", () => {
+    const name = new DisplayName("shell", "stream_query.py");
+
+    expect(name.compact(1)).toEqual(["shell · stream_query.py", 1]);
+    const [compacted, actual] = name.compact(0.5);
+    expect(compacted).not.toBe("shell · stream_query.py");
+    expect(actual).toBeLessThan(0.5);
+    expect(nameProjections(name)).toEqual(["shell · stream_query.py", "stream_query.py", "shell"]);
+
+    const plain: DisplayNode = {
+      kind: "node", name: "plain", brief: [], node_ids: [], children: [], findings: [], folded: 0,
+    };
+    expect(nameProjections(plain)).toEqual(["plain"]);
   });
 });
 

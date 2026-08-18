@@ -1,11 +1,18 @@
 import type { AgentRun, AgentRunIR, AgentTurn, TurnItem } from "../model/agent";
 import type { TraceContext } from "../model/context";
 import type { Finding, Node } from "../model/node";
-import { DisplayName, nameVariants } from "./display";
+import { DisplayName, nameProjections, type Compact } from "./display";
 import { toolNameDetail } from "./tool-name";
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function compactNames(component: unknown, name: string, detail = ""): string[] {
+  const compact = component && typeof (component as Partial<Compact>).compact === "function"
+    ? component as Compact
+    : new DisplayName(name, detail);
+  return nameProjections(compact);
 }
 
 function sourcePayload(
@@ -81,7 +88,7 @@ function itemPayload(
     node_id: `agent-item:${item.kind}:${item.id}`,
     kind: item.kind,
     name: item.name,
-    name_variants: nameVariants(new DisplayName(item.name, detail)),
+    name_variants: compactNames(item, item.name, detail),
     start_ms: item.start_ms,
     duration_ms: item.duration_ms,
     brief: brief.join(" · "),
@@ -113,7 +120,7 @@ function turnPayload(
     node_id: `agent-turn:${turn.id}`,
     kind: "agent-turn",
     name,
-    name_variants: nameVariants(new DisplayName(name)),
+    name_variants: compactNames(turn, name),
     start_ms: turn.start_ms,
     duration_ms: turn.duration_ms,
     brief: `${turn.items.length} items`,
@@ -162,7 +169,7 @@ function runPayload(
     node_id: `agent-run:${run.id}`,
     kind: "agent-run",
     name: run.name,
-    name_variants: nameVariants(new DisplayName(run.name)),
+    name_variants: compactNames(run, run.name),
     start_ms: run.start_ms,
     duration_ms: run.duration_ms,
     brief: `${turnIndex} turns · ${operationCount} operations`,

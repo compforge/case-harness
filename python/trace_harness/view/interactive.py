@@ -30,7 +30,7 @@ from trace_harness.model.agent import AgentRunIR
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Finding, Node
 from trace_harness.view.agent_run import agent_run_roots
-from trace_harness.view.display import DisplayName, DisplayNode, name_variants
+from trace_harness.view.display import Compact, DisplayName, DisplayNode, name_projections
 from trace_harness.view.engine import render as _engine_render
 from trace_harness.view.facet import RenderConfig
 from trace_harness.view.facets import builtin_facets
@@ -62,12 +62,20 @@ def _disp_payload(
             if node.kind == "tool-call"
             else None
         )
-        d.display_name = DisplayName(display_name, tool_name_detail(arguments))
+        compact = (
+            d
+            if isinstance(d, Compact)
+            else (
+                DisplayName(display_name, tool_name_detail(arguments))
+                if node.kind == "tool-call"
+                else d
+            )
+        )
         return {
             "node_id": node.node_id,
             "kind": d.kind,
             "name": d.name,
-            "name_variants": name_variants(d),
+            "name_variants": name_projections(compact, d.name),
             "service": node.service,
             "start_ms": node.start_ms,
             "duration_ms": node.facts.get("wall_ms", node.duration_ms),
@@ -101,7 +109,7 @@ def _disp_payload(
         "node_id": "fold:" + "·".join(d.node_ids[:3]) if d.node_ids else "fold:" + d.name,
         "kind": "",
         "name": d.name,
-        "name_variants": name_variants(d),
+        "name_variants": name_projections(d),
         "service": "",
         "start_ms": start,
         "duration_ms": end - start,

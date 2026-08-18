@@ -101,6 +101,19 @@ def test_node_tree_tool_name_uses_shared_budget_compaction():
     assert "compactName(n,Math.max" in h
 
 
+def test_display_name_compaction_uses_ratio_budget():
+    from trace_harness.view.display import DisplayName, DisplayNode, name_projections
+
+    name = DisplayName("shell", "stream_query.py")
+
+    assert name.compact(1) == ("shell · stream_query.py", 1)
+    compacted, actual = name.compact(0.5)
+    assert compacted != "shell · stream_query.py"
+    assert actual < 0.5
+    assert name_projections(name) == ["shell · stream_query.py", "stream_query.py", "shell"]
+    assert name_projections(DisplayNode(kind="node", name="plain")) == ["plain"]
+
+
 def test_agent_perspective_keeps_semantic_nodes_and_compresses_context_paths():
     from trace_harness.model.node import Node
     from trace_harness.model.viewtree import build_view
