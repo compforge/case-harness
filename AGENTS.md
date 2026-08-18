@@ -82,6 +82,7 @@ cd ../perf-harness && bun install --frozen-lockfile && bun test && bun run typec
 
 - 暂缓能力与启动条件：[`docs/backlog.md`](docs/backlog.md)
 - 内核模型、测试边界与长期功能测试：[`docs/kernel.md`](docs/kernel.md)
+- Quality Harness 的定位、发现式评估与异步触发模型：[`docs/quality-harness.md`](docs/quality-harness.md)
 - e2e_harness（API 测试）：[`python/e2e_harness/AGENTS.md`](python/e2e_harness/AGENTS.md)
 - eval_harness（效果测试）：[`python/eval_harness/AGENTS.md`](python/eval_harness/AGENTS.md)，使用指南 [`python/eval_harness/README.md`](python/eval_harness/README.md)
 - perf_harness（压力测试）：[`python/perf_harness/AGENTS.md`](python/perf_harness/AGENTS.md)，使用指南 [`python/perf_harness/README.md`](python/perf_harness/README.md)
