@@ -226,7 +226,8 @@ function compactName(n,budget){const candidates=Array.isArray(n.name_variants)&&
   for(const candidate of candidates){if(nameLength(candidate)<=limit)return candidate;}
   return fitName(candidates[candidates.length-1],limit);}
 function maxDuration(ns){let max=1;for(const n of ns){max=Math.max(max,n.duration_ms||0,maxDuration(n.children||[]));}return max;}
-function timeHeight(ms,maxMs){const ratio=Math.sqrt(Math.max(0,ms||0)/Math.max(1,maxMs));return Math.round(18+46*ratio);}
+function timeHeight(ms,maxMs){const ratio=Math.sqrt(Math.max(0,ms||0)/Math.max(1,maxMs));
+  const base=22,max=base*4;return Math.round(base+(max-base)*ratio);}
 function renderInto(n,depth,parent){const box=document.createElement('div');
   renderRowInto(box,n,depth,parent);return box;}
 function renderRowInto(box,n,depth,parent){

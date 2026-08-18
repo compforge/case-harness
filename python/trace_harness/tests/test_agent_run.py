@@ -220,6 +220,7 @@ def test_interactive_agent_view_is_owned_by_agent_run_renderer():
     assert "worker-model" in html
     assert "compactName(n,48)" in html
     assert "timeHeight(n.duration_ms,stackMaxDuration)" in html
+    assert "const base=22,max=base*4" in html
 
 
 def test_tool_display_details_prefer_file_and_command_over_call_id():
