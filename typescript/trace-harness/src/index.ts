@@ -33,7 +33,7 @@ export { Node, type Emphasis, type Field, type Finding, type NodeInit, type Seve
 export { SpecSet, mergeSpecs, type KindSpec } from "./model/spec";
 export { NormSpan, spanErrorText, type ErrorEvent, type SpanAttributes, type SpanEvent } from "./model/span";
 export { ViewTree, buildView, type NodeTreeExtractor } from "./model/viewtree";
-export type { DisplayNode } from "./view/display";
+export { DisplayName, nameVariants, type CompactName, type DisplayNode } from "./view/display";
 export {
   DefaultFacet,
   Facet,

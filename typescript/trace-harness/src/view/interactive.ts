@@ -6,11 +6,12 @@ import { FeatureRegistry } from "../feature/registry";
 import type { AgentRunIR } from "../model/agent";
 import type { TraceContext } from "../model/context";
 import type { Finding, Node } from "../model/node";
-import type { DisplayNode } from "./display";
+import { DisplayName, nameVariants, type DisplayNode } from "./display";
 import { agentRunRoots } from "./agent-run";
 import { renderDisplay } from "./engine";
 import { builtinFacets } from "./facets";
 import { FacetRegistry } from "./registry";
+import { toolNameDetail } from "./tool-name";
 
 const ATTR_TRUNCATE = 4000;
 const JSON_DECODE_LIMIT = 4;
@@ -61,6 +62,13 @@ function displayPayload(
   }));
   const node = display.kind && display.node_ids.length ? byId.get(display.node_ids[0]!) : undefined;
   if (node) {
+    const displayName = node.kind === "tool-call"
+      ? String(node.facts.tool ?? display.name)
+      : display.name;
+    const argumentsValue = node.kind === "tool-call"
+      ? context.raw_attr(String(node.facts.io_span ?? node.primary_span_id))["gen_ai.tool.call.arguments"]
+      : undefined;
+    display.display_name = new DisplayName(displayName, toolNameDetail(argumentsValue));
     const features = Object.fromEntries(
       Object.entries(lazyFeatures(
         node,
@@ -75,6 +83,7 @@ function displayPayload(
       node_id: node.node_id,
       kind: display.kind,
       name: display.name,
+      name_variants: nameVariants(display),
       service: node.service ?? "",
       start_ms: node.start_ms,
       duration_ms: Number(node.facts.wall_ms ?? node.duration_ms),
@@ -102,6 +111,7 @@ function displayPayload(
     node_id: display.node_ids.length ? `fold:${display.node_ids.slice(0, 3).join("·")}` : `fold:${display.name}`,
     kind: "",
     name: display.name,
+    name_variants: nameVariants(display),
     service: "",
     start_ms: start,
     duration_ms: end - start,
@@ -167,12 +177,20 @@ const SCRIPT = `${renderJsonSource}\n${String.raw`
 const TREES=__TREES__,SPANS=__SPANS__,KCOLOR={agent:'#7c3aed','agent-run':'#7c3aed','agent-turn':'#4f46e5',framework:'#2563eb',node:'#2563eb','model-call':'#059669','tool-call':'#d97706',action:'#0891b2',operation:'#0891b2',service:'#6b7280'};
 const treeEl=document.getElementById('tree'),paneEl=document.getElementById('pane');
 let perspective='full',layout='tree',tree=TREES.full,selectedId=location.hash.slice(1);
-let byId={},parentOf={},boxOf={},twOf={},flameBuilt=false;
+let byId={},parentOf={},boxOf={},twOf={},flameBuilt=false,stackMaxDuration=1;
 renderjson.set_icons('▸','▾').set_show_to_level(1);
 function esc(s){return String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));}
 function fmtMs(ms){if(ms<1)return(ms*1000).toFixed(0)+'µs';if(ms<1000)return ms.toFixed(0)+'ms';const s=ms/1000;return s<60?s.toFixed(2)+'s':Math.floor(s/60)+'m'+(s%60).toFixed(1)+'s';}
-function renderInto(n,depth,parent){byId[n.node_id]=n;parentOf[n.node_id]=parent&&parent.node_id;const box=document.createElement('div'),row=document.createElement('div');row.className='row'+(n.has_error?' err':'');row.dataset.id=n.node_id;row.style.paddingLeft=(depth*16+8)+'px';
-const tw=document.createElement('span');tw.className='tw';tw.textContent=n.children.length?'▾':'·';row.appendChild(tw);if(n.kind){const k=document.createElement('span');k.className='kind '+n.kind;k.textContent=n.kind;row.appendChild(k);}const nm=document.createElement('span');nm.textContent=n.name;row.appendChild(nm);const dur=document.createElement('span');dur.className='dur';dur.textContent=fmtMs(n.duration_ms);row.appendChild(dur);if(n.brief){const b=document.createElement('span');b.className='brief';b.textContent='('+n.brief+')';row.appendChild(b);}if(n.has_error){const e=document.createElement('span');e.className='errdot';e.textContent='[ERROR]';row.appendChild(e);}box.appendChild(row);const kids=document.createElement('div');box.appendChild(kids);boxOf[n.node_id]=kids;twOf[n.node_id]=tw;n.children.forEach(c=>kids.appendChild(renderInto(c,depth+1,n)));if(n.folded&&n.children.length){kids.style.display='none';tw.textContent='▸';}tw.onclick=ev=>{ev.stopPropagation();const open=kids.style.display!=='none';kids.style.display=open?'none':'';tw.textContent=n.children.length?(open?'▸':'▾'):'·';};row.onclick=()=>select(n.node_id);return box;}
+function nameLength(value){return Array.from(String(value||'')).length;}
+function fitName(value,budget){const chars=Array.from(String(value||'')),limit=Math.max(0,Math.floor(budget));if(chars.length<=limit)return chars.join('');if(limit===0)return'';if(limit===1)return'…';return chars.slice(0,limit-1).join('')+'…';}
+function compactName(n,budget){const candidates=Array.isArray(n.name_variants)&&n.name_variants.length?n.name_variants.map(String):[String(n.name||'')];const limit=Math.max(0,Math.floor(budget));for(const candidate of candidates){if(nameLength(candidate)<=limit)return candidate;}return fitName(candidates[candidates.length-1],limit);}
+// 父节点 duration 通常包含整棵子树；只有 leaf 参与高度映射，避免同一耗时被父子重复表达。
+function maxLeafDuration(ns){let max=1;for(const n of ns){max=Math.max(max,n.children.length?maxLeafDuration(n.children):n.duration_ms||0);}return max;}
+function timeHeight(ms,maxMs){const ratio=Math.sqrt(Math.max(0,ms||0)/Math.max(1,maxMs));const base=22,max=base*4;return Math.round(base+(max-base)*ratio);}
+// 高度决定可用行数，实际栏宽与缩进深度决定每行字符预算。
+function agentNameLayout(depth,rowHeight){const treeWidth=treeEl.clientWidth||Math.min(760,window.innerWidth*.52),width=Math.max(84,treeWidth-depth*16-210),lines=Math.max(1,Math.min(4,Math.floor(rowHeight/22)));return{width,lines,budget:Math.max(12,Math.floor(width/7))*lines};}
+function renderInto(n,depth,parent){byId[n.node_id]=n;parentOf[n.node_id]=parent&&parent.node_id;const box=document.createElement('div'),row=document.createElement('div');row.className='row'+(n.has_error?' err':'');row.dataset.id=n.node_id;row.style.paddingLeft=(depth*16+8)+'px';const timedLeaf=perspective==='agent'&&!n.children.length,rowHeight=timedLeaf?timeHeight(n.duration_ms,stackMaxDuration):22,nameLayout=perspective==='agent'?agentNameLayout(depth,rowHeight):null;if(nameLayout){row.style.minHeight=rowHeight+'px';row.style.alignItems='center';}
+const tw=document.createElement('span');tw.className='tw';tw.textContent=n.children.length?'▾':'·';row.appendChild(tw);if(n.kind){const k=document.createElement('span');k.className='kind '+n.kind;k.textContent=n.kind;row.appendChild(k);}const nm=document.createElement('span');nm.textContent=compactName(n,nameLayout?nameLayout.budget:48);if(nameLayout){nm.style.maxWidth=nameLayout.width+'px';nm.style.maxHeight=(nameLayout.lines*18)+'px';nm.style.lineHeight='18px';nm.style.whiteSpace='normal';nm.style.overflowWrap='anywhere';nm.style.overflow='hidden';}row.appendChild(nm);const dur=document.createElement('span');dur.className='dur';dur.textContent=fmtMs(n.duration_ms);row.appendChild(dur);if(n.brief){const b=document.createElement('span');b.className='brief';b.textContent='('+n.brief+')';row.appendChild(b);}if(n.has_error){const e=document.createElement('span');e.className='errdot';e.textContent='[ERROR]';row.appendChild(e);}box.appendChild(row);const kids=document.createElement('div');box.appendChild(kids);boxOf[n.node_id]=kids;twOf[n.node_id]=tw;n.children.forEach(c=>kids.appendChild(renderInto(c,depth+1,n)));if((n.folded||n.collapsed)&&n.children.length){kids.style.display='none';tw.textContent='▸';}tw.onclick=ev=>{ev.stopPropagation();const open=kids.style.display!=='none';kids.style.display=open?'none':'';tw.textContent=n.children.length?(open?'▸':'▾'):'·';};row.onclick=()=>select(n.node_id);return box;}
 function facts(n){const rows=Object.entries(n.facts||{});return rows.length?'<table class="facts">'+rows.map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+esc(v)+'</td></tr>').join('')+'</table>':'';}
 function findings(n){const marks={error:'✗',warn:'▲',info:'·'};return(n.findings||[]).length?'<div class="findings">'+n.findings.map(f=>'<div class="f-'+esc(f.severity)+'">'+(marks[f.severity]||'·')+' ['+esc(f.source)+'] '+esc(f.note)+'</div>').join('')+'</div>':'';}
 function features(n){const rows=Object.entries(n.features||{});return rows.length?'<div class="meta">特征：</div>'+rows.map(([k,v])=>'<div class="feat"><div class="feat-h">'+esc(k)+'</div><pre class="feat-body">'+esc(v)+'</pre></div>').join(''):'';}
@@ -182,13 +200,13 @@ function select(id){document.querySelectorAll('.row.sel').forEach(r=>r.classList
 function showSpan(sid){paneEl.querySelectorAll('.chip').forEach(c=>c.classList.toggle('sel',c.dataset.sid===sid));const sp=SPANS[sid],box=document.getElementById('attrs');box.replaceChildren();if(!sp){const missing=document.createElement('div');missing.className='meta';missing.textContent='span 不在快照内';box.appendChild(missing);return;}const meta=document.createElement('div');meta.className='meta';meta.textContent='span '+sid+' · '+sp.operation+' · '+fmtMs(sp.duration_ms);box.appendChild(meta);const attrs=document.createElement('dl');attrs.className='attrs';for(const [key,value] of Object.entries(sp.attrs)){const name=document.createElement('dt');name.textContent=key;attrs.append(name,attrValue(value));}box.appendChild(attrs);}
 function firstError(ns){for(const n of ns){if(n.has_error&&n.kind)return n.node_id;const child=firstError(n.children);if(child)return child;}return null;}
 function firstReal(ns){for(const n of ns){if(n.kind)return n.node_id;const child=firstReal(n.children);if(child)return child;}return null;}
-function renderTree(){tree=TREES[perspective]||{roots:[]};treeEl.replaceChildren();byId={};parentOf={};boxOf={};twOf={};flameBuilt=false;tree.roots.forEach(r=>treeEl.appendChild(renderInto(r,0,null)));if(!tree.roots.length){treeEl.innerHTML='<div class="empty">当前侧重点没有可展示节点</div>';paneEl.innerHTML='<div class="empty">切换到“完整”查看全部节点</div>';if(layout==='flame')buildFlame();return;}const wanted=selectedId&&byId[selectedId]?selectedId:null;select(wanted||firstError(tree.roots)||firstReal(tree.roots)||tree.roots[0].node_id);if(layout==='flame')buildFlame();}
+function renderTree(){tree=TREES[perspective]||{roots:[]};treeEl.replaceChildren();stackMaxDuration=perspective==='agent'?maxLeafDuration(tree.roots):1;byId={};parentOf={};boxOf={};twOf={};flameBuilt=false;tree.roots.forEach(r=>treeEl.appendChild(renderInto(r,0,null)));if(!tree.roots.length){treeEl.innerHTML='<div class="empty">当前侧重点没有可展示节点</div>';paneEl.innerHTML='<div class="empty">切换到“完整”查看全部节点</div>';if(layout==='flame')buildFlame();return;}const wanted=selectedId&&byId[selectedId]?selectedId:null;select(wanted||firstError(tree.roots)||firstReal(tree.roots)||tree.roots[0].node_id);if(layout==='flame')buildFlame();}
 document.getElementById('expand').onclick=()=>treeEl.querySelectorAll('.tw').forEach(t=>{if(t.textContent==='▸')t.click();});document.getElementById('fold').onclick=()=>treeEl.querySelectorAll('.tw').forEach(t=>{if(t.textContent==='▾')t.click();});
 const views={tree:document.getElementById('view-stack'),flame:document.getElementById('view-flame')};
 function showLayout(next){layout=next;Object.entries(views).forEach(([key,element])=>element.style.display=key===next?(key==='tree'?'flex':'block'):'none');document.querySelectorAll('[data-layout]').forEach(button=>button.classList.toggle('active',button.dataset.layout===next));document.getElementById('expand').style.display=next==='tree'?'':'none';document.getElementById('fold').style.display=next==='tree'?'':'none';if(next==='flame'&&!flameBuilt)buildFlame();}
 function showPerspective(next){perspective=next;document.querySelectorAll('[data-perspective]').forEach(button=>button.classList.toggle('active',button.dataset.perspective===next));renderTree();}
 document.querySelectorAll('[data-layout]').forEach(button=>button.onclick=()=>showLayout(button.dataset.layout));document.querySelectorAll('[data-perspective]').forEach(button=>button.onclick=()=>showPerspective(button.dataset.perspective));
-function buildFlame(){const box=document.getElementById('flame'),axis=document.getElementById('faxis');box.replaceChildren();axis.replaceChildren();if(!tree.roots.length){box.innerHTML='<div class="empty">当前侧重点没有可展示节点</div>';flameBuilt=true;return;}let t0=Infinity,t1=-Infinity,maxD=0;(function scan(ns,d){ns.forEach(n=>{t0=Math.min(t0,n.start_ms);t1=Math.max(t1,n.start_ms+n.duration_ms);maxD=Math.max(maxD,d);scan(n.children,d+1);});})(tree.roots,0);const span=Math.max(t1-t0,1e-6),rowH=20;box.style.height=((maxD+1)*rowH+4)+'px';for(let i=0;i<=10;i++){const s=document.createElement('span');s.style.left=(i*10)+'%';s.textContent=fmtMs(span*i/10);axis.appendChild(s);}(function place(ns,d){ns.forEach(n=>{const c=document.createElement('div');c.className='fcell'+(n.has_error?' err':'');c.style.left=((n.start_ms-t0)/span*100)+'%';c.style.width=Math.max(n.duration_ms/span*100,.15)+'%';c.style.top=(d*rowH)+'px';c.style.background=KCOLOR[n.kind]||'#9ca3af';c.textContent=n.name;c.onclick=()=>{showLayout('tree');select(n.node_id);};box.appendChild(c);place(n.children,d+1);});})(tree.roots,0);flameBuilt=true;}
+function buildFlame(){const box=document.getElementById('flame'),axis=document.getElementById('faxis');box.replaceChildren();axis.replaceChildren();if(!tree.roots.length){box.innerHTML='<div class="empty">当前侧重点没有可展示节点</div>';flameBuilt=true;return;}let t0=Infinity,t1=-Infinity,maxD=0;(function scan(ns,d){ns.forEach(n=>{t0=Math.min(t0,n.start_ms);t1=Math.max(t1,n.start_ms+n.duration_ms);maxD=Math.max(maxD,d);scan(n.children,d+1);});})(tree.roots,0);const span=Math.max(t1-t0,1e-6),rowH=20;box.style.height=((maxD+1)*rowH+4)+'px';for(let i=0;i<=10;i++){const s=document.createElement('span');s.style.left=(i*10)+'%';s.textContent=fmtMs(span*i/10);axis.appendChild(s);}(function place(ns,d){ns.forEach(n=>{const c=document.createElement('div');c.className='fcell'+(n.has_error?' err':'');c.style.left=((n.start_ms-t0)/span*100)+'%';c.style.width=Math.max(n.duration_ms/span*100,.15)+'%';c.style.top=(d*rowH)+'px';c.style.background=KCOLOR[n.kind]||'#9ca3af';box.appendChild(c);c.textContent=compactName(n,Math.max(1,Math.floor(c.clientWidth/7)));c.title=compactName(n,Number.MAX_SAFE_INTEGER)+' · '+n.kind+' · '+fmtMs(n.duration_ms)+(n.service?' · '+n.service:'')+(n.has_error?' · ERROR':'');c.onclick=()=>{showLayout('tree');select(n.node_id);};place(n.children,d+1);});})(tree.roots,0);flameBuilt=true;}
 renderTree();showLayout('tree');
 `}`;
 

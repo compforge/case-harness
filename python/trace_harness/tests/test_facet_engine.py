@@ -84,6 +84,23 @@ def test_render_interactive_via_engine_smoke():
     assert 'data-layout="tree"' in h and 'data-layout="flame"' in h
 
 
+def test_node_tree_tool_name_uses_shared_budget_compaction():
+    from trace_harness.view.interactive import render_interactive
+
+    ctx = _ctx()
+    tool = next(node for node in ctx.nodes if node.kind == "tool-call")
+    tool.facts["tool"] = "shell"
+    ctx.spans[tool.primary_span_id].attrs["gen_ai.tool.call.arguments"] = (
+        '{"command":"python3 references/scripts/stream_query.py --question example"}'
+    )
+
+    h = render_interactive(ctx)
+
+    assert '"name_variants": ["shell · stream_query.py", "stream_query.py", "shell"]' in h
+    assert "compactName(n,nameLayout?nameLayout.budget:48)" in h
+    assert "compactName(n,Math.max" in h
+
+
 def test_agent_perspective_keeps_semantic_nodes_and_compresses_context_paths():
     from trace_harness.model.node import Node
     from trace_harness.model.viewtree import build_view
@@ -314,4 +331,4 @@ def test_interactive_collapses_folded_by_default():
 
     h = render_interactive(_ctx())
     assert '"folded"' in h  # payload 传 folded 标记
-    assert "n.folded&&n.children.length" in h  # JS：folded 节点默认 display:none
+    assert "(n.folded||n.collapsed)&&n.children.length" in h

@@ -1,6 +1,8 @@
 import type { AgentRun, AgentRunIR, AgentTurn, TurnItem } from "../model/agent";
 import type { TraceContext } from "../model/context";
 import type { Finding, Node } from "../model/node";
+import { DisplayName, nameVariants } from "./display";
+import { toolNameDetail } from "./tool-name";
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
@@ -44,6 +46,11 @@ function facts(
   return values;
 }
 
+function payloadHasError(payload: Record<string, unknown>): boolean {
+  return Boolean(payload.has_error) || (payload.children as Array<Record<string, unknown>>)
+    .some(payloadHasError);
+}
+
 function itemPayload(
   context: TraceContext,
   item: TurnItem,
@@ -56,7 +63,6 @@ function itemPayload(
     brief.push(`model=${item.model}`);
   } else if (item.kind === "tool-call" && item.tool_call_id) {
     itemFacts.tool_call_id = item.tool_call_id;
-    brief.push(`call=${item.tool_call_id}`);
   }
   const agentRuns = item.kind === "tool-call" || item.kind === "operation" ? item.agent_runs ?? [] : [];
   const operations = item.kind === "operation" ? item.operations ?? [] : [];
@@ -69,10 +75,13 @@ function itemPayload(
     Number(left.start_ms) - Number(right.start_ms)
     || String(left.node_id).localeCompare(String(right.node_id))
   ));
+  const source = sourcePayload(context, item.source_node_ids, findings, item.status);
+  const detail = item.kind === "tool-call" ? toolNameDetail(item.input) : "";
   return {
     node_id: `agent-item:${item.kind}:${item.id}`,
     kind: item.kind,
     name: item.name,
+    name_variants: nameVariants(new DisplayName(item.name, detail)),
     start_ms: item.start_ms,
     duration_ms: item.duration_ms,
     brief: brief.join(" · "),
@@ -82,8 +91,10 @@ function itemPayload(
       ...(item.output === undefined ? [] : [["output", text(item.output)]]),
     ]),
     folded: 0,
+    collapsed: item.kind === "operation" && children.length > 0
+      && !source.has_error && !children.some(payloadHasError),
     children,
-    ...sourcePayload(context, item.source_node_ids, findings, item.status),
+    ...source,
   };
 }
 
@@ -97,10 +108,12 @@ function turnPayload(
   const sources = turn.source_node_ids?.length
     ? turn.source_node_ids
     : [...new Set(turn.items.flatMap(itemSources))];
+  const name = turn.name || `Turn ${index + 1}`;
   return {
     node_id: `agent-turn:${turn.id}`,
     kind: "agent-turn",
-    name: turn.name || `Turn ${index + 1}`,
+    name,
+    name_variants: nameVariants(new DisplayName(name)),
     start_ms: turn.start_ms,
     duration_ms: turn.duration_ms,
     brief: `${turn.items.length} items`,
@@ -149,6 +162,7 @@ function runPayload(
     node_id: `agent-run:${run.id}`,
     kind: "agent-run",
     name: run.name,
+    name_variants: nameVariants(new DisplayName(run.name)),
     start_ms: run.start_ms,
     duration_ms: run.duration_ms,
     brief: `${turnIndex} turns · ${operationCount} operations`,

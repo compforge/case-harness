@@ -8,8 +8,31 @@ facet 不拼字符串、不碰格式：它只产出结构化的 DisplayNode（�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from trace_harness.model.node import Field, Finding
+
+
+class CompactName(Protocol):
+    """Presentation object that owns names from highest to lowest fidelity."""
+
+    def name_variants(self) -> tuple[str, ...]: ...
+
+
+@dataclass(frozen=True)
+class DisplayName:
+    name: str
+    detail: str = ""
+
+    def name_variants(self) -> tuple[str, ...]:
+        if not self.detail:
+            return (self.name,)
+        return f"{self.name} · {self.detail}", self.detail, self.name
+
+
+def name_variants(named: CompactName) -> list[str]:
+    """Serialize compact names for renderers whose budget is known only at runtime."""
+    return list(named.name_variants())
 
 
 @dataclass
@@ -21,3 +44,7 @@ class DisplayNode:
     children: list[DisplayNode] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)  # engine 按 node_id 绑定（含上浮的）
     folded: int = 0  # 本行折叠/聚合掉多少个原生 Node（× N / rollup 提示）
+    display_name: DisplayName | None = None
+
+    def name_variants(self) -> tuple[str, ...]:
+        return (self.display_name or DisplayName(self.name)).name_variants()

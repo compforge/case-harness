@@ -10,6 +10,7 @@ import {
   type AgentRunIR,
   type TraceContext,
 } from "../src";
+import { agentRunRoots } from "../src/view/agent-run";
 
 function fixtureDocuments(): Array<Record<string, unknown>> {
   const path = resolve(import.meta.dir, "../../../conformance/trace/fixtures/genai-basic.jsonl");
@@ -210,6 +211,105 @@ describe("AgentRun IR", () => {
     expect(html).toContain("run.finalize");
     expect(html).toContain("agent-run:run-worker");
     expect(html).toContain("worker-model");
+    expect(html).toContain("agentNameLayout(depth,rowHeight)");
+    expect(html).toContain("compactName(n,nameLayout?nameLayout.budget:48)");
+    expect(html).toContain("timeHeight(n.duration_ms,stackMaxDuration)");
+    expect(html).toContain("const timedLeaf=perspective==='agent'&&!n.children.length");
+    expect(html).toContain("maxLeafDuration(tree.roots)");
+    expect(html).toContain("const base=22,max=base*4");
+    expect(html).not.toContain("call=call-search-1");
+    expect(html).toContain('"tool_call_id":"call-search-1"');
+  });
+
+  test("uses file and command names instead of call IDs for tool display", () => {
+    const instance = harness();
+    const context = instance.assemble(normalizeJaegerSpans(fixtureDocuments()));
+    const ir = createAgentRunIR(context.trace_id, [{
+      id: "run",
+      name: "run",
+      start_ms: 0,
+      duration_ms: 1,
+      items: [{
+        kind: "agent-turn",
+        id: "turn",
+        name: "turn",
+        start_ms: 0,
+        duration_ms: 1,
+        items: [{
+          kind: "tool-call",
+          id: "read",
+          name: "read_file",
+          start_ms: 0,
+          duration_ms: 0,
+          tool_call_id: "call-read",
+          input: { path: "/workspace/references/market.md" },
+        }, {
+          kind: "tool-call",
+          id: "shell",
+          name: "shell",
+          start_ms: 0,
+          duration_ms: 0,
+          tool_call_id: "call-shell",
+          input: {
+            command: "cd /workspace/skills/demo && python3 references/scripts/stream_query.py --question example 2>&1",
+          },
+        }],
+      }],
+    }]);
+
+    const items = ((agentRunRoots(context, ir, {})[0]!.children as Array<Record<string, unknown>>)[0]!
+      .children as Array<Record<string, unknown>>);
+
+    expect(items[0]!.name_variants).toEqual(["read_file · market.md", "market.md", "read_file"]);
+    expect(items[1]!.name_variants).toEqual(["shell · stream_query.py", "stream_query.py", "shell"]);
+    expect(items[0]!.brief).toBe("");
+    expect(items[1]!.brief).toBe("");
+    expect(items[0]!.facts).toMatchObject({ tool_call_id: "call-read" });
+    expect(items[1]!.facts).toMatchObject({ tool_call_id: "call-shell" });
+  });
+
+  test("collapses operations unless their subtree contains an error", () => {
+    const instance = harness();
+    const context = instance.assemble(normalizeJaegerSpans(fixtureDocuments()));
+    const ir = createAgentRunIR(context.trace_id, [{
+      id: "run",
+      name: "run",
+      start_ms: 0,
+      duration_ms: 1,
+      items: [{
+        kind: "operation",
+        id: "quiet",
+        name: "quiet",
+        start_ms: 0,
+        duration_ms: 1,
+        operations: [{
+          kind: "operation",
+          id: "child",
+          name: "child",
+          start_ms: 0,
+          duration_ms: 1,
+        }],
+      }, {
+        kind: "operation",
+        id: "failed-parent",
+        name: "failed-parent",
+        start_ms: 0,
+        duration_ms: 1,
+        operations: [{
+          kind: "operation",
+          id: "failed",
+          name: "failed",
+          start_ms: 0,
+          duration_ms: 1,
+          status: "error",
+        }],
+      }],
+    }]);
+
+    const operations = agentRunRoots(context, ir, {})[0]!.children as Array<Record<string, unknown>>;
+
+    expect(operations[0]!.collapsed).toBe(true);
+    expect(operations[1]!.collapsed).toBe(false);
   });
 
   test("hides the Agent view when no extractor is contributed", () => {

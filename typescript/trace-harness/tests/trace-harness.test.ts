@@ -83,6 +83,21 @@ describe("Python trace_harness parity fixture", () => {
     expect(html).toContain("dd.appendChild(renderjson(payload.value))");
     expect(html).not.toContain("function jsonTree(value,label,depth)");
   });
+
+  test("uses shared budget compaction for Node Tree and flame graph tool names", () => {
+    const context = assemble(normalizeJaegerSpans(fixtureDocuments()), genAiSpecs());
+    const tool = context.nodes.find((node) => node.kind === "tool-call")!;
+    tool.facts.tool = "shell";
+    context.spans.get(tool.primary_span_id)!.attrs["gen_ai.tool.call.arguments"] = JSON.stringify({
+      command: "python3 references/scripts/stream_query.py --question example",
+    });
+
+    const html = renderInteractive(context);
+
+    expect(html).toContain('"name_variants":["shell · stream_query.py","stream_query.py","shell"]');
+    expect(html).toContain("compactName(n,nameLayout?nameLayout.budget:48)");
+    expect(html).toContain("compactName(n,Math.max");
+  });
 });
 
 describe("trace perspectives", () => {

@@ -30,11 +30,12 @@ from trace_harness.model.agent import AgentRunIR
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Finding, Node
 from trace_harness.view.agent_run import agent_run_roots
-from trace_harness.view.display import DisplayNode
+from trace_harness.view.display import DisplayName, DisplayNode, name_variants
 from trace_harness.view.engine import render as _engine_render
 from trace_harness.view.facet import RenderConfig
 from trace_harness.view.facets import builtin_facets
 from trace_harness.view.registry import FacetRegistry
+from trace_harness.view.tool_name import tool_name_detail
 
 ATTR_TRUNCATE = 4000  # 单 attr 值超过即截断；完整原文按 span_id 走 dump-io
 
@@ -53,10 +54,20 @@ def _disp_payload(
     kids = [_disp_payload(ctx, c, byid, feature_registry) for c in d.children]
     node = byid.get(d.node_ids[0]) if (d.kind and d.node_ids) else None
     if node is not None:
+        display_name = str(node.facts.get("tool") or d.name) if node.kind == "tool-call" else d.name
+        arguments = (
+            ctx.raw_attr(str(node.facts.get("io_span") or node.primary_span_id)).get(
+                "gen_ai.tool.call.arguments"
+            )
+            if node.kind == "tool-call"
+            else None
+        )
+        d.display_name = DisplayName(display_name, tool_name_detail(arguments))
         return {
             "node_id": node.node_id,
             "kind": d.kind,
             "name": d.name,
+            "name_variants": name_variants(d),
             "service": node.service,
             "start_ms": node.start_ms,
             "duration_ms": node.facts.get("wall_ms", node.duration_ms),
@@ -90,6 +101,7 @@ def _disp_payload(
         "node_id": "fold:" + "·".join(d.node_ids[:3]) if d.node_ids else "fold:" + d.name,
         "kind": "",
         "name": d.name,
+        "name_variants": name_variants(d),
         "service": "",
         "start_ms": start,
         "duration_ms": end - start,
@@ -198,11 +210,30 @@ const KCOLOR={agent:'#7c3aed','agent-run':'#7c3aed','agent-turn':'#4f46e5',frame
   node:'#2563eb','model-call':'#059669','tool-call':'#d97706',action:'#0891b2',operation:'#0891b2',service:'#6b7280'};
 const treeEl=document.getElementById('tree'),paneEl=document.getElementById('pane');
 let perspective='full',layout='tree',tree=TREES.full,selectedId=location.hash.slice(1);
-let byId={},parentOf={},boxOf={},twOf={},flameBuilt=false;
+let byId={},parentOf={},boxOf={},twOf={},flameBuilt=false,stackMaxDuration=1;
 function fmtMs(ms){if(ms<1)return (ms*1000).toFixed(0)+'µs';if(ms<1000)return ms.toFixed(0)+'ms';
   const s=ms/1000;if(s<60)return s.toFixed(2)+'s';return Math.floor(s/60)+'m'+(s%60).toFixed(1)+'s';}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function kindClass(k){return k.replace(/[^a-zA-Z0-9-]/g,'-');}
+function nameLength(value){return Array.from(String(value||'')).length;}
+function fitName(value,budget){const chars=Array.from(String(value||'')),limit=Math.max(0,Math.floor(budget));
+  if(chars.length<=limit)return chars.join('');if(limit===0)return'';if(limit===1)return'…';
+  return chars.slice(0,limit-1).join('')+'…';}
+// 展示节点自己提供从高到低保真度的语义表示；渲染器只负责按预算选择。
+function compactName(n,budget){const candidates=Array.isArray(n.name_variants)&&n.name_variants.length
+    ?n.name_variants.map(String):[String(n.name||'')];
+  const limit=Math.max(0,Math.floor(budget));
+  for(const candidate of candidates){if(nameLength(candidate)<=limit)return candidate;}
+  return fitName(candidates[candidates.length-1],limit);}
+// 父节点 duration 通常包含整棵子树；只有 leaf 参与高度映射，避免同一耗时被父子重复表达。
+function maxLeafDuration(ns){let max=1;for(const n of ns){max=Math.max(max,n.children.length
+    ?maxLeafDuration(n.children):n.duration_ms||0);}return max;}
+function timeHeight(ms,maxMs){const ratio=Math.sqrt(Math.max(0,ms||0)/Math.max(1,maxMs));
+  const base=22,max=base*4;return Math.round(base+(max-base)*ratio);}
+// 高度决定可用行数，实际栏宽与缩进深度决定每行字符预算。
+function agentNameLayout(depth,rowHeight){const treeWidth=treeEl.clientWidth||Math.min(760,window.innerWidth*.52);
+  const width=Math.max(84,treeWidth-depth*16-210),lines=Math.max(1,Math.min(4,Math.floor(rowHeight/22)));
+  return{width,lines,budget:Math.max(12,Math.floor(width/7))*lines};}
 function renderInto(n,depth,parent){const box=document.createElement('div');
   renderRowInto(box,n,depth,parent);return box;}
 function renderRowInto(box,n,depth,parent){
@@ -210,10 +241,17 @@ function renderRowInto(box,n,depth,parent){
   const row=document.createElement('div');
   row.className='row'+(n.has_error?' err':'');row.dataset.id=n.node_id;
   row.style.paddingLeft=(depth*16+8)+'px';
+  const timedLeaf=perspective==='agent'&&!n.children.length;
+  const rowHeight=timedLeaf?timeHeight(n.duration_ms,stackMaxDuration):22;
+  const nameLayout=perspective==='agent'?agentNameLayout(depth,rowHeight):null;
+  if(nameLayout){row.style.minHeight=rowHeight+'px';row.style.alignItems='center';}
   const tw=document.createElement('span');tw.className='tw';
   tw.textContent=n.children.length?'▾':'·';row.appendChild(tw);
   if(n.kind){const k=document.createElement('span');k.className='kind '+kindClass(n.kind);k.textContent=n.kind;row.appendChild(k);}
-  const nm=document.createElement('span');nm.textContent=n.name;row.appendChild(nm);
+  const nm=document.createElement('span');nm.textContent=compactName(n,nameLayout?nameLayout.budget:48);
+  if(nameLayout){nm.style.maxWidth=nameLayout.width+'px';nm.style.maxHeight=(nameLayout.lines*18)+'px';
+    nm.style.lineHeight='18px';nm.style.whiteSpace='normal';nm.style.overflowWrap='anywhere';nm.style.overflow='hidden';}
+  row.appendChild(nm);
   const d=document.createElement('span');d.className='dur';d.textContent=fmtMs(n.duration_ms);row.appendChild(d);
   if(n.brief){const be=document.createElement('span');be.className='brief';be.textContent='('+n.brief+')';row.appendChild(be);}
   if(n.has_error){const e=document.createElement('span');e.className='errdot';e.textContent='[ERROR]';row.appendChild(e);}
@@ -221,7 +259,7 @@ function renderRowInto(box,n,depth,parent){
   const kidsBox=document.createElement('div');box.appendChild(kidsBox);
   boxOf[n.node_id]=kidsBox;twOf[n.node_id]=tw;
   n.children.forEach(c=>kidsBox.appendChild(renderInto(c,depth+1,n)));
-  if(n.folded&&n.children.length){kidsBox.style.display='none';tw.textContent='▸';}  // 折叠合成节点默认收起，点开才展
+  if((n.folded||n.collapsed)&&n.children.length){kidsBox.style.display='none';tw.textContent='▸';}  // 聚合节点和低关注 operation 默认收起
   tw.addEventListener('click',ev=>{ev.stopPropagation();
     const open=kidsBox.style.display!=='none';
     kidsBox.style.display=open?'none':'';tw.textContent=n.children.length?(open?'▸':'▾'):'·';});
@@ -310,6 +348,7 @@ function firstReal(ns){for(const n of ns){if(n.kind)return n.node_id;
   const k=firstReal(n.children);if(k)return k;}return null;}
 function renderTree(){
   tree=TREES[perspective]||{roots:[]};treeEl.replaceChildren();
+  stackMaxDuration=perspective==='agent'?maxLeafDuration(tree.roots):1;
   byId={};parentOf={};boxOf={};twOf={};flameBuilt=false;
   tree.roots.forEach(r=>treeEl.appendChild(renderInto(r,0,null)));
   if(!tree.roots.length){treeEl.innerHTML='<div class="empty">当前侧重点没有可展示节点</div>';
@@ -338,11 +377,11 @@ function buildFlame(){
     c.style.width=Math.max(n.duration_ms/span*100,0.15)+'%';
     c.style.top=(d*rowH)+'px';
     c.style.background=KCOLOR[n.kind]||'#9ca3af';
-    c.textContent=n.name;
-    c.title=n.name+' · '+n.kind+' · '+fmtMs(n.duration_ms)
+    box.appendChild(c);
+    c.textContent=compactName(n,Math.max(1,Math.floor(c.clientWidth/7)));
+    c.title=compactName(n,Number.MAX_SAFE_INTEGER)+' · '+n.kind+' · '+fmtMs(n.duration_ms)
       +(n.service?' · '+n.service:'')+(n.has_error?' · ERROR':'');
     c.addEventListener('click',()=>{showLayout('tree');select(n.node_id);});
-    box.appendChild(c);
     place(n.children,d+1);});})(tree.roots,0);flameBuilt=true;}
 renderTree();showLayout('tree');
 """
