@@ -218,6 +218,65 @@ def test_interactive_agent_view_is_owned_by_agent_run_renderer():
     assert "tool-search" in html
     assert "agent-run:run-worker" in html
     assert "worker-model" in html
+    assert "compactName(n,48)" in html
+    assert "timeHeight(n.duration_ms,stackMaxDuration)" in html
+
+
+def test_tool_display_details_prefer_file_and_command_over_call_id():
+    harness = _harness()
+    context = harness.assemble(load_jaeger_file(RAW))
+    ir = AgentRunIR(
+        trace_id=context.trace_id,
+        runs=(
+            AgentRun(
+                id="run",
+                name="run",
+                start_ms=0,
+                duration_ms=1,
+                items=(
+                    AgentTurn(
+                        id="turn",
+                        name="turn",
+                        start_ms=0,
+                        duration_ms=1,
+                        items=(
+                            ToolCall(
+                                id="read",
+                                name="read_file",
+                                start_ms=0,
+                                duration_ms=0,
+                                tool_call_id="call-read",
+                                input={"path": "/workspace/references/market.md"},
+                            ),
+                            ToolCall(
+                                id="shell",
+                                name="shell",
+                                start_ms=0,
+                                duration_ms=0,
+                                tool_call_id="call-shell",
+                                input={
+                                    "command": (
+                                        "cd /workspace/skills/demo && python3 "
+                                        "references/analysis/scripts/stream_query.py "
+                                        "--question example 2>&1"
+                                    )
+                                },
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    items = agent_run_roots(context, ir, {})[0]["children"][0]["children"]
+
+    assert items[0]["name_variants"] == ["read_file · market.md", "market.md", "read_file"]
+    assert items[1]["name_variants"] == ["shell · stream_query.py", "stream_query.py", "shell"]
+    assert items[0]["brief"] == ""
+    assert items[1]["brief"] == ""
+    assert items[0]["facts"]["tool_call_id"] == "call-read"
+    assert items[1]["facts"]["tool_call_id"] == "call-shell"
 
 
 def test_turn_source_fallback_includes_nested_operation_sources():
@@ -264,6 +323,44 @@ def test_turn_source_fallback_includes_nested_operation_sources():
 
     assert turn["facts"]["source_nodes"] == agent.node_id
     assert turn["span_ids"] == list(agent.span_ids)
+    assert turn["children"][0]["collapsed"] is True
+
+
+def test_operation_with_error_descendant_stays_expanded():
+    harness = _harness()
+    context = harness.assemble(load_jaeger_file(RAW))
+    ir = AgentRunIR(
+        trace_id=context.trace_id,
+        runs=(
+            AgentRun(
+                id="run",
+                name="run",
+                start_ms=0,
+                duration_ms=1,
+                items=(
+                    Operation(
+                        id="outer",
+                        name="outer",
+                        start_ms=0,
+                        duration_ms=1,
+                        operations=(
+                            Operation(
+                                id="failed",
+                                name="failed",
+                                start_ms=0,
+                                duration_ms=1,
+                                status="error",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    operation = agent_run_roots(context, ir, {})[0]["children"][0]
+
+    assert operation["collapsed"] is False
 
 
 def test_interactive_hides_agent_view_without_an_extractor():

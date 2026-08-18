@@ -16,6 +16,8 @@ from trace_harness.model.agent import (
 )
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Finding
+from trace_harness.view.display import DisplayName, name_variants
+from trace_harness.view.tool_name import tool_name_detail
 
 
 def _text(value: Any) -> str:
@@ -70,6 +72,12 @@ def _facts(
     return values
 
 
+def _payload_has_error(payload: dict[str, Any]) -> bool:
+    return bool(payload["has_error"]) or any(
+        _payload_has_error(child) for child in payload["children"]
+    )
+
+
 def _item_payload(
     context: TraceContext,
     item: TurnItem,
@@ -80,9 +88,9 @@ def _item_payload(
     if isinstance(item, ModelCall) and item.model:
         facts = {"model": item.model, **facts}
         brief_parts.append(f"model={item.model}")
-    elif isinstance(item, ToolCall) and item.tool_call_id:
-        facts = {"tool_call_id": item.tool_call_id, **facts}
-        brief_parts.append(f"call={item.tool_call_id}")
+    elif isinstance(item, ToolCall):
+        if item.tool_call_id:
+            facts = {"tool_call_id": item.tool_call_id, **facts}
     agent_runs = item.agent_runs if isinstance(item, ToolCall | Operation) else ()
     operations = item.operations if isinstance(item, Operation) else ()
     if operations:
@@ -99,18 +107,28 @@ def _item_payload(
         *(_run_payload(context, run, findings) for run in agent_runs),
     ]
     children.sort(key=lambda child: (child["start_ms"], child["node_id"]))
+    source = _source_payload(context, item.source_node_ids, findings, item.status)
+    detail = tool_name_detail(item.input) if isinstance(item, ToolCall) else ""
     return {
         "node_id": f"agent-item:{item.kind}:{item.id}",
         "kind": item.kind,
         "name": item.name,
+        "name_variants": name_variants(DisplayName(item.name, detail)),
         "start_ms": item.start_ms,
         "duration_ms": item.duration_ms,
         "brief": " · ".join(brief_parts),
         "facts": facts,
         "features": features,
         "folded": 0,
+        # Operation 是上下文包装层，默认降噪；包含错误时保持展开，避免隐藏观测信号。
+        "collapsed": (
+            isinstance(item, Operation)
+            and bool(children)
+            and not source["has_error"]
+            and not any(_payload_has_error(child) for child in children)
+        ),
         "children": children,
-        **_source_payload(context, item.source_node_ids, findings, item.status),
+        **source,
     }
 
 
@@ -124,10 +142,12 @@ def _turn_payload(
     sources = turn.source_node_ids or tuple(
         dict.fromkeys(node_id for item in turn.items for node_id in _item_sources(item))
     )
+    name = turn.name or f"Turn {index + 1}"
     return {
         "node_id": f"agent-turn:{turn.id}",
         "kind": "agent-turn",
-        "name": turn.name or f"Turn {index + 1}",
+        "name": name,
+        "name_variants": name_variants(DisplayName(name)),
         "start_ms": turn.start_ms,
         "duration_ms": turn.duration_ms,
         "brief": f"{len(turn.items)} items",
@@ -190,6 +210,7 @@ def _run_payload(
         "node_id": f"agent-run:{run.id}",
         "kind": "agent-run",
         "name": run.name,
+        "name_variants": name_variants(DisplayName(run.name)),
         "start_ms": run.start_ms,
         "duration_ms": run.duration_ms,
         "brief": f"{turn_index} turns · {operation_count} operations",
