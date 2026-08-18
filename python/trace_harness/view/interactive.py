@@ -163,6 +163,7 @@ nav.switch button.active{background:#2563eb;color:#fff}
 .tree{flex:0 0 52%;max-width:760px;overflow:auto;border-right:1px solid #e5e7eb;background:#fff;padding:8px 0}
 .pane{flex:1;overflow:auto;padding:16px}
 .row{white-space:nowrap;cursor:pointer;font-size:12px;padding:2px 8px;border-left:3px solid transparent;display:flex;align-items:baseline;gap:6px}
+.row.agent-row{border-left-color:var(--node-color,#9ca3af)}
 .row:hover{background:#f1f5f9}
 .row.sel{background:#e0edff;border-left-color:#3b82f6}
 .row.err{color:#b91c1c}
@@ -244,7 +245,9 @@ function renderRowInto(box,n,depth,parent){
   const timedLeaf=perspective==='agent'&&!n.children.length;
   const rowHeight=timedLeaf?timeHeight(n.duration_ms,stackMaxDuration):22;
   const nameLayout=perspective==='agent'?agentNameLayout(depth,rowHeight):null;
-  if(nameLayout){row.style.minHeight=rowHeight+'px';row.style.alignItems='center';}
+  // 每个 Agent node 都用 kind 色左边条标出自身边界；leaf 的时间高度会自然变成长条。
+  if(nameLayout){row.classList.add('agent-row');row.style.setProperty('--node-color',KCOLOR[n.kind]||'#9ca3af');
+    row.style.minHeight=rowHeight+'px';row.style.alignItems='center';}
   const tw=document.createElement('span');tw.className='tw';
   tw.textContent=n.children.length?'▾':'·';row.appendChild(tw);
   if(n.kind){const k=document.createElement('span');k.className='kind '+kindClass(n.kind);k.textContent=n.kind;row.appendChild(k);}
