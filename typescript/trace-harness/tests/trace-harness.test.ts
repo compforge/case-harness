@@ -123,6 +123,23 @@ describe("Python trace_harness parity fixture", () => {
     };
     expect(nameProjections(plain)).toEqual(["plain"]);
   });
+
+  test("jumps between the ratios reported by compact names", () => {
+    let calls = 0;
+    const sparseName = {
+      compact(expect: number): readonly [string, number] {
+        calls += 1;
+        if (expect >= 1) return ["x".repeat(1000), 1];
+        if (expect >= 0.5) return ["m".repeat(500), 0.5];
+        return ["s".repeat(100), 0.1];
+      },
+    };
+
+    expect(nameProjections(sparseName)).toEqual([
+      "x".repeat(1000), "m".repeat(500), "s".repeat(100),
+    ]);
+    expect(calls).toBe(4);
+  });
 });
 
 describe("trace perspectives", () => {

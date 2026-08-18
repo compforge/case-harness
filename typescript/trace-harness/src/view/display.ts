@@ -2,7 +2,8 @@ import type { Field, Finding } from "../model/node";
 
 export interface Compact {
   // expect is a target upper bound; implementations own their semantic views
-  // and may return an actual ratio well below it.
+  // and may return an actual ratio well below it. Serializers use actual as the
+  // next breakpoint, so it must describe the returned projection truthfully.
   compact(expect: number): readonly [name: string, actual: number];
 }
 
@@ -52,14 +53,18 @@ export function nameProjections(named: DisplayNode | Compact, defaultName = ""):
     ? named as Compact
     : new DisplayName(defaultName || (named as DisplayNode).name);
   const compact = (expect: number) => owner.compact(expect);
-  const [raw] = compact(1);
+  const [raw, rawActual] = compact(1);
   const rawLength = Math.max(1, nameLength(raw));
-  const projections: string[] = [];
-  // Offline HTML cannot call the original object. Probe every display-column
-  // budget so the browser can preserve its ratio-based contract while dragging.
-  for (let budget = rawLength; budget >= 0; budget -= 1) {
-    const [name] = compact(budget / rawLength);
+  const projections = [raw];
+  // Offline HTML cannot call the original object. Use each returned ratio as the
+  // next breakpoint instead of probing every display-column budget.
+  let budget = Math.ceil(rawActual * rawLength) - 1;
+  while (budget >= 0) {
+    const expect = budget / rawLength;
+    const [name, actual] = compact(expect);
     if (!projections.includes(name)) projections.push(name);
+    if (actual > expect) break;
+    budget = Math.min(budget - 1, Math.ceil(actual * rawLength) - 1);
   }
   return projections;
 }

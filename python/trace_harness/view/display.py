@@ -8,6 +8,7 @@ facet 不拼字符串、不碰格式：它只产出结构化的 DisplayNode（�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import ceil
 from typing import Protocol, runtime_checkable
 
 from trace_harness.model.node import Field, Finding
@@ -15,7 +16,11 @@ from trace_harness.model.node import Field, Finding
 
 @runtime_checkable
 class Compact(Protocol):
-    """Optional display capability that chooses a name for a target size ratio."""
+    """Choose a name for a target ratio and report its actual ratio.
+
+    Serializers use ``actual`` as the next breakpoint, so implementations should return the
+    highest-fidelity stable projection that fits ``expect``.
+    """
 
     def compact(self, expect: float) -> tuple[str, float]: ...
 
@@ -49,13 +54,19 @@ class DisplayName:
 def name_projections(named: DisplayNode | Compact, default_name: str = "") -> list[str]:
     """Serialize every distinct name needed by an integer display-width budget."""
     owner = named if isinstance(named, Compact) else DisplayName(default_name or named.name)
-    raw, _ = owner.compact(1)
+    raw, actual = owner.compact(1)
     raw_length = max(1, _name_length(raw))
-    projections: list[str] = []
-    for budget in range(raw_length, -1, -1):
-        name, _ = owner.compact(budget / raw_length)
+    projections = [raw]
+    budget = ceil(actual * raw_length) - 1
+    while budget >= 0:
+        expect = budget / raw_length
+        name, actual = owner.compact(expect)
         if name not in projections:
             projections.append(name)
+        if actual > expect:
+            break
+        # One projection covers every integer budget down to its actual ratio.
+        budget = min(budget - 1, ceil(actual * raw_length) - 1)
     return projections
 
 

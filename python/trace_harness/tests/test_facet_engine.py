@@ -114,6 +114,26 @@ def test_display_name_compaction_uses_ratio_budget():
     assert name_projections(DisplayNode(kind="node", name="plain")) == ["plain"]
 
 
+def test_name_projections_jump_between_reported_ratios():
+    from trace_harness.view.display import name_projections
+
+    class SparseName:
+        calls = 0
+
+        def compact(self, expect: float) -> tuple[str, float]:
+            self.calls += 1
+            if expect >= 1:
+                return "x" * 1000, 1
+            if expect >= 0.5:
+                return "m" * 500, 0.5
+            return "s" * 100, 0.1
+
+    name = SparseName()
+
+    assert name_projections(name) == ["x" * 1000, "m" * 500, "s" * 100]
+    assert name.calls == 4
+
+
 def test_agent_perspective_keeps_semantic_nodes_and_compresses_context_paths():
     from trace_harness.model.node import Node
     from trace_harness.model.viewtree import build_view
