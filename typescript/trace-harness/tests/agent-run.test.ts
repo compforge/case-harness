@@ -211,15 +211,16 @@ describe("AgentRun IR", () => {
     expect(html).toContain("run.finalize");
     expect(html).toContain("agent-run:run-worker");
     expect(html).toContain("worker-model");
-    expect(html).toContain("agentNameLayout(depth,rowHeight)");
-    expect(html).toContain("compactName(n,nameLayout?nameLayout.budget:48)");
+    expect(html).toContain("nodeNameLayout(depth,rowHeight)");
+    expect(html).toContain("applyNameLayout(row,n,depth,rowHeight)");
     expect(html).toContain("timeHeight(n.duration_ms,stackMaxDuration)");
     expect(html).toContain("const timedLeaf=perspective==='agent'&&!n.children.length");
     expect(html).toContain("maxLeafDuration(tree.roots)");
     expect(html).toContain("const base=22,max=base*4");
-    expect(html).toContain(".row.agent-row{border-left-color:var(--node-color,#9ca3af)}");
+    expect(html).toContain(".row.agent-row::before");
     expect(html).toContain("row.classList.add('agent-row')");
     expect(html).toContain("row.style.setProperty('--node-color',KCOLOR[n.kind]||'#9ca3af')");
+    expect(html).toContain("row.style.setProperty('--node-indent',(depth*16+4)+'px')");
     expect(html).not.toContain("call=call-search-1");
     expect(html).toContain('"tool_call_id":"call-search-1"');
   });
@@ -263,7 +264,7 @@ describe("AgentRun IR", () => {
     const items = ((agentRunRoots(context, ir, {})[0]!.children as Array<Record<string, unknown>>)[0]!
       .children as Array<Record<string, unknown>>);
 
-    expect(items[0]!.name_variants).toEqual(["read_file · market.md", "market.md", "read_file"]);
+    expect(items[0]!.name_variants).toEqual(["read_file · market.md", "market.md"]);
     expect(items[1]!.name_variants).toEqual(["shell · stream_query.py", "stream_query.py", "shell"]);
     expect(items[0]!.brief).toBe("");
     expect(items[1]!.brief).toBe("");

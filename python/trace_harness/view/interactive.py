@@ -30,7 +30,7 @@ from trace_harness.model.agent import AgentRunIR
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Finding, Node
 from trace_harness.view.agent_run import agent_run_roots
-from trace_harness.view.display import DisplayName, DisplayNode, name_variants
+from trace_harness.view.display import Compact, DisplayName, DisplayNode, name_projections
 from trace_harness.view.engine import render as _engine_render
 from trace_harness.view.facet import RenderConfig
 from trace_harness.view.facets import builtin_facets
@@ -62,12 +62,20 @@ def _disp_payload(
             if node.kind == "tool-call"
             else None
         )
-        d.display_name = DisplayName(display_name, tool_name_detail(arguments))
+        compact = (
+            d
+            if isinstance(d, Compact)
+            else (
+                DisplayName(display_name, tool_name_detail(arguments))
+                if node.kind == "tool-call"
+                else d
+            )
+        )
         return {
             "node_id": node.node_id,
             "kind": d.kind,
             "name": d.name,
-            "name_variants": name_variants(d),
+            "name_variants": name_projections(compact, d.name),
             "service": node.service,
             "start_ms": node.start_ms,
             "duration_ms": node.facts.get("wall_ms", node.duration_ms),
@@ -101,7 +109,7 @@ def _disp_payload(
         "node_id": "fold:" + "·".join(d.node_ids[:3]) if d.node_ids else "fold:" + d.name,
         "kind": "",
         "name": d.name,
-        "name_variants": name_variants(d),
+        "name_variants": name_projections(d),
         "service": "",
         "start_ms": start,
         "duration_ms": end - start,
@@ -162,8 +170,8 @@ nav.switch button.active{background:#2563eb;color:#fff}
 .fcell.err{box-shadow:inset 0 0 0 2px #dc2626}
 .tree{flex:0 0 52%;max-width:760px;overflow:auto;border-right:1px solid #e5e7eb;background:#fff;padding:8px 0}
 .pane{flex:1;overflow:auto;padding:16px}
-.row{white-space:nowrap;cursor:pointer;font-size:12px;padding:2px 8px;border-left:3px solid transparent;display:flex;align-items:baseline;gap:6px}
-.row.agent-row{border-left-color:var(--node-color,#9ca3af)}
+.row{white-space:nowrap;cursor:pointer;font-size:12px;padding:2px 8px;border-left:3px solid transparent;display:flex;align-items:baseline;gap:6px;position:relative}
+.row.agent-row::before{content:"";position:absolute;left:var(--node-indent,4px);top:3px;bottom:3px;width:3px;border-radius:2px;background:var(--node-color,#9ca3af)}
 .row:hover{background:#f1f5f9}
 .row.sel{background:#e0edff;border-left-color:#3b82f6}
 .row.err{color:#b91c1c}
@@ -245,8 +253,9 @@ function renderRowInto(box,n,depth,parent){
   const timedLeaf=perspective==='agent'&&!n.children.length;
   const rowHeight=timedLeaf?timeHeight(n.duration_ms,stackMaxDuration):22;
   const nameLayout=perspective==='agent'?agentNameLayout(depth,rowHeight):null;
-  // 每个 Agent node 都用 kind 色左边条标出自身边界；leaf 的时间高度会自然变成长条。
+  // 竖条跟随 node 的缩进而非整行边框，避免选中态覆盖，也让 leaf 的时间高度直接可见。
   if(nameLayout){row.classList.add('agent-row');row.style.setProperty('--node-color',KCOLOR[n.kind]||'#9ca3af');
+    row.style.setProperty('--node-indent',(depth*16+4)+'px');
     row.style.minHeight=rowHeight+'px';row.style.alignItems='center';}
   const tw=document.createElement('span');tw.className='tw';
   tw.textContent=n.children.length?'▾':'·';row.appendChild(tw);

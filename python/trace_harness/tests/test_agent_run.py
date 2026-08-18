@@ -224,9 +224,10 @@ def test_interactive_agent_view_is_owned_by_agent_run_renderer():
     assert "const timedLeaf=perspective==='agent'&&!n.children.length" in html
     assert "maxLeafDuration(tree.roots)" in html
     assert "const base=22,max=base*4" in html
-    assert ".row.agent-row{border-left-color:var(--node-color,#9ca3af)}" in html
+    assert ".row.agent-row::before" in html
     assert "row.classList.add('agent-row')" in html
     assert "row.style.setProperty('--node-color',KCOLOR[n.kind]||'#9ca3af')" in html
+    assert "row.style.setProperty('--node-indent',(depth*16+4)+'px')" in html
 
 
 def test_tool_display_details_prefer_file_and_command_over_call_id():
@@ -278,7 +279,7 @@ def test_tool_display_details_prefer_file_and_command_over_call_id():
 
     items = agent_run_roots(context, ir, {})[0]["children"][0]["children"]
 
-    assert items[0]["name_variants"] == ["read_file · market.md", "market.md", "read_file"]
+    assert items[0]["name_variants"] == ["read_file · market.md", "market.md"]
     assert items[1]["name_variants"] == ["shell · stream_query.py", "stream_query.py", "shell"]
     assert items[0]["brief"] == ""
     assert items[1]["brief"] == ""

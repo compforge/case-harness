@@ -16,7 +16,7 @@ from trace_harness.model.agent import (
 )
 from trace_harness.model.context import TraceContext
 from trace_harness.model.node import Finding
-from trace_harness.view.display import DisplayName, name_variants
+from trace_harness.view.display import Compact, DisplayName, name_projections
 from trace_harness.view.tool_name import tool_name_detail
 
 
@@ -24,6 +24,11 @@ def _text(value: Any) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def _compact_names(component: object, name: str, detail: str = "") -> list[str]:
+    compact = component if isinstance(component, Compact) else DisplayName(name, detail)
+    return name_projections(compact)
 
 
 def _source_payload(
@@ -113,7 +118,7 @@ def _item_payload(
         "node_id": f"agent-item:{item.kind}:{item.id}",
         "kind": item.kind,
         "name": item.name,
-        "name_variants": name_variants(DisplayName(item.name, detail)),
+        "name_variants": _compact_names(item, item.name, detail),
         "start_ms": item.start_ms,
         "duration_ms": item.duration_ms,
         "brief": " · ".join(brief_parts),
@@ -147,7 +152,7 @@ def _turn_payload(
         "node_id": f"agent-turn:{turn.id}",
         "kind": "agent-turn",
         "name": name,
-        "name_variants": name_variants(DisplayName(name)),
+        "name_variants": _compact_names(turn, name),
         "start_ms": turn.start_ms,
         "duration_ms": turn.duration_ms,
         "brief": f"{len(turn.items)} items",
@@ -210,7 +215,7 @@ def _run_payload(
         "node_id": f"agent-run:{run.id}",
         "kind": "agent-run",
         "name": run.name,
-        "name_variants": name_variants(DisplayName(run.name)),
+        "name_variants": _compact_names(run, run.name),
         "start_ms": run.start_ms,
         "duration_ms": run.duration_ms,
         "brief": f"{turn_index} turns · {operation_count} operations",
