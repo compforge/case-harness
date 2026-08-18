@@ -44,7 +44,21 @@ Quality Harness 只负责评估，不修改被测代码。是否阻止合并、�
 
 ## 3. 质量能力
 
-case-harness 已有的各类 harness 是 Quality Harness 的质量工具箱，分别回答不同领域的问题：
+Quality Harness 不拥有一套包办所有测试的工具箱。它连接各领域的通用执行机制、随业务演进的真实
+测试资产，以及 Agent 操作这些能力所需的过程知识。case-harness 提供其中可跨项目复用的基础能力，
+但项目是否真正可测，仍取决于业务仓内是否存在可执行的测试代码、环境适配和判定标准。
+
+以 e2e 为例，能力由三部分共同组成：
+
+1. case-harness 或其它框架提供 Runner、生命周期、断言、证据和 Verdict 等基础机制；
+2. 被测项目拥有跟随业务演进的 e2e 代码、Case、fixture、适配器和验收标准；
+3. e2e 目录附近的 AGENTS.md、README、runbook、配置和历史问题，沉淀该项目如何准备环境、执行、
+   清理和解释证据的过程知识。
+
+缺少第二部分时，安装了测试框架也不表示项目拥有 e2e 能力。Quality Harness 通过 skill 将三部分
+连接起来：先理解并发现项目自己的执行入口，再调用底层机制，最后按项目语义解释结果。
+
+不同质量视角分别回答不同领域的问题：
 
 | 目标或证据 | 主要视角 | 回答的问题 |
 |---|---|---|
@@ -55,8 +69,8 @@ case-harness 已有的各类 harness 是 Quality Harness 的质量工具箱，�
 | Coding / agent Harness | trajectory | 决策、工具调用和行动过程是否合理 |
 
 这些视角是可以组合的判断能力，不是 Quality Harness 必须固定执行的步骤。具体项目拥有什么资产、环境
-和执行入口，决定当前能回答哪些问题。业务特有的评估知识和工作方式可以通过 skill 或其它扩展提供；
-通用 harness 负责发现、调度和综合解释，不把每个业务的规则写进核心流程。
+和执行入口，决定当前能回答哪些问题。每个视角使用独立 skill 沉淀发现、执行和解释方式；业务特有的
+规则与经验继续留在业务仓，通用 Harness 只负责装载 skill、提供工具和执行 agent loop。
 
 Quality Harness 可以使用阅读、搜索、shell、浏览器或 HTTP 等通用观察工具理解项目和解释结果，但这些
 工具不能代替缺失的质量能力。仅凭阅读代码形成的印象可以成为风险提示，不能伪装成经过 e2e、perf 或
@@ -122,7 +136,34 @@ Quality Harness 驱动已有能力执行，消费各 harness 的原生 Run、Ver
 评估结果引用 e2e、eval、perf、trace 和 trajectory 的原生产物，不抹平它们各自的判定语义，也
 不依赖一个总分制造确定性。消费者应能从结论回溯到目标 revision、环境、执行记录和底层证据。
 
-## 5. 触发方式
+## 5. Skill 先于专用运行时
+
+Quality Harness 按“先稳定过程知识，再替换执行宿主”的方向渐进成立：
+
+```text
+Codex / Claude + quality skill
+            ↓
+通用 Harness Framework + 同一 quality skill
+            ↓
+Baton Plugin ──prompt──▶ Harness + 同一 quality skill
+```
+
+第一步先让 quality skill 在 Codex 和 Claude Code 中经过真实项目校准。此时可以直接观察 Agent 能否
+找到项目测试目录、遵循业务 runbook、正确执行入口，并诚实区分 pass、fail、error、blocked 和
+no capability。过程中的通用经验进入 skill，项目特有经验继续留在项目测试目录。
+
+当 skill 已能稳定驱动质量任务后，通用 Harness Framework 只需提供模型、工具、上下文和 skill
+装载机制，就能复用同一套过程知识，不必重新实现一套 e2e、perf 或 trajectory 编排。只有 agent loop
+本身出现稳定且无法由 skill 表达的需求时，才把它提升为专用 Quality Harness Runtime。
+
+Baton Plugin 位于更外层。它通过 prompt 请求 Harness 执行某项质量任务，并负责 Resource、调度、
+权限、异步 Lane、状态和结果回流；具体怎么发现和运行 e2e 仍由 Harness 中的 skill 决定。这样
+Baton Plugin 不复制 Harness 过程知识，skill 也不承担长期调度和恢复状态。
+
+这条路径让每一层都可以独立验证：skill 先证明任务能被 Agent 跑顺，Harness Framework 再证明执行
+宿主可替换，Baton Plugin 最后证明任务能够被异步和周期性控制。
+
+## 6. 触发方式
 
 ### 定向异步触发
 
@@ -135,7 +176,7 @@ Coding Harness 轨迹”。Quality Harness 围绕指定问题发现并执行相�
 所有可发现能力，执行当时允许执行的验证，并报告质量变化、风险、未知项和能力缺口。调度、运行窗口、
 环境授权和通知渠道由 devloop、Baton、CI 或其它外部系统负责，不进入 Quality Harness 的稳定内核。
 
-## 6. 边界
+## 7. 边界
 
 - 不假设一定存在 diff、专用声明或完整测试计划；
 - 不凭空创造项目没有的测试能力，也不生成代码来绕过能力缺口；
