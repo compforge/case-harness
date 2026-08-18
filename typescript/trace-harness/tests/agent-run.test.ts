@@ -217,9 +217,10 @@ describe("AgentRun IR", () => {
     expect(html).toContain("const timedLeaf=perspective==='agent'&&!n.children.length");
     expect(html).toContain("maxLeafDuration(tree.roots)");
     expect(html).toContain("const base=22,max=base*4");
-    expect(html).toContain(".row.agent-row{border-left-color:var(--node-color,#9ca3af)}");
+    expect(html).toContain(".row.agent-row::before");
     expect(html).toContain("row.classList.add('agent-row')");
     expect(html).toContain("row.style.setProperty('--node-color',KCOLOR[n.kind]||'#9ca3af')");
+    expect(html).toContain("row.style.setProperty('--node-indent',(depth*16+4)+'px')");
     expect(html).not.toContain("call=call-search-1");
     expect(html).toContain('"tool_call_id":"call-search-1"');
   });
