@@ -80,7 +80,7 @@ func TestStartSandboxHappyPath(t *testing.T) {
 			Budgets: budgets,
 		},
 	)
-	caserun.Assert(t, result)
+	sandboxSuite.Assert(t, result)
 }
 
 func TestStartSandboxReuse(t *testing.T) {
@@ -127,7 +127,7 @@ func TestStartSandboxReuse(t *testing.T) {
 			Budgets: budgets,
 		},
 	)
-	caserun.Assert(t, result)
+	sandboxSuite.Assert(t, result)
 }
 
 func stopSandbox(r *runner.JSONRunner) caserun.Step[startState] {

@@ -1,0 +1,44 @@
+cases:
+  - id: full_pass
+    steps: {prepare: pass, execute: pass, judge: pass, cleanup: pass}
+    variant: {executor: supervisor}
+    facets: {runtime: bed}
+    want:
+      status: pass
+      phases: [prepare, execute, judge, cleanup]
+      arm_id: executor=supervisor
+      facets: {executor: supervisor, runtime: bed}
+
+  - id: execute_error_still_cleans_up
+    steps: {prepare: pass, execute: error, judge: pass, cleanup: pass}
+    want:
+      status: error
+      phases: [prepare, execute, judge, cleanup]
+      phase_status: {execute: error, judge: skipped, cleanup: pass}
+
+  - id: judge_mismatch_is_fail
+    steps: {execute: pass, judge: fail}
+    want:
+      status: fail
+      phases: [execute, judge]
+      phase_status: {judge: fail}
+
+  - id: prepare_skip_still_cleans_up
+    steps: {prepare: skip, execute: pass, judge: pass, cleanup: pass}
+    want:
+      status: skipped
+      phases: [prepare, judge, cleanup]
+      phase_status: {prepare: skipped, judge: skipped, cleanup: pass}
+
+  - id: cleanup_error_wins
+    steps: {execute: pass, judge: fail, cleanup: error}
+    want:
+      status: error
+      phases: [execute, judge, cleanup]
+      phase_status: {judge: fail, cleanup: error}
+
+rollups:
+  - {id: pass_over_skipped, statuses: [pass, skipped], want: pass}
+  - {id: fail_over_pass, statuses: [pass, fail, skipped], want: fail}
+  - {id: error_over_fail, statuses: [pass, fail, error], want: error}
+  - {id: empty_is_skipped, statuses: [], want: skipped}

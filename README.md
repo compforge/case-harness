@@ -8,7 +8,7 @@ An AI project keeps growing — more features, longer chains, a wider test surfa
 
 | Question | Kind | SDK |
 |----------|------|-----|
-| Are the APIs correct? | API testing (e2e, black-box) | `python/e2e_harness` |
+| Are the APIs correct? | API testing (e2e, black-box) | `python/e2e_harness` / `go/e2e` |
 | Is the agent any good? | Quality evaluation (eval, black-box) | `python/eval_harness` |
 | How does it behave under pressure? | Load testing (perf, black-box) | `python/perf_harness` / `typescript/perf-harness` |
 | Which layer misbehaves first? | Trace analysis (trace, open-box) | `python/trace_harness` / `typescript/trace-harness` |
@@ -49,6 +49,7 @@ The unified output is `verdict.json` (schema: [`spec/verdict-schema.yaml`](spec/
 ```
 case-harness/
 ├── spec/                # runtime conventions: case compatibility projection / verdict / config
+├── conformance/         # cross-language behavior fixtures
 ├── python/              # Python workspace (uv), five sibling SDKs + shared harness_common
 │   ├── e2e_harness/     # API testing: deterministic contract tests, judgment-as-data, pytest-driven
 │   ├── eval_harness/    # quality evaluation: Experiment/Arm comparison + Worksheet + reconciler
