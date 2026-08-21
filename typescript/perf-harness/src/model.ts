@@ -1,14 +1,8 @@
 import type { LoadProfile } from "./load";
-
-/** Minimal runtime view of a canonical Case asset. Schema ownership stays with spec-case. */
-export interface CaseView {
-  id: string;
-  input: Record<string, unknown>;
-  facets?: Record<string, string>;
-}
+export type { Case, CaseSet } from "@compforge/spec-case/model";
 
 export interface CaseMixEntry {
-  case: CaseView;
+  id: string;
   weight?: number;
 }
 

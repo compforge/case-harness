@@ -1,12 +1,13 @@
 import { intensityAt, pacingWait, scheduleDuration, type LoadProfile } from "./load";
-import type { Arm, CaseView, Outcome, StopSnapshot, TimedOutcome, TrialStop } from "./model";
+import type { Case } from "@compforge/spec-case/model";
+import type { Arm, Outcome, StopSnapshot, TimedOutcome, TrialStop } from "./model";
 import { defaultJudge, type TrialContext, type Workload } from "./workload";
 
 export interface DriveInput {
   workload: Workload;
   context: Omit<TrialContext, "signal" | "arm">;
   arm: Arm;
-  cases: readonly CaseView[];
+  cases: readonly Case[];
   weights: readonly number[];
   signal?: AbortSignal;
   now?: () => number;
@@ -32,7 +33,7 @@ interface Runtime {
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-function pick(cases: readonly CaseView[], weights: readonly number[]): CaseView {
+function pick(cases: readonly Case[], weights: readonly number[]): Case {
   const total = weights.reduce((sum, value) => sum + value, 0);
   if (total <= 0) return cases[0]!;
   let cursor = Math.random() * total;
@@ -75,7 +76,7 @@ async function fireOne(
   input: DriveInput,
   runtime: Runtime,
   trial: Omit<TrialContext, "signal">,
-  selected: CaseView,
+  selected: Case,
 ): Promise<void> {
   if (!reserve(runtime)) return;
   const t = (runtime.now() - runtime.t0) / 1000;

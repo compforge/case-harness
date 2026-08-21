@@ -47,8 +47,8 @@ class Provisioner(Protocol):
     name/uniqueness clash. Provisioning is keyed by ``key`` (not the arm_id), so
     same-key arms share one resource — prepare once, not per arm.
 
-    ``prepare`` receives the corpus's ``EvalSet`` (``corpus`` name + ``sources`` to ingest
-    + ``focus`` / ``domain``), so the provisioner needs no separate manifest of its own.
+    ``prepare`` receives the canonical CaseSet's Eval projection (identity + sources + focus),
+    so the provisioner needs no separate manifest of its own.
     """
 
     async def prepare(self, key: str, target: Target, evalset: EvalSet) -> str: ...

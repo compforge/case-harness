@@ -56,22 +56,18 @@ def test_sut_endpoint_from_llm():
 
 _BODY = {
     "name": "exp",
-    "evalset": {
-        "corpus": "c",
-        "cases": [
-            {
-                "id": "q1",
-                "input": {"query": "q"},
-                "judge": {"eval": {"ground_truth": "a"}},
-            }
-        ],
-    },
+    "evalset": "cases.yaml",
 }
 
 
 def _write(tmp_path, target):
     d = tmp_path / "experiments"
     d.mkdir()
+    (tmp_path / "cases.yaml").write_text(
+        "caseset: c\ncases:\n"
+        "  - {id: q1, input: {query: q}, judge: {eval: {ground_truth: a}}}\n",
+        encoding="utf-8",
+    )
     body = {**_BODY, "target": target}
     f = d / "exp.yaml"
     f.write_text(yaml.safe_dump(body, allow_unicode=True), encoding="utf-8")

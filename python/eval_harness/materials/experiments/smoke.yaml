@@ -1,12 +1,7 @@
 # Single entry config for an experiment. `arms` present → multi-arm comparison;
 # omit `arms` for a single run (a 1-Arm experiment).
 name: smoke
-evalset:
-  corpus: demo            # corpus name (manifest resolution is an adapter concern)
-  cases: smoke.yaml       # → materials/cases/smoke.yaml (reusable, by reference)
-facets:                   # FacetSchema (merged over the framework base)
-  difficulty: {values: [easy, medium, hard], ordered: true}
-  type: {values: [factual, numeric, reasoning, refuse, summary]}
+evalset: cases/smoke.yaml # canonical CaseSet shared with other harnesses
 target:                   # base system-under-test config (SUT-agnostic: open `config` bag)
   name: chat
   config: {tenant_id: t1, host: {base_url: "http://localhost:8416"}}

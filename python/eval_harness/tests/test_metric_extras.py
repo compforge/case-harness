@@ -35,7 +35,7 @@ def _exp(weights=None):
     return Experiment(
         name="e",
         target=Target(name="chat"),
-        evalsets=[EvalSet(corpus="c", cases=[make_eval_case(id="q", query="q")])],
+        evalsets=[EvalSet(caseset="c", cases=[make_eval_case(id="q", query="q")])],
         metrics=["correctness", "faith"],
         weights=weights or {},
     )

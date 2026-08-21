@@ -1,6 +1,8 @@
-# Canonical common.Case shape (spec/case-schema.yaml): input = stimulus,
-# judge.eval = scoring contract, facets = classification. The facet vocab
-# (difficulty / type) is declared on the experiment (experiments/smoke.yaml).
+caseset: smoke
+focus: Small multi-face dataset used by the Eval smoke experiment.
+facets:
+  difficulty: {values: [easy, medium, hard], ordered: true}
+  type: {values: [factual, numeric, reasoning, refuse, summary]}
 cases:
   - id: f1
     input: {query: "What is the capital of France?"}

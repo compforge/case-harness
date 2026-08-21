@@ -14,7 +14,7 @@ def _ws():
         target=Target(name="chat", config={"tenant_id": "t1"}),
         evalsets=[
             EvalSet(
-                corpus="rag",
+                caseset="rag",
                 cases=[
                     make_eval_case(
                         id="q1",

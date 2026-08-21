@@ -1,4 +1,5 @@
-import type { Arm, CaseView, Outcome, Subject, Verdict } from "./model";
+import type { Case } from "@compforge/spec-case/model";
+import type { Arm, Outcome, Subject, Verdict } from "./model";
 
 export interface TrialContext {
   subject: Subject;
@@ -8,7 +9,7 @@ export interface TrialContext {
 }
 
 export interface FireContext extends TrialContext {
-  case: CaseView;
+  case: Case;
 }
 
 export interface Workload {

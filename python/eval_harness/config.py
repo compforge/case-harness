@@ -1,10 +1,9 @@
 """Load a single ``experiment.yaml`` → ``Experiment``.
 
-One entry file describes the whole run: ``evalset`` (corpus + cases, by
-reference to reusable materials or inline), ``facets`` (FacetSchema overrides),
+One entry file describes the whole run: ``evalset`` (a canonical CaseSet reference),
 ``target`` (base SUT config), ``arms`` / ``matrix`` (comparison arms),
-``metrics`` and ``weights``. Cases referenced by filename are resolved under
-``<materials_root>/cases/``; corpus/cases stay decoupled and reusable.
+``metrics`` and ``weights``. Relative CaseSet paths resolve from ``materials_root``;
+the CaseSet owns its identity, sources, facet vocabulary, cases and per-face judgment.
 
 String values support ``${VAR}`` / ``${VAR:-default}`` interpolation from the
 environment, so secrets (e.g. ``target.llm.api_key``) stay out of the yaml /
@@ -19,9 +18,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from spec_case.model import Case, case_from_raw
+from spec_case.model import CaseSet, Source, load_caseset, validate
 
-from eval_harness.model.evalset import EvalSet, FacetSpec, SourceRecord
+from eval_harness.model.evalset import EvalSet, SourceRecord
 from eval_harness.model.experiment import Arm, Experiment, Target
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
@@ -47,50 +46,39 @@ def _interpolate(obj: Any) -> Any:
     return obj
 
 
-def _resolve_cases(spec: Any, materials_root: Path) -> list[Case]:
-    if isinstance(spec, str):
-        raw = yaml.safe_load((materials_root / "cases" / spec).read_text(encoding="utf-8")) or {}
-        items = raw["cases"] if isinstance(raw, dict) else raw
-    elif isinstance(spec, list):
-        items = spec
-    else:
-        raise ValueError("evalset.cases must be a filename or an inline list")
-    return [case_from_raw(c) for c in items]
-
-
-def _source(s: dict, base: Path) -> SourceRecord:
+def _source(s: Source, base: Path) -> SourceRecord:
     """Resolve a source's ``uri`` to an absolute path (relative to the evalset file's dir);
     URLs and inline content pass through unchanged."""
-    uri = s.get("uri")
+    uri = s.uri
     if uri and "://" not in uri and not Path(uri).is_absolute():
         uri = str((base / uri).resolve())
     return SourceRecord(
-        name=s["name"],
+        name=s.name,
         uri=uri,
-        content=s.get("content"),
-        selected=bool(s.get("selected", True)),
-        meta=dict(s.get("meta") or {}),
+        content=s.content,
+        meta=dict(s.meta),
     )
 
 
 def _load_evalset(spec: Any, root: Path) -> EvalSet:
-    """An evalsets entry is either a path to a unified ``evalset.yaml`` (corpus + sources +
-    cases) or an inline mapping. Source uris resolve relative to the evalset file's dir
-    (inline: relative to materials root)."""
-    if isinstance(spec, str):
-        es_path = Path(spec) if Path(spec).is_absolute() else (root / spec)
-        raw = _interpolate(yaml.safe_load(es_path.read_text(encoding="utf-8")) or {})
-        base = es_path.parent
-    elif isinstance(spec, dict):
-        raw, base = spec, root
-    else:
-        raise ValueError("evalsets entry must be a path or an inline mapping")
+    """Load and resolve one canonical CaseSet for Eval.
+
+    Source paths belong to the CaseSet file, never to the process cwd or experiment.
+    The canonical loader and integrity rules remain owned by spec-case.
+    """
+    if not isinstance(spec, str) or not spec:
+        raise ValueError("evalset must be a non-empty canonical CaseSet path")
+    es_path = Path(spec).expanduser()
+    if not es_path.is_absolute():
+        es_path = root / es_path
+    case_set: CaseSet = load_caseset(es_path)
+    validate(case_set)
     return EvalSet(
-        corpus=raw["corpus"],
-        sources=[_source(s, base) for s in (raw.get("sources") or [])],
-        cases=_resolve_cases(raw["cases"], root),
-        focus=raw.get("focus"),
-        domain=raw.get("domain"),
+        caseset=case_set.caseset,
+        facet_schema=case_set.facet_schema,
+        sources=[_source(s, es_path.parent) for s in case_set.sources],
+        cases=list(case_set.cases),
+        focus=case_set.focus or None,
     )
 
 
@@ -100,19 +88,19 @@ def load_experiment(path: str | Path, materials_root: str | Path | None = None) 
     # experiments/<x>.yaml lives under materials/, so materials root = parent of experiments/
     root = Path(materials_root) if materials_root else path.parents[1]
 
-    # evalsets: a list of {corpus, cases}; `evalset` (singular) is single-corpus sugar.
+    # `evalset` is single-CaseSet sugar; `evalsets` runs several canonical sets together.
     raw_evalsets = raw.get("evalsets") or ([raw["evalset"]] if "evalset" in raw else [])
     if not raw_evalsets:
         raise ValueError("experiment config needs `evalset` or `evalsets`")
     evalsets = [_load_evalset(e, root) for e in raw_evalsets]
-    facets = {k: FacetSpec(**(v or {})) for k, v in (raw.get("facets") or {}).items()}
+    if "facets" in raw:
+        raise ValueError("experiment facets cannot override canonical CaseSet facets")
 
     exp = Experiment(
         name=raw["name"],
         description=raw.get("description") or "",
         target=Target(**raw["target"]),
         evalsets=evalsets,
-        facets=facets,
         arms=[Arm(**e) for e in (raw.get("arms") or [])],
         matrix=raw.get("matrix") or {},
         metrics=raw.get("metrics") or [],

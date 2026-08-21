@@ -2,13 +2,7 @@ import pytest
 from pydantic import ValidationError
 from spec_case.model import Case
 
-from eval_harness.model.evalset import (
-    BASE_FACETS,
-    EvalSet,
-    FacetSchema,
-    FacetSpec,
-    eval_view,
-)
+from eval_harness.model.evalset import EvalSet, FacetSchema, FacetSpec, eval_view
 from eval_harness.model.experiment import Arm, Experiment, Target, expand_matrix
 from eval_harness.model.sample import MetricResult
 from eval_harness.tests.eval_cases import make_eval_case
@@ -40,12 +34,12 @@ def test_eval_view_contract():
 def test_facet_schema_validation():
     schema = FacetSchema(
         {
+            "difficulty": FacetSpec(values=["easy", "medium", "hard"], ordered=True),
             "type": FacetSpec(values=["factual", "summary"]),
             "domain": FacetSpec(open=True),
-        },
-        base=BASE_FACETS,
+        }
     )
-    # base difficulty inherited + ordered
+    # difficulty order comes from the CaseSet vocabulary.
     schema.validate_dimensions(
         "c1", {"difficulty": "hard", "type": "summary", "domain": "anything"}
     )
@@ -107,7 +101,7 @@ def _exp(arms=None, matrix=None):
         target=_target(),
         evalsets=[
             EvalSet(
-                corpus="rag",
+                caseset="rag",
                 cases=[make_eval_case(id="q1", query="q", ground_truth="a")],
             )
         ],

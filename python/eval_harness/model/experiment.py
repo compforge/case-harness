@@ -26,7 +26,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from spec_case.model import Case
 
-from eval_harness.model.evalset import BASE_FACETS, EvalSet, FacetSchema, FacetSpec
+from eval_harness.model.evalset import EvalSet, FacetSchema, FacetSpec
 
 
 def _deep_set(data: dict[str, Any], path: list[str], value: Any) -> None:
@@ -140,11 +140,9 @@ class Experiment(BaseModel):
     # never invalidates a resumable checkpoint.
     description: str = ""
     target: Target
-    # An experiment spans one or more corpora (each its own provisioned resource): one
-    # experiment, one worksheet, one report, with corpus as a built-in dimension. A
-    # single-corpus run is just ``evalsets`` with one entry — no separate singular field.
+    # An experiment spans one or more CaseSets (each becomes one provisioned corpus): one
+    # experiment, one worksheet, one report, with corpus as Eval's report dimension.
     evalsets: list[EvalSet] = Field(min_length=1)
-    facets: dict[str, FacetSpec] = Field(default_factory=dict)
     arms: list[Arm] = Field(default_factory=list)
     matrix: dict[str, list[Any]] = Field(default_factory=dict)
     metrics: list[str] = Field(default_factory=list)
@@ -155,9 +153,9 @@ class Experiment(BaseModel):
 
     @model_validator(mode="after")
     def _check_corpora(self) -> Experiment:
-        corpora = [es.corpus for es in self.evalsets]
-        if len(set(corpora)) != len(corpora):
-            raise ValueError(f"duplicate corpus across evalsets: {corpora}")
+        case_sets = [es.caseset for es in self.evalsets]
+        if len(set(case_sets)) != len(case_sets):
+            raise ValueError(f"duplicate CaseSet across evalsets: {case_sets}")
         arm_ids = [arm.id for arm in self.resolved_arms()]
         if len(set(arm_ids)) != len(arm_ids):
             raise ValueError(f"duplicate arm id: {arm_ids}")
@@ -172,7 +170,14 @@ class Experiment(BaseModel):
         return [(es.corpus, c) for es in self.evalsets for c in es.cases]
 
     def facet_schema(self) -> FacetSchema:
-        return FacetSchema(self.facets, base=BASE_FACETS)
+        merged: dict[str, FacetSpec] = {}
+        for evalset in self.evalsets:
+            for name, spec in evalset.facet_schema.facets.items():
+                previous = merged.get(name)
+                if previous is not None and previous != spec:
+                    raise ValueError(f"conflicting facet {name!r} across CaseSets")
+                merged[name] = spec
+        return FacetSchema(merged)
 
     def resolved_arms(self) -> list[Arm]:
         """Explicit ``arms`` plus matrix expansion; default to one identity Arm

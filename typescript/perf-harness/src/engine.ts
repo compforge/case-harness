@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { validateCaseSet, type Case, type CaseSet } from "@compforge/spec-case/model";
 import { drive } from "./scheduler";
 import { buildWindows } from "./reduce";
 import { loadLabel, resourceLabel, validateLoadProfile, type LoadProfile } from "./load";
@@ -11,10 +12,45 @@ export interface Experiment {
   workload: Workload;
   resources?: ResourceProfile[];
   loads: LoadProfile[];
+  caseSet?: CaseSet;
   caseMix?: readonly CaseMixEntry[];
   signal?: AbortSignal;
   onTrialStart?(context: TrialContext, startedAt: Date): Promise<void> | void;
   onTrialFinish?(trial: TrialRecord): Promise<void> | void;
+}
+
+function resolveCases(experiment: Experiment): { cases: readonly Case[]; weights: number[] } {
+  if (!experiment.caseSet) {
+    if (experiment.caseMix?.length) throw new Error("perf caseMix requires a canonical caseSet");
+    return { cases: [{ id: "default", input: {} }], weights: [1] };
+  }
+  validateCaseSet(experiment.caseSet);
+  const byId = new Map(experiment.caseSet.cases.map((item) => [item.id, item]));
+  if (!byId.size) throw new Error(`perf CaseSet '${experiment.caseSet.caseset}' has no cases`);
+  const selection = experiment.caseMix?.length
+    ? experiment.caseMix
+    : experiment.caseSet.cases.map((item) => ({ id: item.id, weight: 1 }));
+  const ids = new Set<string>();
+  const cases: Case[] = [];
+  const weights: number[] = [];
+  for (const entry of selection) {
+    if (ids.has(entry.id)) throw new Error(`duplicate perf Case selection: ${entry.id}`);
+    ids.add(entry.id);
+    const item = byId.get(entry.id);
+    if (!item) {
+      throw new Error(`perf Case '${entry.id}' not found in CaseSet '${experiment.caseSet.caseset}'`);
+    }
+    const weight = entry.weight ?? 1;
+    if (!Number.isFinite(weight) || weight < 0) {
+      throw new Error(`perf Case weight must be finite and >= 0: ${entry.id}`);
+    }
+    cases.push(item);
+    weights.push(weight);
+  }
+  if (!weights.some((weight) => weight > 0)) {
+    throw new Error("perf case mix requires at least one positive weight");
+  }
+  return { cases, weights };
 }
 
 function runId(now = new Date()): string {
@@ -42,36 +78,22 @@ function arms(experiment: Experiment): Arm[] {
 export class Engine {
   readonly #experiment: Experiment;
   readonly #runId: string;
+  readonly #cases: readonly Case[];
+  readonly #weights: number[];
 
   constructor(experiment: Experiment, options: { run_id?: string } = {}) {
     if (!experiment.loads.length) throw new Error("perf experiment requires at least one load profile");
     experiment.loads.forEach(validateLoadProfile);
-    const caseMix = experiment.caseMix ?? [];
-    const ids = new Set<string>();
-    for (const entry of caseMix) {
-      if (!entry.case.id) throw new Error("perf Case id must not be empty");
-      if (ids.has(entry.case.id)) throw new Error(`duplicate perf Case id: ${entry.case.id}`);
-      ids.add(entry.case.id);
-      const weight = entry.weight ?? 1;
-      if (!Number.isFinite(weight) || weight < 0) {
-        throw new Error(`perf Case weight must be finite and >= 0: ${entry.case.id}`);
-      }
-    }
-    if (caseMix.length && !caseMix.some((entry) => (entry.weight ?? 1) > 0)) {
-      throw new Error("perf case mix requires at least one positive weight");
-    }
+    const resolved = resolveCases(experiment);
     this.#experiment = experiment;
     this.#runId = options.run_id ?? runId();
+    this.#cases = resolved.cases;
+    this.#weights = resolved.weights;
   }
 
   async run(): Promise<Run> {
     const created = new Date();
     const trials: TrialRecord[] = [];
-    const caseMix = this.#experiment.caseMix?.length
-      ? this.#experiment.caseMix
-      : [{ case: { id: "default", input: {} }, weight: 1 }];
-    const cases = caseMix.map((entry) => entry.case);
-    const weights = caseMix.map((entry) => entry.weight ?? 1);
     for (const arm of arms(this.#experiment)) {
       if (this.#experiment.signal?.aborted) break;
       const started = new Date();
@@ -92,8 +114,8 @@ export class Engine {
           workload: this.#experiment.workload,
           context: { subject: context.subject, run_id: context.run_id },
           arm,
-          cases,
-          weights,
+          cases: this.#cases,
+          weights: this.#weights,
           signal: this.#experiment.signal,
         });
         await this.#experiment.workload.deactivate?.(context);

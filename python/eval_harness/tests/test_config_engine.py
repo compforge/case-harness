@@ -3,8 +3,11 @@ producers, no live services) → reports written."""
 
 from pathlib import Path
 
+import pytest
+import yaml
+
 import eval_harness
-from eval_harness.config import load_experiment
+from eval_harness.config import _load_evalset, load_experiment
 from eval_harness.engine import resolve_weights, run_experiment
 from eval_harness.metric.registry import resolve
 from eval_harness.schedule.ratelimit import GateRegistry
@@ -13,6 +16,9 @@ from eval_harness.schedule.reconcile import Solver, SolveResult
 # materials ship inside the package (python/eval_harness/materials/)
 MATERIALS = Path(eval_harness.__file__).resolve().parent / "materials"
 SMOKE = MATERIALS / "experiments" / "smoke.yaml"
+SHARED_CASESET = (
+    Path(__file__).parents[3] / "conformance" / "case" / "fixtures" / "shared-chat.yaml"
+)
 
 
 class _Prov:
@@ -42,11 +48,28 @@ class _EchoSolver(Solver):
 def test_load_experiment_resolves_cases_and_facets():
     exp = load_experiment(SMOKE)
     assert exp.name == "smoke"
-    assert exp.evalsets[0].corpus == "demo"
+    assert exp.evalsets[0].caseset == "smoke"
     assert [c.id for c in exp.evalsets[0].cases] == ["f1", "f2", "r1"]
     assert len(exp.resolved_arms()) == 2
-    # facet schema merged base + declared; validation already ran in loader
+    # Facet schema comes from the canonical CaseSet and was validated by the loader.
     assert "difficulty" in exp.facet_schema().facets
+
+
+def test_eval_loads_the_shared_eval_and_perf_caseset():
+    evalset = _load_evalset(str(SHARED_CASESET), MATERIALS)
+    assert evalset.caseset == "shared-chat"
+    assert [case.id for case in evalset.cases] == ["ordinary_chat", "knowledge_chat"]
+    assert evalset.facet_schema.ordered_value_lists() == {"difficulty": ["simple", "complex"]}
+    assert set(evalset.cases[0].judge) == {"eval", "perf"}
+
+
+def test_experiment_cannot_override_caseset_facets(tmp_path):
+    raw = yaml.safe_load(SMOKE.read_text())
+    raw["facets"] = {"difficulty": {"values": ["trivial"]}}
+    config = tmp_path / "experiment.yaml"
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="cannot override"):
+        load_experiment(config, materials_root=MATERIALS)
 
 
 async def test_run_experiment_end_to_end(tmp_path):
@@ -64,12 +87,12 @@ async def test_run_experiment_end_to_end(tmp_path):
     )
     assert ws.is_complete()
     # answer cases exact-match 1.0; refuse case keyword_refusal 1.0
-    assert ws.rows[("model-alpha", "demo", "f1")].scores["exact_match"].result.score == 1.0
-    assert ws.rows[("model-alpha", "demo", "r1")].scores["keyword_refusal"].result.score == 1.0
+    assert ws.rows[("model-alpha", "smoke", "f1")].scores["exact_match"].result.score == 1.0
+    assert ws.rows[("model-alpha", "smoke", "r1")].scores["keyword_refusal"].result.score == 1.0
     # exact_match abstains on the refuse case (None, not 0)
-    assert ws.rows[("model-alpha", "demo", "r1")].scores["exact_match"].result.score is None
+    assert ws.rows[("model-alpha", "smoke", "r1")].scores["exact_match"].result.score is None
     # latency measurement captured
-    assert ws.rows[("model-alpha", "demo", "f1")].scores["latency"].result.value == 900
+    assert ws.rows[("model-alpha", "smoke", "f1")].scores["latency"].result.value == 900
 
     # reports written under runs/<experiment>/<run-id>/ (run-id = experiment_hash);
     # multi-arm_id → report/ folder (comparison + per-arm_id)
@@ -94,7 +117,7 @@ def test_single_env_writes_flat_report_md(tmp_path):
     exp = Experiment(
         name="solo",
         target=Target(name="chat"),
-        evalsets=[EvalSet(corpus="c", cases=[make_eval_case(id="q1", query="q")])],
+        evalsets=[EvalSet(caseset="c", cases=[make_eval_case(id="q1", query="q")])],
         metrics=[],
     )
     out = write_reports(Worksheet.build(exp), exp, [], tmp_path / "solo")

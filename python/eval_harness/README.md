@@ -21,7 +21,7 @@ renders by pure pivot.
 | **Experiment** | one eval "question": `target` (base SUT config) + `arms` + `evalset` + `metrics` + `weights`. |
 | **Arm** | a named comparison configuration = `target ⊕ overrides`. Two layers: **heavy** (provisioned resource+sources, `prepare()`/`clean()`/`key`, shared across same-key Arms) + **light** (model/params, per call). `Arm.key` hashes only heavy-affecting fields → light-only differences share one provisioned resource. |
 | **Trial** | one real execution of an Arm over the evalset; its cells are recorded in the Worksheet under the explicit `arm_id`. |
-| **EvalSet / Case** | input: corpus ref + cases. A case is the canonical `common.Case` (`input.query`, `judge.eval.{ground_truth, expected_behavior, evidence_sources}`, `facets` = typed dimensions); eval reads it via `eval_view`. |
+| **EvalSet / Case** | Runtime projection of one canonical spec-case CaseSet. Eval consumes its identity, sources, facet vocabulary and cases unchanged, then interprets `input.query` and `judge.eval` through `eval_view`. |
 | **FacetSchema** | per-facet value domain (constrained / `open` / `ordered`); validated at load (so a free-string field can't rot). Replaces flat tags. |
 | **Worksheet** | the big table; rows = (arm_id × case), cells carry state (PENDING/OK/FAILED). The engine's single truth + checkpoint. |
 | **MetricResult** | dual channel: **quality** (0~1 → weighted overall) vs **measurement** (value+unit, mean/p50/p95, excluded from overall). |
@@ -33,6 +33,7 @@ renders by pure pivot.
 loud) — keeps secrets like `target.llm.api_key` out of yaml/git:
 
 ```yaml
+evalset: cases/chat.yaml  # canonical CaseSet; also reusable by Perf
 target:
   name: chat
   llm: {base_url: "${AIGW_BASE}", api_key: "${AIGW_KEY}"}   # secret-free

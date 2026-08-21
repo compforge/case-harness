@@ -18,6 +18,9 @@
     "dist",
     "README.md"
   ],
+  "dependencies": {
+    "@compforge/spec-case": "^0.0.4"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^22.0.0",

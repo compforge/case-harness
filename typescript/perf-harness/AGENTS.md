@@ -13,7 +13,7 @@ Prometheus、Kubernetes 等资源观测由消费方通过 Prombed 或自己的�
 
 | 文件 | 职责 |
 |---|---|
-| `model.ts` | Case、Outcome、Trial、Run 等纯数据名词 |
+| `model.ts` | CaseSet 选择 overlay、Outcome、Trial、Run 等纯数据名词 |
 | `load.ts` | open/closed、Stage、Schedule 与 Pacing |
 | `workload.ts` | 服务协议扩展契约 |
 | `scheduler.ts` | 发压、熔断、请求上限与停止语义 |
@@ -28,6 +28,7 @@ Prometheus、Kubernetes 等资源观测由消费方通过 Prombed 或自己的�
 3. 未发出的请求与被强制中断的在途请求不进入延迟分布。
 4. `trace_id` 等跨平面对齐键放在 `Outcome.meta`，落盘时不得丢失。
 5. 通用包不写业务 SSE 语义；业务 Plugin/consumer 实现 Workload。
+6. Case/CaseSet 归 spec-case；Perf Experiment 只通过 `caseMix` 选择 id 和设置 weight。
 
 ## References
 
