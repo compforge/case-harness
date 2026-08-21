@@ -1,4 +1,4 @@
-package suite
+package testrun
 
 import (
 	"bytes"
@@ -48,7 +48,7 @@ func TestFinishWritesNothingWhenNoCasesRan(t *testing.T) {
 	}
 	entries, err := os.ReadDir(runsDir)
 	if err != nil || len(entries) != 0 {
-		t.Fatalf("empty suite created artifacts: entries=%v error=%v", entries, err)
+		t.Fatalf("empty run created artifacts: entries=%v error=%v", entries, err)
 	}
 }
 
@@ -81,6 +81,6 @@ func TestMainRejectsInvalidRunIdentityBeforeRunningTests(t *testing.T) {
 		t.Fatalf("Main = code %d runCalled %v, want code 1 without running tests", code, runCalled)
 	}
 	if output.Len() == 0 {
-		t.Fatal("invalid suite configuration was not reported")
+		t.Fatal("invalid run configuration was not reported")
 	}
 }
