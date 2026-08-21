@@ -23,6 +23,7 @@ go test -tags=e2e -v ./...
 
 文件：
 - `config.yaml` — 服务配置
+- `run_test.go` — 聚合本次 `go test` 的 CaseRun 并写 Verdict
 - `start_sandbox_e2e_test.go` — HappyPath + Reuse 两个 case
 
 ## python-service
