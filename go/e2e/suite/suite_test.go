@@ -68,3 +68,19 @@ func TestMainMakesVerdictWriteFailureFailTheRun(t *testing.T) {
 		t.Fatal("verdict write failure was not reported")
 	}
 }
+
+func TestMainRejectsInvalidRunIdentityBeforeRunningTests(t *testing.T) {
+	var output bytes.Buffer
+	runCalled := false
+	s := New("invalid scope", WithRunID("run-1"), WithOutput(&output))
+	code := s.Main(func() int {
+		runCalled = true
+		return 0
+	})
+	if code != 1 || runCalled {
+		t.Fatalf("Main = code %d runCalled %v, want code 1 without running tests", code, runCalled)
+	}
+	if output.Len() == 0 {
+		t.Fatal("invalid suite configuration was not reported")
+	}
+}
