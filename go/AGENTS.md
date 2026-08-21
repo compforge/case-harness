@@ -10,6 +10,7 @@ Python 侧形状的 Go 等价实现，**预先按 e2e/eval/perf 三分**。当�
 go/
 ├── e2e/                # 确定性契约测试（= python/e2e_harness）
 │   ├── caserun/        # prepare/execute/judge/cleanup + phase budgets/evidence + Recorder
+│   ├── suite/          # 多 Case 聚合、TestMain 集成与统一 run/Verdict 出口
 │   ├── matrix/         # variant Cartesian product；arm_id/facets 投影
 │   ├── core/           # Env / profile+capability / context-aware Poll/Retry/Consistently
 │   ├── runner/         # 纯 Runner(ctx) + Outcome / JSONRunner / RawRequest
@@ -28,6 +29,8 @@ go/
 - **执行身份**：测试以字面量 `caserun.Ref("<canonical-caseset>", "<case-id>")` 绑定资产。CaseSet 内 case id 唯一；variant 在同一 CaseRun 内展开，不重复声明 Ref。
 - **coverage gate 不生成测试体**：`casegen check` 要求每个 marker 恰有一个 Ref，并拒绝 missing/orphan/duplicate/dynamic ref。测试过程代码归消费方，框架不维护 scaffold/meta 区域。
 - **生命周期失败语义**：judge mismatch 用 `caserun.Fail` → fail；请求、环境、timeout、cleanup 异常 → error；cleanup 独立 context 且总执行。
+- **Suite 是运行出口**：消费仓用 `suite.Assert` 记录每个 CaseRun，并在 `TestMain` 调 `suite.Main`；统一写入 `runs/<scope>/<run-id>/verdict.json`，未执行任何 Case 时不制造空 run。
+- **跨语言行为由 fixture 约束**：`../conformance/e2e/caserun.yaml` 同时被 Python/Go 测试消费，固定阶段顺序、状态、cleanup、variant/facets 与 Verdict rollup 语义。
 - **单行 marker 天然躲开 gofmt**：每个 `+case` 是一行，没有续行就没有 Go 1.19+ doc-comment 把续行改 tab 缩进的问题。
 - **import 路径**：四层在 `e2e/` 下，如 `github.com/compforge/case-harness/go/e2e/core`。
 

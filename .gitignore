@@ -38,6 +38,7 @@ python/.venv/
 
 # Runtime artifacts (agent tier)
 runtime/
+runs/
 
 # devloop
 .devloop/

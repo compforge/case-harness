@@ -6,7 +6,7 @@
 
 | 问题 | 类型 | SDK |
 |------|----------|-----|
-| 接口对不对 | API 测试（e2e，黑盒） | `python/e2e_harness` |
+| 接口对不对 | API 测试（e2e，黑盒） | `python/e2e_harness` / `go/e2e` |
 | agent 效果好不好 | 效果测试（eval，黑盒） | `python/eval_harness` |
 | 压力下表现如何 | 压力测试（perf，黑盒） | `python/perf_harness` / `typescript/perf-harness` |
 | 链路内部哪层先反常 | trace 分析（trace，开盒） | `python/trace_harness` / `typescript/trace-harness` |
@@ -23,6 +23,7 @@
 ```
 case-harness/
 ├── spec/                # 运行时约定层：case 兼容投影 / config / verdict / conventions
+├── conformance/         # 跨语言共享行为 fixture
 ├── python/              # Python 工程（uv），五个 sibling SDK + 共享 common
 │   ├── e2e_harness/     # API 测试（e2e）：确定性契约测试，pytest 驱动      → 见其 AGENTS.md
 │   ├── eval_harness/    # 效果测试（eval）：非确定性质量评测，大表 + reconciler → 见其 AGENTS.md
@@ -46,6 +47,7 @@ case-harness/
 - 五个 Python SDK 共享同一个 uv 工程与 `spec/` 约定，**互不 import**；公共能力集中在 `common`（case / verdict / llm / facets + report_kit 报告 IR）这一中立共享层，而不是 SDK 之间互相复用。各 SDK 仍自带一小撮协议原语（Outcome 形状、runner、SSEParser；perf 自带 httpx 发压栈、trace 自带薄 driver）——**先复制后收敛**，确属公共再收进 `common`。trace 的 parquet 持久化走可选 extra `[trace-corpus]`，不给其它 SDK 增重。
 - 新增能力先想清楚归哪类问题（对错 / 效果 / 容量 / 归因），落到对应 SDK；跨 SDK 的"公共抽象"冲动默认抑制，先复制后收敛，确属公共再进 `common`。
 - Go/Python e2e 共享 CaseRun 语义（prepare/execute/judge/cleanup、阶段 budget、Verdict），API 保持各自语言习惯；资产模型仍统一由 spec-case 持有。
+- Go/Python e2e 的共同语义由 `conformance/e2e/` fixture 约束；Go 项目通过 `e2e/suite` 聚合 CaseRun 并写入统一 run 目录，不在消费仓重复实现 Recorder/TestMain/Verdict 胶水。
 - Trace Harness 的 canonical 定义是 [`spec/trace-harness.md`](spec/trace-harness.md) 与
   `schema/trace/v1/`；Python 和 TypeScript 是对等实现，共用 `conformance/trace/`
   fixtures。通用包不承载业务域知识，业务能力通过 scoped
