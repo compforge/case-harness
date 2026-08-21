@@ -2,7 +2,7 @@
 
 ## 项目定位与边界
 
-Python 侧形状的 Go 等价实现，**预先按 e2e/eval/perf 三分**。当前 e2e 落地确定性契约测试、完整 CaseRun 生命周期，以及「case 贴着 handler」的静态覆盖闸门。Python/Go 对齐执行语义与 Verdict，不要求 API 语法一致。
+Python 侧形状的 Go 等价实现，**预先按 e2e/eval/perf 三分**，并为多个 Harness 提供中立的平台工具箱。当前 e2e 落地确定性契约测试、完整 CaseRun 生命周期，以及「case 贴着 handler」的静态覆盖闸门。Python/Go 对齐执行语义与 Verdict，不要求 API 语法一致。
 
 ## 代码地图与核心模块
 
@@ -17,6 +17,7 @@ go/
 │   ├── judge/          # 不依赖 testing.T 的 Assertion
 │   ├── burst/          # burst.Run[T] 泛型并发发射
 │   └── contract/       # +case marker 与 caserun.Ref(caseset,id) 的静态 coverage gate
+├── kube/               # e2e / perf 共用的 namespace-scoped Kubernetes 操作与观测
 ├── eval/  perf/        # 占位骨架（短期不实现，仅固定包边界与 import 路径）
 ├── report/             # Go Verdict wire projection
 ├── cmd/casegen/        # CLI：list / check
@@ -31,6 +32,7 @@ go/
 - **生命周期失败语义**：judge mismatch 用 `caserun.Fail` → fail；请求、环境、timeout、cleanup 异常 → error；cleanup 独立 context 且总执行。
 - **Run 是运行出口**：消费仓用 `testrun.Run.Assert` 记录每个 CaseRun，并在 `TestMain` 调 `testrun.Run.Main`；统一写入 `runs/<scope>/<run-id>/verdict.json`，未执行任何 Case 时不制造空 run。`testrun` 只是 Go testing adapter，稳定模型仍是 CaseRun → Run → Verdict。
 - **跨语言行为由 fixture 约束**：`../conformance/e2e/caserun.yaml` 同时被 Python/Go 测试消费，固定阶段顺序、状态、cleanup、variant/facets 与 Verdict rollup 语义。
+- **平台工具箱保持中立**：`kube` 只执行 namespace-scoped 的 Kubernetes 操作、稳定等待和证据采集，不解释业务 Worker、Case、故障场景或 Verdict；目标 selector、注入时机与通过条件由消费方拥有。
 - **单行 marker 天然躲开 gofmt**：每个 `+case` 是一行，没有续行就没有 Go 1.19+ doc-comment 把续行改 tab 缩进的问题。
 - **import 路径**：四层在 `e2e/` 下，如 `github.com/compforge/case-harness/go/e2e/core`。
 

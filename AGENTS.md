@@ -32,7 +32,7 @@ case-harness/
 │   ├── trajectory_harness/ # 轨迹评估：外部记录→Trajectory→Evaluator → 见其 AGENTS.md
 │   ├── common/          # 中立共享层：case / verdict / llm / facets + report_kit（报告 IR + HTML 渲染），五个 SDK 共用、无业务概念
 │   └── …/tests/         # 测试在各自包内（e2e_harness/tests 等；common 同），打包时排除
-├── go/                  # Go SDK（参考实现，形状对齐 spec）→ 见 go/AGENTS.md
+├── go/                  # Go SDK（e2e 参考实现 + 跨 Harness 平台工具箱）→ 见 go/AGENTS.md
 ├── typescript/          # TypeScript SDK；perf/trace 实现共同遵守 spec 下的跨语言契约
 ├── examples/            # 接入示例：api-test / agent-test
 └── docs/                # 跨 SDK 设计文档
@@ -47,6 +47,7 @@ case-harness/
 - 五个 Python SDK 共享同一个 uv 工程与 `spec/` 约定，**互不 import**；公共能力集中在 `common`（case / verdict / llm / facets + report_kit 报告 IR）这一中立共享层，而不是 SDK 之间互相复用。各 SDK 仍自带一小撮协议原语（Outcome 形状、runner、SSEParser；perf 自带 httpx 发压栈、trace 自带薄 driver）——**先复制后收敛**，确属公共再收进 `common`。trace 的 parquet 持久化走可选 extra `[trace-corpus]`，不给其它 SDK 增重。
 - 新增能力先想清楚归哪类问题（对错 / 效果 / 容量 / 归因），落到对应 SDK；跨 SDK 的"公共抽象"冲动默认抑制，先复制后收敛，确属公共再进 `common`。
 - Go/Python e2e 共享 CaseRun 语义（prepare/execute/judge/cleanup、阶段 budget、Verdict），API 保持各自语言习惯；资产模型仍统一由 spec-case 持有。
+- Kubernetes 等平台工具箱不拥有 Case、负载模型或 Verdict；e2e / perf 及消费仓用它们完成环境操作与观测，具体目标选择、故障时机和通过条件仍由对应 Harness 与项目决定。
 - Go/Python e2e 的共同语义由 `conformance/e2e/` fixture 约束；Go 项目通过 `e2e/testrun.Run` 将一次 `go test` 中的 CaseRun 聚合到统一 run 目录，不在消费仓重复实现 Recorder/TestMain/Verdict 胶水。它是 Go testing adapter，不引入跨语言 Suite 概念。
 - Trace Harness 的 canonical 定义是 [`spec/trace-harness.md`](spec/trace-harness.md) 与
   `schema/trace/v1/`；Python 和 TypeScript 是对等实现，共用 `conformance/trace/`

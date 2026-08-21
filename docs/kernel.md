@@ -85,6 +85,10 @@ case-harness 长期为每类 Target 提供便于生成脚本和稳定执行的 S
 
 平台通用能力属于 case-harness；“创建笔记”、“邀请协作者”等产品域动作属于被测产品仓库。不为了表面复用而强迫 Web、Android、iOS 和 API 共享一套浅抽象；它们共享 Playbook / Run / Verdict 契约，各自持有会独立演进的 Driver。
 
+Kubernetes 操作、资源状态等待和 Events 采集属于可被 e2e、perf 等多个视角复用的平台工具箱。工具箱只回答“如何操作和观察部署环境”，不拥有“破坏哪个实例、何时注入、怎样算恢复”等项目语义；这些仍由消费仓的 Case 与 Harness 决定。因此，同一个 Kubernetes Driver 可以被确定性恢复测试和容量、扩缩容观测共同使用，而不需要建立独立的 Kube Harness。
+
+混沌工程工具是这一平台边界上的可选故障注入后端，而不是 case-harness 的 Case、编排或判定事实源：[Chaos Mesh](https://chaos-mesh.org/) 与 [ChaosBlade](https://chaosblade.io/) 适合 Kubernetes Pod、网络和资源故障，[Toxiproxy](https://github.com/Shopify/toxiproxy) 适合确定性的依赖网络故障，[AgentChaos](https://github.com/IntelligentDDS/AgentChaos) 则提供 LLM API 输出截断、字段遗漏和错误响应等 Agent 语义故障的分类与实现参考；[LitmusChaos](https://litmuschaos.io/) 已包含 Workflow、Probe 和 Result 等完整平台能力，接入时应避免与 CaseRun 和 Verdict 重复建模。只有出现至少两个真实后端后，才从具体 Driver 中收敛通用故障注入接口。
+
 ## 6. 判定与观测视角
 
 同一 Case 或 Playbook Run 可以被多个视角消费：
