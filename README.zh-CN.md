@@ -1,95 +1,117 @@
 # case-harness
 
-> **Cases in, verdicts out.** 一组跨语言测试 harness，把"系统健壮不健壮"拆成若干可分开回答的问题——接口对错（e2e）、agent 效果（eval）、压力容量（perf）、链路归因（trace）与 agent 行动轨迹——共用同一份可积累的 **case** 资产。与 [spec-case](https://github.com/compforge/spec-case)（资产格式）、[case-code-review](https://github.com/compforge/case-code-review)（白盒消费方）互为姊妹仓。｜ English: [README.md](./README.md)
+> **Cases in, verdicts out.** 输入可复用 Case，由 e2e、eval、perf、trace 和 trajectory 运行生成统一、机器可读的 Verdict。English: [README.md](./README.md)。
 
-## 为什么有这个仓库
+## 这是什么
 
-一个 AI 项目会越来越复杂——功能多、链路长、测试面广，经常临到发版才发现问题，慌慌张张地修，修完也不敢说系统就完全没问题。本仓库的回答是：把"系统健壮不健壮"拆成几个可以分开回答的问题，各建一类 harness——前三类是**黑盒测试**（发请求看响应），trace 与 trajectory 是互补的**开盒分析**：
+case-harness 是一组跨语言测试 SDK，用于回答已经无法由一条测试命令概括的项目质量问题。它把 API 对错、Agent 效果、系统容量、链路归因和 Agent 行动轨迹拆成不同判定视角，同时让它们复用同一份版本化 Case 资产。
 
-| 问题 | 类型 | SDK |
-|------|------|-----|
-| 接口对不对 | API 测试（e2e，黑盒） | `python/e2e_harness` |
-| agent 效果好不好 | 效果测试（eval，黑盒） | `python/eval_harness` |
-| 压力下表现如何 | 压力测试（perf，黑盒） | `python/perf_harness` / `typescript/perf-harness` |
-| 链路内部哪层先反常 | trace 分析（trace，开盒） | `python/trace_harness` / `typescript/trace-harness` |
-| agent 的决策和行动是否合理 | 轨迹评估（trajectory，开盒） | `python/trajectory_harness` |
+本仓库提供 Harness SDK 和平台工具，不提供某个产品的现成测试。被测项目继续拥有自己的 Case、协议适配、凭据、资源生命周期和验收标准。
 
-提供 SDK，不提供测试本身：被测服务（SUT）在自己仓库里以 SDK 形式接入，按自己的协议/认证/资源生命周期组织。
+## 可以评估什么
 
-### 它处在哪一层测试
+| 问题 | 视角 | 已有 SDK |
+|---|---|---|
+| 公开 API 是否仍按契约工作？ | e2e | Python / Go |
+| Agent 产出质量是否达标？ | eval | Python |
+| 在声明的负载和资源约束下表现如何？ | perf | Python / TypeScript |
+| 物理调用链中哪一层最先异常？ | trace | Python / TypeScript |
+| Agent 的决策和行动过程是否合理？ | trajectory | Python |
 
-产品定位通常比需求稳定，需求和对外契约又比代码稳定。因此测试不是只有一种“端到端”：
+前三个视角根据系统公开行为进行判定；trace 和 trajectory 检查执行证据。“黑盒”描述的是判定边界，而不是要求所有准备动作都只能调用公开 API：准备环境、注入受控故障或观察资源压力，仍可能需要部署级工具。
 
-| 层级 | 边界 | 作用 | 状态 |
-|---|---|---|---|
-| Web / App 功能测试 | UI / 产品入口，可横跨多服务 | 验证用户能否完整走通某个功能，包括客户端代码 | 长期覆盖，尚未实现 |
-| API 功能测试 | 产品入口 API，可编排多步、多服务 | 验证后端业务功能，不覆盖 Web / App 代码 | 长期覆盖，尚未实现 |
-| 服务 API 契约测试 | 单个服务的对外 API | 验证服务契约在重构后仍可用 | 对应当前 `e2e_harness` |
-| unit 测试 | 函数 / 类 / 模块 | 验证局部实现，随代码变化更频繁 | 属于被测仓 |
+当前 e2e 以单个服务的公开边界为目标。产品级 Web、移动端和跨服务功能测试属于长期范围，不与服务 API 契约测试混为一谈。
 
-这里的 `e2e` 是相对于**单服务 SUT 边界**的端到端，不等于产品级 UI E2E。长期功能测试以自然语言 Playbook 为稳定意图，由 AI 在编写期生成 Web / Android / iOS / API Script，再由目标平台 SDK 执行。完整模型见 [`docs/kernel.md`](docs/kernel.md)。
+## 如何工作
 
-## 核心思想
-
-1. **不同判定实现思路迥异，但 case 应该一致**。case 只描述"如何给系统发请求"，不绑定怎么判定；同一份 case，e2e 拿去看对错，eval 拿去看效果，perf 拿去看压力下的表现。canonical 资产格式与模型由 `spec-case` 持有，本仓 `spec/` 只保留运行时约定与兼容投影。
-2. **case 是可积累的资产**。case 与判定解耦后就能持续积累；case 攒得越多，发版前全量跑一遍，就越有底气相信系统没问题。
-3. **实验词汇统一为 Experiment → Arm → Trial**。Experiment 回答一个问题，Arm 是参与比较的命名配置，Trial 是某个 Arm 的一次真实执行。结果落在 `runs/<scope>/<run-id>/`，`arm_id` 作为显式对齐键贯穿产物。
-4. **一次执行，多面观测**。同一次请求可同时服务对错（e2e）、效果（eval）、延迟/资源（perf）、链路归因（trace）和行动轨迹（trajectory）——这些 harness 是不同视角，不是多次独立发压。
-5. **case 锚定稳定契约**。case 的身份和断言语义来自需求或 API 契约；marker 贴近 handler 是为了发现与漂移检测，不代表内部函数名或文件路径是 case 的业务身份。
-
-统一的输出是 `verdict.json`（schema 见 [`spec/verdict-schema.yaml`](spec/verdict-schema.yaml)）：人读它，CI 读它，agent 开发循环也读它自纠偏。
-
-## 与 spec-case 的分工
-
-[spec-case](https://github.com/compforge/spec-case) 是**资产层**：`@spec`/`@case`/`@rule` 标注长在代码上，经工具链蒸馏成机器可读资产，靠 symbol-id 与代码稳定绑定；canonical `Case` 模型也由它提供（`spec_case.model`）。case-harness 是**运行层**：黑盒地把这些 case 跑成 verdict。同一份资产的白盒消费方是 [case-code-review](https://github.com/compforge/case-code-review)（把 spec/case 附到评审 unit 上作 checklist）。
-
-## Layout
-
-```
-case-harness/
-├── spec/                # 运行时约定层：case 兼容投影 / verdict / config
-├── python/              # Python 工程（uv），五个 sibling SDK + 共享 harness_common
-│   ├── e2e_harness/     # API 测试：确定性契约测试，判定即数据，pytest 驱动
-│   ├── eval_harness/    # 效果测试：Experiment/Arm 对照 + Worksheet 大表 + reconciler
-│   ├── perf_harness/    # 压力测试：资源约束下的容量/资源画像
-│   ├── trace_harness/   # trace 分析：OTel/Jaeger span 归因，调用栈 + 判读 + corpus
-│   ├── trajectory_harness/ # agent 轨迹归一与评估
-│   └── harness_common/  # 中立共享层：verdict / llm / report_kit
-├── go/                  # Go SDK（参考实现，形状对齐 spec/）
-├── typescript/          # TypeScript perf/trace SDK，遵守 spec/ 下的共享契约
-├── examples/            # 接入示例：api-test / agent-test
-└── docs/                # 跨 SDK 设计文档
+```text
+项目拥有的 canonical CaseSet
+    + 环境与执行代码
+    + 一个判定视角
+    → CaseRun（prepare → execute → judge → cleanup）
+    → Run 产物
+    → verdict.json
 ```
 
-五个 Python SDK 共享同一 uv 工程与 `spec/` 约定，但**互不 import**；公共能力集中在 `harness_common` 这一中立共享层。
+| 概念 | 含义 |
+|---|---|
+| **Case** | 由 `case_id` 标识的稳定、可复用测试输入与判定数据；canonical 格式由 [spec-case](https://github.com/compforge/spec-case) 持有。 |
+| **CaseRun** | 一个 Case 在一个环境和 variant 上的真实执行，具有显式阶段预算与 cleanup 语义。 |
+| **Run** | 一次真实执行的生命周期和产物边界，携带环境与对齐身份。 |
+| **Verdict** | 人、CI 和 Agent 开发闭环共同消费的机器可读结论。 |
 
-## Quickstart
+同一 Case 可以从多个角度观察。一次执行已经产生响应、trace、指标或 trajectory 时，应尽量让这些证据服务多个判定，而不是重复发起相同工作。
+
+## 共享平台工具箱
+
+部分执行机制会服务多个 Harness。例如，恢复 E2E 和性能测试都需要可靠地发现 Kubernetes 工作负载、等待状态收敛并采集 Event 证据。Go `kube` 包统一提供 namespace-scoped 的 Kubernetes 控制与观测，但不拥有任何业务 Case、负载模型或 Verdict。
+
+消费项目仍负责选择目标工作负载、决定何时允许注入故障，以及什么结果足以证明恢复或性能达标。其它故障注入后端可以继续加入工具箱，而不把实验意图从项目中搬走。
+
+## 快速开始
+
+先选择最接近自身场景的示例：
+
+| 示例 | 适用场景 |
+|---|---|
+| [`examples/api-test`](examples/api-test/README.md) | 小型、数据驱动的 API Case |
+| [`examples/python-service`](examples/python-service/) | 带准备和清理的 Python CaseRun |
+| [`examples/go-service`](examples/go-service/) | Go CaseRun、`go test` 聚合与 Verdict 输出 |
+| [`examples/agent-test`](examples/agent-test/README.md) | 数据集驱动的 Agent 评测 |
+
+在源码目录运行 Python API 示例：
 
 ```bash
-# Python：五个 SDK 共用一个 uv 工程
+cd python
+uv sync
+export WIDGET_TOKEN=...
+uv run e2e run ../examples/api-test/cases.yaml \
+  --config ../examples/api-test/config.yaml \
+  --runs-dir ../runs
+```
+
+针对一个已部署服务运行 Go 示例：
+
+```bash
+cd examples/go-service
+export ASANDBOX_BASE_URL=http://localhost:8090
+export EXAMPLE_TOKEN=...
+go test -tags=e2e -v ./...
+```
+
+两条路径都会生成以 `verdict.json` 结尾的 Run 目录。被跳过或执行出错的 Case 会明确保留，不能被解释为已经验证成功。
+
+## Owner 分工
+
+| Owner | 职责 |
+|---|---|
+| 被测项目 | 版本化 Case 资产、测试代码、业务动作、验收标准 |
+| case-harness | Case 执行、Runner / Driver、Judge、Run 产物、Verdict 投影、共享平台工具 |
+| spec-case | canonical Case 模型与代码到 Case 的意图标记 |
+| 部署工作流 | 环境、凭据、目标 revision、触发策略与发布门禁 |
+
+这个分工让测试意图贴近产品，同时允许执行机制和输出契约集中演进。[case-code-review](https://github.com/compforge/case-code-review) 从白盒评审视角消费同一份资产。
+
+## SDK 地图
+
+| 路径 | 能力 |
+|---|---|
+| `python/e2e_harness` / `go/e2e` | 确定性 CaseRun 执行与 API 断言 |
+| `python/eval_harness` | Agent 评测与对照实验 |
+| `python/perf_harness` / `typescript/perf-harness` | 发压、SLO 与容量证据 |
+| `python/trace_harness` / `typescript/trace-harness` | Trace 归一、归因与 Finding |
+| `python/trajectory_harness` | Agent 轨迹归一与评估 |
+| `go/kube` | e2e / perf 共用的 Kubernetes 控制与观测 |
+
+## 仓库开发
+
+```bash
 cd python && uv sync && uv run pytest -q
-
-# eval_harness 端到端（mock，无需 live 服务）
-uv run python -m eval_harness.cli eval_harness/materials/experiments/smoke.yaml --mock --fresh --runs-dir /tmp/ch
-
-# perf_harness 端到端（mock）
-uv run python -m perf_harness.cli run perf_harness/examples/mock.yaml --out /tmp/ph
-
-# trace 分析（离线 jaeger 文件 → 调用栈 + 判读）
-uv run trace single ../conformance/trace/fixtures/genai-basic.jsonl --diagnose
-
-# Go（参考实现）
-cd go && go test ./...
-
-# TypeScript trace-harness
-cd typescript/trace-harness && bun install --frozen-lockfile && bun test
-
-# TypeScript perf-harness
+cd ../go && go test ./...
+cd ../typescript/trace-harness && bun install --frozen-lockfile && bun test
 cd ../perf-harness && bun install --frozen-lockfile && bun test
 ```
 
-各 SDK 的接入方式见其目录下的 `README.md`；开发者向的代码地图与约定见各 `AGENTS.md`。
+## 状态
 
-## Status
-
-Early public release。canonical case schema 来自 `spec-case`；本仓 `spec/` 下的 verdict 与运行时契约是稳定中心。不同语言实现可以覆盖不同 feature，但共享 IR 共同遵守契约，不以某一种实现作为 canonical。
+case-harness 仍处于早期公开阶段。canonical Case schema 来自 spec-case；`spec/` 下的 Verdict 与运行时契约是本仓库的稳定中心。不同语言 SDK 可以覆盖不同能力，但应持续遵守同一组契约。
