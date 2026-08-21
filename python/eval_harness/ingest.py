@@ -1,9 +1,8 @@
-"""Helpers for importers that turn an external QA dataset into an eval_harness
-evalset (corpus + cases).
+"""Helpers for importers that turn an external QA dataset into a canonical CaseSet.
 
 The generic, dataset-agnostic bits that every importer otherwise re-implements:
 - ``slug`` — a filesystem-safe, collision-resistant doc filename from a title;
-- ``dump_cases_yaml`` (re-exported) — write the canonical ``cases:`` file.
+- ``dump_evalset`` — write the canonical CaseSet asset consumed by every harness.
 
 The *corpus manifest* shape (how a SUT lists its sources) is intentionally
 NOT here — eval_harness keeps "corpus = a name" and leaves source resolution to the
@@ -59,7 +58,7 @@ def fetch_json(url: str, *, cache_dir: str | Path | None = None) -> Any:
 
 
 def dump_evalset(evalset: EvalSet, out_dir: str | Path) -> Path:
-    """Write a unified ``evalset.yaml`` (corpus + sources + cases) under ``out_dir``.
+    """Write a canonical CaseSet under ``out_dir``.
 
     Inline source ``content`` is materialised into ``docs/`` and rewritten to a ``uri`` —
     so the on-disk evalset references files, while an importer can build in memory. This
@@ -74,25 +73,28 @@ def dump_evalset(evalset: EvalSet, out_dir: str | Path) -> Path:
             (out_dir / "docs").mkdir(exist_ok=True)
             (out_dir / "docs" / f"{slug(s.name)}.txt").write_text(s.content, encoding="utf-8")
             uri = f"docs/{slug(s.name)}.txt"
-        rec: dict = {"name": s.name, "uri": uri, "selected": s.selected}
+        rec: dict = {"name": s.name, "uri": uri}
         if s.meta:
             rec["meta"] = dict(s.meta)
         sources.append(rec)
-    body: dict = {"corpus": evalset.corpus}
+    body: dict = {"caseset": evalset.caseset}
     if evalset.focus:
         body["focus"] = evalset.focus
-    if evalset.domain:
-        body["domain"] = evalset.domain
+    if evalset.facet_schema.facets:
+        body["facets"] = {
+            name: spec.model_dump(exclude_none=True, exclude_defaults=True)
+            for name, spec in evalset.facet_schema.facets.items()
+        }
     body["sources"] = sources
     body["cases"] = [case_to_raw(c) for c in evalset.cases]
     text = yaml.safe_dump(body, allow_unicode=True, sort_keys=False, width=4096)
-    path = out_dir / "evalset.yaml"
+    path = out_dir / "caseset.yaml"
     path.write_text(text, encoding="utf-8")
     return path
 
 
 class Importer(ABC):
-    """Maps an external/open dataset → a unified ``EvalSet`` (corpus + sources + cases).
+    """Maps an external/open dataset → a canonical CaseSet-shaped ``EvalSet``.
 
     The dataset→cases/sources mapping is SUT-independent, so a public-benchmark importer is
     reusable across consumers. Subclass and implement ``build``; ``write`` dumps it to disk.

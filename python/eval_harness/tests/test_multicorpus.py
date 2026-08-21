@@ -18,12 +18,12 @@ def _multi_exp():
         target=Target(name="chat", config={"tenant_id": "t1"}),
         evalsets=[
             EvalSet(
-                corpus="finance",
+                caseset="finance",
                 cases=[make_eval_case(id="q1", query="q", ground_truth="a")],
             ),
             # same case id under a different corpus must coexist (keyed by corpus)
             EvalSet(
-                corpus="news",
+                caseset="news",
                 cases=[make_eval_case(id="q1", query="q", ground_truth="a")],
             ),
         ],
@@ -35,7 +35,7 @@ def test_single_corpus_is_one_evalset():
     exp = Experiment(
         name="e",
         target=Target(name="chat"),
-        evalsets=[EvalSet(corpus="solo", cases=[make_eval_case(id="q1", query="q")])],
+        evalsets=[EvalSet(caseset="solo", cases=[make_eval_case(id="q1", query="q")])],
         metrics=["correctness"],
     )
     assert exp.corpora == ["solo"]  # a single-corpus run is just evalsets with one entry

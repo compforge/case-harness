@@ -7,7 +7,7 @@
 ### 脊柱
 
 ```
-evalset ──( solver 补 answer / scorer 补 metric )──▶ Worksheet（大表）──pivot──▶ report
+canonical CaseSet → EvalSet runtime ──(solver / scorer)──▶ Worksheet ──pivot──▶ report
 ```
 
 一个 evalset，过一个或多个 Arm，产出一张内存 Worksheet，reconciler 逐 cell 填，report 纯 pivot 渲染。**不是 prepare→run→eval 的串行流水线**。
@@ -27,7 +27,9 @@ eval_harness/
 
 ## 关键约定
 
-- **Experiment** = `target`（基线 SUT 配置）+ `arms` + `evalset` + `metrics` + `weights`
+- **Experiment** = `target`（基线 SUT 配置）+ `arms` + CaseSet 引用 + `metrics` + `weights`
+- **CaseSet 归 spec-case**：Eval 完整加载其 identity / sources / facets / cases，只解释
+  `input` 与 `judge.eval`；Experiment 不得覆盖资产字段
 - **Arm**（对照配置）= `target ⊕ overrides`，分 **heavy**（provisioned resource+sources，有 prepare/clean 和复用 key）+ **light**（model/params，按调用施加）；`Arm.key` 只 hash heavy 字段 → 只换模型的 Arm 共享同一份 provision
 - **Trial** = 某个 Arm 的一次真实执行，Worksheet 以显式 `arm_id` 记录并对齐其结果
 - **Worksheet**（大表）= rows = (arm_id × case)，每 cell 带 PENDING/OK/FAILED；引擎唯一真相 + checkpoint

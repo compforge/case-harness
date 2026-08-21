@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadCaseSet } from "@compforge/spec-case/model";
 import {
   buildWindows,
   Engine,
@@ -18,6 +19,10 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const PERF_FIXTURES = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../../conformance/perf/fixtures",
+);
+const SHARED_CASESET = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../conformance/case/fixtures/shared-chat.yaml",
 );
 
 describe("TypeScript perf harness", () => {
@@ -71,6 +76,7 @@ describe("TypeScript perf harness", () => {
     let pick = 0;
     Math.random = () => (pick++ % 2 === 0 ? 0.1 : 0.9);
     try {
+      const caseSet = loadCaseSet(SHARED_CASESET);
       const run = await new Engine({
         subject: { name: "chat", target: {} },
         workload: {
@@ -79,10 +85,8 @@ describe("TypeScript perf harness", () => {
             duration_ms: selected.id === "ordinary_chat" ? 10 : 20,
           }),
         },
-        caseMix: [
-          { case: { id: "ordinary_chat", input: { query: "hello" } }, weight: 1 },
-          { case: { id: "knowledge_chat", input: { query: "docs" } }, weight: 1 },
-        ],
+        caseSet,
+        caseMix: [{ id: "ordinary_chat", weight: 1 }, { id: "knowledge_chat", weight: 1 }],
         loads: [rampHold("closed", 1, 0, 1, { max_requests: 4 })],
       }).run();
 
@@ -94,6 +98,20 @@ describe("TypeScript perf harness", () => {
     } finally {
       Math.random = originalRandom;
     }
+  });
+
+  test("rejects experiment-local Case overrides and unknown selections", () => {
+    const base = {
+      subject: { name: "chat", target: {} },
+      workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
+      loads: [rampHold("closed", 1, 0, 1)],
+    };
+    expect(() => new Engine({ ...base, caseMix: [{ id: "ordinary_chat" }] })).toThrow("caseSet");
+    expect(() => new Engine({
+      ...base,
+      caseSet: loadCaseSet(SHARED_CASESET),
+      caseMix: [{ id: "missing" }],
+    })).toThrow("not found");
   });
 
   test("error-rate breaker stops a failing trial", async () => {

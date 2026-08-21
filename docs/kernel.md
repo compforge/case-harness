@@ -19,7 +19,7 @@ case-harness 的价值不是再提供一个测试 runner，而是让稳定的测
 
 | 概念 | 语义 |
 |---|---|
-| **Case** | 一个可重用的结构化测试输入，具有稳定 `case_id`。它适合表达一次 API / agent 输入，可被 e2e、eval、perf 等不同视角消费。 |
+| **Case** | 一个可重用的结构化测试输入，具有稳定 `case_id`；与 sources、facet vocabulary 一起归属 canonical CaseSet，可被 e2e、eval、perf 等不同视角消费。 |
 | **Playbook** | 用自然语言表达的产品功能测试剧本：用户目标、前置条件、有序动作、关键检查点和最终验收结果。它与 Web / Android / iOS / API 等执行目标解耦。 |
 | **Script** | Playbook 针对某个 Target 编译出的可执行代码。它是可 review、可重放、可再生成的派生产物，不是功能需求的事实源。 |
 | **Target** | 脚本真正操作的系统边界，例如 Web、Android、iOS、产品 API 或单服务 API。Target 决定 Script 使用的 SDK / Driver 和可观测证据。 |
@@ -38,10 +38,13 @@ case-harness 的价值不是再提供一个测试 runner，而是让稳定的测
 ### Case 路径（当前主路径）
 
 ```text
-Case + Variant → CaseRun(prepare → execute → judge → cleanup) → Verdict
+CaseSet + Experiment overlay（选择 / weight / 环境）
+    → Case + Variant
+    → CaseRun(prepare → execute → judge → cleanup)
+    → Verdict
 ```
 
-Case 是可直接消费的结构化数据，CaseRun 承担环境相关的过程。prepare/cleanup 不进入 Case；cleanup 总执行并使用独立预算，失败必须进入 Verdict error。耗时收敛检查属于 execute/judge，可复用 deadline-aware poll/retry/consistently。不同 harness 可以对同一次执行做确定性断言、效果评估、容量观测或链路归因，不必为每个视角重复发起请求。
+CaseSet 是资产边界；Experiment 只叠加选择、权重、负载和环境等运行参数，不覆盖 Case 的 input、facets、sources 或 judgment。CaseRun 承担环境相关的过程。prepare/cleanup 不进入 Case；cleanup 总执行并使用独立预算，失败必须进入 Verdict error。耗时收敛检查属于 execute/judge，可复用 deadline-aware poll/retry/consistently。不同 harness 可以对同一次执行做确定性断言、效果评估、容量观测或链路归因，不必为每个视角重复发起请求。
 
 ### Playbook 路径（长期功能测试）
 

@@ -5,7 +5,10 @@ open- or closed-loop load profiles, preserves per-request outcomes and correlati
 the shared model/raw artifacts described by `spec/perf-contract.md`.
 
 ```ts
+import { loadCaseSet } from "@compforge/spec-case/model";
 import { Engine, rampHold, writeRunData, type Workload } from "@compforge/perf-harness";
+
+const caseSet = loadCaseSet("./cases/chat.yaml");
 
 const workload: Workload = {
   fire: async ({ signal }) => {
@@ -19,10 +22,8 @@ const run = await new Engine({
   name: "service-capacity",
   subject: { name: "service", target: {} },
   workload,
-  caseMix: [
-    { case: { id: "ordinary_chat", input: { query: "hello" } }, weight: 4 },
-    { case: { id: "knowledge_chat", input: { query: "use the docs" } }, weight: 1 },
-  ],
+  caseSet,
+  caseMix: [{ id: "ordinary_chat", weight: 4 }, { id: "knowledge_chat", weight: 1 }],
   resources: [{}],
   loads: [rampHold("closed", 20, 10, 60)],
 }).run();
@@ -30,9 +31,9 @@ const run = await new Engine({
 writeRunData(run, "./runs/service-capacity");
 ```
 
-`caseMix` selects one or more canonical Case assets for this Experiment; its weights are load-plan
-metadata and do not mutate the Cases. `CaseView` is only the minimal runtime shape accepted by the
-Harness—the canonical Case/CaseSet schema remains owned by spec-case.
+`caseSet` is the canonical asset loaded by spec-case. `caseMix` may only select its stable case ids
+and assign load-plan weights; input, facets, sources and per-face judgment remain owned by the
+CaseSet and cannot be overridden by the Perf experiment.
 
 Service-specific request and SSE semantics stay in the consumer's `Workload`. Each `fire` handles
 exactly one dispatch and must be safe for concurrent calls; the Workload must not start its own load

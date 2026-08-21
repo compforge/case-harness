@@ -78,7 +78,7 @@ def _exp(cases=None, arms=None):
     return Experiment(
         name="exp",
         target=Target(name="chat", config={"tenant_id": "t1"}),
-        evalsets=[EvalSet(corpus="rag", cases=cases)],
+        evalsets=[EvalSet(caseset="rag", cases=cases)],
         arms=arms or [Arm(id="model-alpha")],
         metrics=["correctness", "latency"],
         weights={"correctness": 1.0},

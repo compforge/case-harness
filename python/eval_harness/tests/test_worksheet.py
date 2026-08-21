@@ -12,7 +12,7 @@ def _exp():
         target=Target(name="chat", config={"tenant_id": "t1"}),
         evalsets=[
             EvalSet(
-                corpus="rag",
+                caseset="rag",
                 cases=[
                     make_eval_case(
                         id="q1",
@@ -53,7 +53,7 @@ def test_to_sample_carries_evidence_sources():
         target=Target(name="chat", config={"tenant_id": "t1"}),
         evalsets=[
             EvalSet(
-                corpus="rag",
+                caseset="rag",
                 cases=[make_eval_case(id="q1", query="q1", evidence_sources=["d1.md", "d2.md"])],
             )
         ],
@@ -146,7 +146,7 @@ def test_candidate_sources_flows_case_to_row_sample_and_checkpoint(tmp_path):
         target=Target(name="chat", config={"tenant_id": "t1"}),
         evalsets=[
             EvalSet(
-                corpus="rag",
+                caseset="rag",
                 cases=[
                     make_eval_case(
                         id="q1",

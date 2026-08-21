@@ -1,8 +1,8 @@
-"""Input side: ``EvalSet`` (corpus + sources + cases) + how eval *reads* a ``common.Case``.
+"""Eval's runtime projection of one canonical CaseSet and how eval reads a Case.
 
-Cases are the harness-neutral ``common.Case`` — there is no eval-private case class. What is
-eval's own is the **reading** of one: ``eval_view`` projects a canonical case onto the fields
-eval's solver / scorer need, encoding eval's autonomous interpretation of ``input`` and
+Cases are the harness-neutral ``spec_case.model.Case`` — there is no eval-private case class.
+What is eval's own is the **reading** of one: ``eval_view`` projects a canonical case onto
+the fields eval's solver / scorer need, encoding eval's autonomous interpretation of ``input`` and
 ``judge.eval`` (``common.case`` deliberately leaves both schemaless). It is a read-only view,
 not a model — nothing is stored or serialized through it (the canonical ``common.Case`` is the
 only input model; ``dump_cases_yaml`` writes it back via ``case_to_raw``). Do not let it grow
@@ -35,12 +35,6 @@ from spec_case.facets import FacetSchema as FacetSchema
 from spec_case.facets import FacetSpec as FacetSpec
 from spec_case.model import Case as Case
 from spec_case.model import case_to_raw
-
-# Framework base registry: a few well-known facets every evalset inherits (passed as the
-# `base` when resolving a FacetSchema). Kept minimal; evalsets extend / re-open values.
-BASE_FACETS: dict[str, FacetSpec] = {
-    "difficulty": FacetSpec(values=["easy", "medium", "hard"], ordered=True),
-}
 
 
 @dataclass(frozen=True)
@@ -83,9 +77,9 @@ def eval_view(case: Case) -> EvalView:
 
 
 def dump_cases_yaml(cases: list[Case]) -> str:
-    """Serialize canonical cases to the ``cases:`` YAML consumed by ``evalset.cases``.
+    """Serialize canonical cases as a reusable CaseSet fragment.
 
-    The single write path for importers/builders — they hand ``common.Case`` objects, not
+    The single write path for importers/builders — they hand canonical ``Case`` objects, not
     hand-assembled YAML (which would re-implement escaping). Round-trips through
     ``common.case.case_from_raw``.
     """
@@ -108,36 +102,38 @@ class SourceRecord(BaseModel):
     name: str  # display name / identity (shown in citations; used by retrieval-recall)
     uri: str | None = None
     content: str | None = None
-    selected: bool = True  # enters retrieval scope
     meta: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check(self) -> SourceRecord:
-        if self.uri is None and self.content is None:
-            raise ValueError(f"source {self.name!r} needs `uri` or `content`")
+        if (self.uri is None) == (self.content is None):
+            raise ValueError(f"source {self.name!r} needs exactly one of `uri` or `content`")
         return self
 
 
 class EvalSet(BaseModel):
-    """A corpus (its documents) + the cases that query it — the unified eval unit an
-    ``Importer`` produces and a provisioner consumes.
+    """Resolved runtime view of one canonical spec-case CaseSet.
 
-    ``corpus`` is the identity (drives ``Arm.key`` / provisioning reuse); ``sources`` are
-    the docs the provisioner ingests; ``focus`` / ``domain`` describe the set (e.g. become
-    a provisioned resource's description). corpus/cases stay reusable: an experiment may
-    reference the same evalset across runs.
+    ``caseset`` is the shared identity used by Eval and Perf. Sources are resolved for the
+    local runtime, while cases and facet vocabulary retain the canonical asset semantics.
+    The ``corpus`` property is Eval's name for the provisioned source collection and is
+    deliberately derived from the CaseSet identity rather than configured separately.
     """
 
-    # arbitrary_types_allowed: `cases` holds the canonical `common.Case` (a dataclass, not a
+    # arbitrary_types_allowed: `cases` holds the canonical spec-case Case (a dataclass, not a
     # pydantic model) — pydantic treats it as an opaque value; cases are built + validated by
     # the config layer (case_from_raw) and validate_against, not re-parsed here.
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-    corpus: str
+    caseset: str
+    facet_schema: FacetSchema = Field(default_factory=FacetSchema)
     sources: list[SourceRecord] = Field(default_factory=list)
     cases: list[Case] = Field(min_length=1)
     focus: str | None = None
-    domain: str | None = None
+
+    @property
+    def corpus(self) -> str:
+        return self.caseset
 
     def validate_against(self, schema: FacetSchema) -> None:
         seen: set[str] = set()

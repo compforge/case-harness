@@ -1,0 +1,17 @@
+caseset: shared-chat
+focus: Chat cases shared by Eval and Perf implementations.
+facets:
+  difficulty: {values: [simple, complex], ordered: true}
+cases:
+  - id: ordinary_chat
+    input: {query: hello}
+    facets: {difficulty: simple}
+    judge:
+      eval: {ground_truth: hello}
+      perf: {expect_status: 200}
+  - id: knowledge_chat
+    input: {query: use the docs}
+    facets: {difficulty: complex}
+    judge:
+      eval: {ground_truth: docs}
+      perf: {expect_status: 200}
