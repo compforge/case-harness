@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
 
 from trajectory_harness.model import Trajectory
@@ -10,21 +10,7 @@ from trajectory_harness.model import Trajectory
 EvaluatorKind = Literal["common", "domain"]
 EvaluationStatus = Literal["evaluated", "not_applicable", "error"]
 Verdict = Literal["pass", "fail", "warning"]
-SignalSeverity = Literal["info", "warning", "error"]
-MetricDirection = Literal["higher_is_better", "lower_is_better", "neutral"]
-Aggregation = Literal["mean", "p50", "p95"]
-Measurement = float | int | bool
-
-
-@dataclass(frozen=True, slots=True)
-class MeasurementSpec:
-    """One per-trajectory measurement exposed by an evaluator."""
-
-    name: str
-    unit: str = ""
-    description: str = ""
-    direction: MetricDirection = "neutral"
-    aggregations: tuple[Aggregation, ...] = ("mean",)
+FindingSeverity = Literal["info", "warning", "error"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,15 +22,14 @@ class EvaluatorSpec:
     description: str
     kind: EvaluatorKind = "domain"
     owner: str = ""
-    measurements: tuple[MeasurementSpec, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
-class DiagnosticSignal:
-    """One observed pattern and the problems it may indicate."""
+class Finding:
+    """One evaluator finding, its evidence, and possible explanations."""
 
     code: str
-    severity: SignalSeverity
+    severity: FindingSeverity
     summary: str
     step_ids: tuple[str, ...] = ()
     hypotheses: tuple[str, ...] = ()
@@ -61,16 +46,15 @@ class DiagnosticSignal:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationResult:
-    """One evaluator's conclusion, measurements, and diagnostic signals."""
+    """One evaluator's quality conclusion and diagnostic findings."""
 
     evaluator_id: str
     status: EvaluationStatus
     verdict: Verdict | None = None
     score: float | None = None
-    measurements: dict[str, Measurement] = field(default_factory=dict)
     explanation: str = ""
     step_ids: tuple[str, ...] = ()
-    signals: tuple[DiagnosticSignal, ...] = ()
+    findings: tuple[Finding, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -78,10 +62,9 @@ class EvaluationResult:
             "status": self.status,
             "verdict": self.verdict,
             "score": self.score,
-            "measurements": dict(self.measurements),
             "explanation": self.explanation,
             "step_ids": list(self.step_ids),
-            "signals": [signal.to_dict() for signal in self.signals],
+            "findings": [finding.to_dict() for finding in self.findings],
         }
 
 

@@ -1,4 +1,4 @@
-"""Detect exact repeated tool calls, a common agent-loop churn signal."""
+"""Detect exact repeated tool calls, a common agent-loop churn finding."""
 
 from __future__ import annotations
 
@@ -8,9 +8,8 @@ from typing import Any
 
 from trajectory_harness.evaluate import (
     EvaluationResult,
-    DiagnosticSignal,
     EvaluatorSpec,
-    MeasurementSpec,
+    Finding,
 )
 from trajectory_harness.model import Step, Trajectory
 
@@ -23,21 +22,6 @@ class RepeatedToolCallEvaluator:
         description="Detect exact repeats of an earlier tool name and arguments.",
         kind="common",
         owner="trajectory_harness",
-        measurements=(
-            MeasurementSpec("tool_call_count", "count", "Observed tool calls."),
-            MeasurementSpec(
-                "repeated_call_count",
-                "count",
-                "Calls repeating an earlier name and arguments.",
-                "lower_is_better",
-            ),
-            MeasurementSpec(
-                "repeated_call_rate",
-                "ratio",
-                "Repeated calls divided by observed tool calls.",
-                "lower_is_better",
-            ),
-        ),
     )
 
     def evaluate(
@@ -64,12 +48,6 @@ class RepeatedToolCallEvaluator:
             else:
                 seen.add(signature)
 
-        repeated_rate = round(len(duplicate_steps) / len(calls), 3)
-        measurements = {
-            "tool_call_count": len(calls),
-            "repeated_call_count": len(duplicate_steps),
-            "repeated_call_rate": repeated_rate,
-        }
         if duplicate_steps:
             summary = (
                 f"{len(duplicate_steps)} of {len(calls)} tool calls repeat an earlier "
@@ -79,11 +57,10 @@ class RepeatedToolCallEvaluator:
                 evaluator_id=self.spec.evaluator_id,
                 status="evaluated",
                 verdict="warning",
-                measurements=measurements,
                 explanation=f"{summary} Inspect whether batching or reuse would help.",
                 step_ids=tuple(duplicate_steps),
-                signals=(
-                    DiagnosticSignal(
+                findings=(
+                    Finding(
                         code="repeated_tool_call",
                         severity="warning",
                         summary=summary,
@@ -101,7 +78,6 @@ class RepeatedToolCallEvaluator:
             status="evaluated",
             score=1.0,
             verdict="pass",
-            measurements=measurements,
             explanation=f"All {len(calls)} tool calls are distinct.",
         )
 

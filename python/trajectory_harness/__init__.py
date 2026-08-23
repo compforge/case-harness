@@ -1,10 +1,9 @@
 """Normalize, evaluate, aggregate, and report agent trajectories."""
 
 from trajectory_harness.evaluate import EvaluationResult as EvaluationResult
-from trajectory_harness.evaluate import DiagnosticSignal as DiagnosticSignal
 from trajectory_harness.evaluate import Evaluator as Evaluator
 from trajectory_harness.evaluate import EvaluatorSpec as EvaluatorSpec
-from trajectory_harness.evaluate import MeasurementSpec as MeasurementSpec
+from trajectory_harness.evaluate import Finding as Finding
 from trajectory_harness.evaluate import TrajectoryEvaluation as TrajectoryEvaluation
 from trajectory_harness.evaluate import evaluate as evaluate
 from trajectory_harness.evaluators.execution_success import (
@@ -23,6 +22,15 @@ from trajectory_harness.failures import llm_failure as llm_failure
 from trajectory_harness.failures import llm_timeout as llm_timeout
 from trajectory_harness.loaders.base import TrajectoryLoader as TrajectoryLoader
 from trajectory_harness.loaders.otel_json import OTelJsonLoader as OTelJsonLoader
+from trajectory_harness.measure import MeasurementResult as MeasurementResult
+from trajectory_harness.measure import MeasurementSpec as MeasurementSpec
+from trajectory_harness.measure import Measurer as Measurer
+from trajectory_harness.measure import MeasurerSpec as MeasurerSpec
+from trajectory_harness.measure import TrajectoryMeasurement as TrajectoryMeasurement
+from trajectory_harness.measure import measure as measure
+from trajectory_harness.measurers.model_usage import (
+    ModelUsageMeasurer as ModelUsageMeasurer,
+)
 from trajectory_harness.metrics import DatasetRef as DatasetRef
 from trajectory_harness.metrics import EvaluationRun as EvaluationRun
 from trajectory_harness.metrics import Metric as Metric

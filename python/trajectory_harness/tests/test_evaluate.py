@@ -4,11 +4,11 @@ from dataclasses import dataclass
 
 from trajectory_harness import (
     EvaluationResult,
-    DiagnosticSignal,
     EvaluatorSpec,
     ExecutionResult,
     ExecutionSuccessEvaluator,
     Failure,
+    Finding,
     RepeatedToolCallEvaluator,
     Step,
     ToolSuccessEvaluator,
@@ -42,7 +42,7 @@ def _tool_step(step_id: str, path: str, *, failure: Failure | None = None) -> St
     )
 
 
-def test_repeated_tool_call_evaluator_returns_measurements_and_evidence():
+def test_repeated_tool_call_evaluator_returns_judgment_and_evidence():
     trajectory = Trajectory(
         trajectory_id="t1",
         steps=(
@@ -57,14 +57,9 @@ def test_repeated_tool_call_evaluator_returns_measurements_and_evidence():
     result = evaluation.results[0]
     assert result.score is None
     assert result.verdict == "warning"
-    assert result.measurements == {
-        "tool_call_count": 3,
-        "repeated_call_count": 1,
-        "repeated_call_rate": 0.333,
-    }
     assert result.step_ids == ("s3",)
-    assert result.signals == (
-        DiagnosticSignal(
+    assert result.findings == (
+        Finding(
             code="repeated_tool_call",
             severity="warning",
             summary="1 of 3 tool calls repeat an earlier tool name and arguments.",
@@ -76,7 +71,7 @@ def test_repeated_tool_call_evaluator_returns_measurements_and_evidence():
             ),
         ),
     )
-    assert result.to_dict()["signals"][0]["step_ids"] == ["s3"]
+    assert result.to_dict()["findings"][0]["step_ids"] == ["s3"]
 
 
 def test_evaluator_is_not_applicable_when_trajectory_has_no_tool_calls():
@@ -154,9 +149,9 @@ def test_common_execution_and_tool_evaluators_keep_failures_as_facts():
 
     execution, tool = evaluation.results
     assert execution.verdict == "fail"
-    assert execution.measurements == {"success": False, "duration_ms": 25}
+    assert execution.score == 0
     assert tool.verdict == "fail"
-    assert tool.measurements["success_rate"] == 0
+    assert tool.score == 0
     assert tool.step_ids == ("s1",)
 
 
