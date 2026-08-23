@@ -36,6 +36,7 @@ The processing boundary is:
 
 ```text
 Source
+  -> RecordingRef / Recording
   -> TrajectoryLoader
   -> Trajectory (Step + Failure + ExecutionResult)
   -> Evaluator
@@ -44,6 +45,10 @@ Source
   -> Metric
   -> Report / HTML
 ```
+
+Source implementations discover lightweight `RecordingRef` values and fetch raw `Recording`
+text. Loaders own format parsing and can consume either files with `load` or fetched content with
+`loads`; dataset builders attach labels separately instead of coupling annotations to storage.
 
 The bundled loader accepts OTLP JSON, Tempo's OTLP wrapper, and flat OTLP JSONL. Message
 payloads follow the OTel GenAI `role + parts` schema. A failed operation carries a

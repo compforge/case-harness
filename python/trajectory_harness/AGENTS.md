@@ -7,15 +7,16 @@ trajectory_harness 评估 agent/workflow 的**决策与行动序列**：是否�
 loop 与确定性操作构成的 pipeline。它不替代 eval_harness 的最终回答质量评分，也不替代
 trace_harness 对物理 span、耗时与错误传播的归因。
 
-外部 session / trace 先经 `TrajectoryLoader` 投影为稳定的 `Trajectory`，Evaluator 只消费
-该中间格式，不感知 OTel、框架 session 或存储后端。轨迹事实、评估结论、批量指标和报告逐层
-分离：Failure 不是低分，Measurement 也不是 Dataset 级 Metric。
+外部 session / trace 先由 `RecordingSource` 发现和读取，再经 `TrajectoryLoader` 投影为稳定的
+`Trajectory`。Evaluator 只消费该中间格式，不感知 OTel、框架 session 或存储后端。轨迹事实、
+评估结论、批量指标和报告逐层分离：Failure 不是低分，Measurement 也不是 Dataset 级 Metric。
 
 ## 代码地图与核心模块
 
 ```
 trajectory_harness/
 ├── model.py             # Trajectory / Step / Failure / ExecutionResult
+├── source.py            # RecordingQuery / RecordingRef / RecordingSource
 ├── failures.py          # LLM 等通用低基数 Failure taxonomy 与构造函数
 ├── loaders/             # 外部记录 → Trajectory；base 契约 + OTel JSON 默认实现
 ├── evaluate.py          # EvaluatorSpec / EvaluationResult / DiagnosticSignal 与编排函数
@@ -29,8 +30,10 @@ trajectory_harness/
 
 - **OTel 是外部词汇，不是内部依赖**：operation 与 message parts 对齐 OTel GenAI 语义约定，
   但核心模型不依赖某个 OTel SDK 或仍在演进的生成类型。
+- **Source 只负责选择和读取**：Source 返回轻量 `RecordingRef` 和原始 `Recording`，不解析为
+  `Trajectory`，也不执行判定；领域标签作为 Dataset annotation 组合，不塞进 Source 契约。
 - **只有 Loader 知道来源格式**：session/OTLP/框架私有字段止于 Loader；Evaluator 只读
-  `Trajectory`。
+  `Trajectory`。Source 与 Loader 通过内存文本组合，避免强制落临时文件。
 - **多阶段仍是 Step tree**：`parent_step_id` 保留 agent/workflow 的执行层级；领域 Evaluator
   通过 `operation / name / attributes` 选择子树，通用模型不引入 Stage。
 - **Failure 是执行事实**：具体操作失败放在 `Step.failure`，最终主要失败放在
