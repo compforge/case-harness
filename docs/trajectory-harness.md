@@ -15,6 +15,7 @@ trajectory_harness 回答的是：**agent 为得到结果而采取的决策与�
 
 ```text
 Source
+  -> RecordingRef / Recording
   -> TrajectoryLoader
   -> Trajectory (Step + Failure + ExecutionResult)
   -> Evaluator
@@ -41,7 +42,18 @@ Evaluator 逐步沉淀可复用的判定、Measurement 和 Signal，观察执行
 是否反复或预算是否异常，再由实验或业务 Policy 判断应修改 prompt、tool、loop mechanism 还是
 pipeline 编排。单个行为模式通常只是 Signal；除非存在明确契约，不能直接把它定性成 Failure。
 
-### 1.1 Tool set 的两个评估层级
+### 1.1 Source 与 Loader 边界
+
+`RecordingSource` 统一“从哪里找轨迹原料”：`select(RecordingQuery)` 返回只含身份、URI、时间和
+低成本属性的 `RecordingRef`，`fetch(ref)` 才读取完整原始文本。公共 Query 只提供时间、精确属性
+和数量上限；仓库、租户等领域过滤可由具体 Source 扩展。
+
+Source 不理解 ATIF、OTLP 等格式，不构造 `Trajectory`，也不拥有人工标签。格式解析属于
+`TrajectoryLoader`；forge comment 等监督信号属于 Dataset annotation，由业务 Dataset builder
+将 recording、trajectory identity 与 label 组合。Loader 同时提供文件 `load` 与内存文本 `loads`，
+因此远端 API、CLI 导出或本地 session Source 不需要先创建临时文件。
+
+### 1.2 Tool set 的两个评估层级
 
 Tool 不能只按“调用成功或失败”评估，还要区分单个工具契约和整个工具集：
 

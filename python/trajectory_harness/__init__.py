@@ -34,3 +34,7 @@ from trajectory_harness.model import Trajectory as Trajectory
 from trajectory_harness.report import build_report as build_report
 from trajectory_harness.report import render_report_html as render_report_html
 from trajectory_harness.report import write_report_html as write_report_html
+from trajectory_harness.source import Recording as Recording
+from trajectory_harness.source import RecordingQuery as RecordingQuery
+from trajectory_harness.source import RecordingRef as RecordingRef
+from trajectory_harness.source import RecordingSource as RecordingSource

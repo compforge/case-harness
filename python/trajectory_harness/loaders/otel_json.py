@@ -27,6 +27,12 @@ class OTelJsonLoader:
     def load(self, source: str | Path) -> list[Trajectory]:
         path = Path(source)
         text = path.read_text(encoding="utf-8").strip()
+        return self.loads(text, source=str(path))
+
+    def loads(self, text: str, *, source: str = "") -> list[Trajectory]:
+        """Load trajectories from in-memory recording content."""
+
+        text = text.strip()
         if not text:
             return []
 
@@ -51,7 +57,7 @@ class OTelJsonLoader:
                 Trajectory(
                     trajectory_id=trace_id,
                     steps=tuple(steps),
-                    source=str(path),
+                    source=source,
                     metadata={"format": "otel-genai"},
                 )
             )
