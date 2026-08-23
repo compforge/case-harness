@@ -18,9 +18,9 @@ Source
   -> RecordingRef / Recording
   -> TrajectoryLoader
   -> Trajectory (Step + Failure + ExecutionResult)
-  -> Evaluator
-  -> EvaluationResult (verdict + measurements + signals)
-  -> EvaluationRun (Dataset + evaluated trajectories)
+  -> Evaluator -> EvaluationResult (verdict + score + findings)
+  -> Measurer  -> MeasurementResult (measurements)
+  -> EvaluationRun (Dataset + separate evaluation/measurement items)
   -> Metric
   -> Report / HTML
 ```
@@ -38,9 +38,9 @@ Trajectory 是这些 loop 配置及其编排共同作用后的运行证据，不
 标识 agent、workflow、LLM 和 tool 等操作。具体业务可以据此选择某个 Step 子树或整条 Trajectory
 进行评估，无需让通用 Harness 理解 Review 1、Review 2 等领域阶段。
 
-Evaluator 逐步沉淀可复用的判定、Measurement 和 Signal，观察执行是否完成、工具是否失败、调用
-是否反复或预算是否异常，再由实验或业务 Policy 判断应修改 prompt、tool、loop mechanism 还是
-pipeline 编排。单个行为模式通常只是 Signal；除非存在明确契约，不能直接把它定性成 Failure。
+Evaluator 逐步沉淀可复用的判定和 Finding，Measurer 独立记录 token、调用量与耗时等事实，再由实验
+或业务 Policy 判断应修改 prompt、tool、loop mechanism 还是 pipeline 编排。单个行为模式通常只是
+Finding；除非存在明确契约，不能直接把它定性成 Failure。
 
 ### 1.1 Source 与 Loader 边界
 
@@ -63,7 +63,7 @@ Tool 不能只按“调用成功或失败”评估，还要区分单个工具契
 2. **工具集覆盖与效率**：tool portfolio 是否覆盖该行业或任务中反复出现的高价值动作，工具之间
    是否存在明显空白、重叠或选择歧义。`read / write / edit / bash` 等最小通用工具集可能足以完成
    任务，却不一定高效；模型反复借助 shell 安装依赖、拼接临时命令或绕行多步完成固定动作，会表现为
-   轨迹变长，是缺少专用工具或批量能力的候选信号。
+   轨迹变长，是缺少专用工具或批量能力的候选 Finding。
 
 第二类判断需要任务和行业上下文。通用 Harness 可以测量无效参数率、重试、连续调用、通用执行器
 占比和轨迹长度，但不内建“某个行业必须有哪些工具”的清单；期望的 tool portfolio 及其契约由 domain
@@ -125,7 +125,8 @@ HTTP 传输层的 pool/connect/write/read 划分与
 TTFT、ITL/TPOT 和 end-to-end latency 是 Measurement，不是天然的 Failure 类型。TTFT 包含网络、
 排队、prefill 和首 token 生成；ITL/TPOT 是输出 token 间延迟的聚合值。只有调用方对这些
 边界实际执行 deadline 时，才产生 `first_chunk` 或 `inter_chunk` timeout Failure；“TPOT 偏高”
-本身应由 Evaluator 输出 Measurement/Signal。vLLM 服务端进一步暴露 queue、prefill 和 decode 时间，
+本身应由 Measurer 输出 Measurement；只有对高延迟作出规则判断后才形成 Evaluator Finding。vLLM
+服务端进一步暴露 queue、prefill 和 decode 时间，
 这些数据可作为 Step attributes 帮助归因，但客户端 Loader 不应凭 TTFT 猜测其中哪一段超时。
 
 分类维度保持正交：
@@ -147,7 +148,7 @@ TTFT、ITL/TPOT 和 end-to-end latency 是 Measurement，不是天然的 Failure
 ### 3.1 Evaluator
 
 确定性规则、reference match 和 LLM judge 都实现同一个 Evaluator 协议。`EvaluatorSpec`
-声明稳定 id、说明、owner、`common/domain` 类型及可输出的 Measurement。
+声明稳定 id、说明、owner 和 `common/domain` 类型。
 
 首批通用 Evaluator：
 
@@ -155,30 +156,30 @@ TTFT、ITL/TPOT 和 end-to-end latency 是 Measurement，不是天然的 Failure
 - `tool_success`
 - `repeated_tool_call`
 
-其中 `repeated_tool_call` 只输出 warning 与重复率，提示检查缓存、复用或批量参数的机会；重复调用
+其中 `repeated_tool_call` 输出 warning 与诊断 Finding，提示检查缓存、复用或批量参数的机会；重复调用
 本身不等于错误。
 
 文件覆盖率、搜索范围、业务提交是否完成等规则仍由业务包提供；通用 Harness 只负责执行和
 聚合，不理解业务工具语义。
 
-### 3.2 围绕 Agent Loop 积累信号
+### 3.2 围绕 Agent Loop 积累 Finding
 
-trajectory_harness 持续沉淀可跨业务复用的 Evaluator，其信号可以帮助检查 agent loop 的
+trajectory_harness 持续沉淀可跨业务复用的 Evaluator，其 Finding 可以帮助检查 agent loop 的
 三个组成面：
 
-| 观察面 | 可沉淀的通用信号 | 业务 Evaluator 负责的判断 |
+| 观察面 | 可沉淀的通用 Finding | 业务 Evaluator 负责的判断 |
 |--------|------------------------|--------------------------|
 | system prompt | 目标偏离、指令重试、过早结束、输出格式反复自我修正 | 领域指令和结果契约是否真正被违反 |
-| tool set | tool 成功率、无效参数、换参重试、连续重复调用、通用执行器绕行 | 领域工具集是否缺失、重叠或不符合任务契约 |
-| loop mechanism | 预算耗尽、timeout、压缩压力、停止不收敛、完成率 | 具体轮次、时间、压缩和停止策略是否合理 |
+| tool set | 工具执行失败、无效参数、换参重试、连续重复调用、通用执行器绕行 | 领域工具集是否缺失、重叠或不符合任务契约 |
+| loop mechanism | 预算耗尽、timeout、压缩压力、停止不收敛、过早结束 | 具体轮次、时间、压缩和停止策略是否合理 |
 
-这个对应是多对多的诊断索引，不是根因归属。例如连续重复调用同一 tool 是 Signal；它可能暗示
+这个对应是多对多的诊断索引，不是根因归属。例如连续重复调用同一 tool 是 Finding；它可能暗示
 工具缺少批量参数、prompt 未要求复用结果，或 loop 没有合适的停止机制，这些候选解释记录为
 `hypotheses`。Evaluator 只输出可复现的现象、证据和假设，根因由对照实验或业务 Policy 确认。
 
-新的通用 Evaluator 应在 `evaluators/` 中按一种稳定信号一个实现沉淀；依赖行业工具清单、
+新的通用 Evaluator 应在 `evaluators/` 中按一种稳定 Finding 一个实现沉淀；依赖行业工具清单、
 业务阶段或特定结果契约的判断留在 domain Evaluator。pipeline 可以包含多个 loop，跨 loop 的
-编排与协作信号同样由 domain Evaluator 先行沉淀，出现稳定跨业务模式后再上收为通用实现。
+编排与协作 Finding 同样由 domain Evaluator 先行沉淀，出现稳定跨业务模式后再上收为通用实现。
 
 ### 3.3 EvaluationResult
 
@@ -187,9 +188,8 @@ trajectory_harness 持续沉淀可跨业务复用的 Evaluator，其信号可以
 - `status`：`evaluated / not_applicable / error`。
 - `verdict`：`pass / fail / warning`。
 - `score`：可选的归一化分数。
-- `measurements`：该轨迹上的原始数值。
 - `explanation / step_ids`：可读解释与证据锚点。
-- `signals`：Evaluator 观察到的零到多个现象；每个 Signal 包含稳定 `code`、`severity`、摘要、
+- `findings`：Evaluator 观察到的零到多个诊断发现；每个 Finding 包含稳定 `code`、`severity`、摘要、
   `step_ids` 证据及可能原因 `hypotheses`。
 
 `not_applicable` 不按 0 分处理；Evaluator 异常使用 `status=error`，属于评估执行健康，不是
@@ -197,30 +197,65 @@ trajectory_harness 持续沉淀可跨业务复用的 Evaluator，其信号可以
 提供 Policy。
 
 Failure 与 Evaluator 判定是两条独立轴：`Step.failure / ExecutionResult.failure` 只记录运行时
-已经发生的失败事实；Evaluator 发现的行为模式写入 `EvaluationResult.signals`，可能原因只是
+已经发生的失败事实；Evaluator 发现的行为模式写入 `EvaluationResult.findings`，可能原因只是
 Hypothesis，不是已确认 Issue。存在改进可能但尚不能判错时使用 `verdict=warning`；业务契约明确
 认为该行为不合格时使用 `verdict=fail`。这里不使用 `verdict=error`，因为 `status=error` 专门表示
 Evaluator 自身执行异常。报告分别展示 Failure 与 Evaluator 结果，不能把 warning/fail 反写成
 轨迹 Failure。
+
+`Finding` 是 Evaluator 对证据作出解释后识别的具体问题模式，不是可任意聚合的原始数值。
+它使用稳定 `code` 表示模式、`step_ids` 指向证据，并用 `hypotheses` 保存尚未确认的可能原因。token、
+调用次数、时长等能直接计数或求和的观测必须进入 Measurement；如果一个 Finding 只是在换名字包装
+原始事实，就不应作为 Finding。
 
 Failure 在评估前已经由 Loader 确定，Evaluator 不修改它。EvaluationRun 把 Failure、Trajectory
 身份和 Dataset 重新连接，既可聚合“哪些 slice 的 `llm.request.timeout` 比例更高”，也可在报告中
 回看受影响的具体 trajectory/case。诸如“长上下文更容易 timeout，可能暴露 inference 能力不足”属于
 基于 Failure 与 case 特征的关联和归因假设，不属于 Failure 本身。
 
+### 3.4 Measurer 与 MeasurementResult
+
+Measurer 只观察事实，不判断质量。`MeasurerSpec` 声明稳定 `measurer_id` 及其可输出的
+`MeasurementSpec`；`MeasurementResult` 使用 `measured / not_applicable / error` 表达测量执行状态，
+并携带 Measurement、解释及证据 step。它不包含 verdict、score 或 Finding。反过来，EvaluatorSpec
+和 EvaluationResult 也不声明或携带 Measurement。
+
+首个通用 Measurer 是 `ModelUsageMeasurer`。命名和类型共同表达边界，不提供所谓
+“measurement-only evaluator”。
+
+### 3.5 成本与效果联合解释
+
+模型调用次数、input/output/cache token、耗时和工具调用次数都是 Measurement，不天然代表好坏。
+相同成本可能用于完成更难的任务，也可能来自重复读取、失败重试或上下文膨胀；因此这些原始量默认使用
+`direction=neutral`。通用 Evaluator 可以另外输出重复调用、失败重试、上下文增长等可复现 Finding，
+但不能只因为 token 更多就判定轨迹更差。
+
+成本优化必须和效果放在同一 Dataset/Cohort 中比较。以 CCR 为例，通用 Harness 负责记录每条 Review
+轨迹的 token、模型调用、完成状态和行为 Finding；CCR 的 domain Dataset/Evaluator 再把这些事实与
+Review 1/Review 2、finding 人工标签、missed finding 等监督信号对齐，比较有效 finding rate、wrong
+rate、completion/timeout 与单位有效 finding 成本。有限时间或 token 预算下，减少非必要读取、重复
+调用和无效重试也可能提高 completion，从而同时改善成本与效果；这种结论必须来自同 workload 的对照，
+不能由单条轨迹的低 token 值直接推出。
+
+`ModelUsageMeasurer` 只输出事实与覆盖率，不内建价格表。货币成本依赖 provider、模型、时间、缓存
+计费和长上下文阶梯价，应由带 pricing provenance 的消费侧 Measurement 逐调用计算后再聚合，未知
+价格保持 unknown，不能静默当作零成本。
+
 ## 4. EvaluationRun 与 Metric
 
-`EvaluationRun` 把一批轨迹评估绑定到 `DatasetRef`、run id、时间和 Evaluator 目录。run id
+`EvaluationRun` 把同批轨迹的 Evaluation 和 Measurement 分栏绑定到 `DatasetRef`、run id、时间、
+Evaluator 目录与 Measurer 目录。两类结果使用独立 item/spec 字段，不能互相冒充。run id
 只是身份，趋势横轴使用 `created_at`；按周、按版本或按需运行都是调用方策略。Dataset
 的版本和 slice 是 Metric 可比较性的组成部分，例如 CCR 的 Unit 与 Lane 应使用不同 slice。
 
 Measurement 是单条轨迹上的原始测量；Metric 是 EvaluationRun 上的聚合结果。Metric 可以
-来自三类事实：
+来自四类事实：
 
 ```text
 Trajectory / ExecutionResult -> completion rate, duration p95
 Failure                      -> llm timeout rate, tool dependency-missing count
-EvaluationResult             -> evaluator pass rate, mean score, measurement p95
+EvaluationResult             -> evaluator pass rate, mean score
+MeasurementResult            -> token sum, model-call p95, usage coverage
 ```
 
 Metric 使用 `name + aggregation + dimensions` 寻址，例如：
@@ -229,7 +264,7 @@ Metric 使用 `name + aggregation + dimensions` 寻址，例如：
 execution.duration_ms.p95
 failure.rate{impact=execution,kind=llm,phase=request,error_type=timeout}
 evaluation.pass.rate{evaluator_id=repeated_tool_call}
-evaluation.measurement.mean{evaluator_id=tool_success,measurement=success_rate}
+measurement.value.sum{measurer_id=model_usage,measurement=input_tokens}
 ```
 
 多个 EvaluationRun 上同一地址的 Metric 按 `created_at` 构成趋势序列。报告接口也可直接
@@ -243,8 +278,9 @@ trajectory_harness 拥有轨迹领域报告语义，对外提供 `build_report`�
 1. EvaluationRun 与 Dataset。
 2. 执行结果与 Failure 分类。
 3. common/domain Evaluator 目录。
-4. 最新 Metric。
-5. 多个 Run 的 Metric 趋势。
+4. Measurer 目录。
+5. 最新 Metric。
+6. 多个 Run 的 Metric 趋势。
 
 实现上先投影为 `harness_common.report_kit.Report`，再使用公共 HTML renderer。report_kit 只
 理解 Section、Table、Chart 等中立文档块；业务可以追加 Section，但不自行维护 HTML 模板。

@@ -8,13 +8,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Iterable, Literal
 
-from trajectory_harness.evaluate import (
-    EvaluatorSpec,
+from trajectory_harness.evaluate import EvaluatorSpec, TrajectoryEvaluation
+from trajectory_harness.measure import (
     MetricDirection,
-    TrajectoryEvaluation,
+    MeasurerSpec,
+    TrajectoryMeasurement,
 )
 
-MetricAggregation = Literal["count", "rate", "mean", "p50", "p95"]
+MetricAggregation = Literal["count", "rate", "sum", "mean", "p50", "p95"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +62,8 @@ class EvaluationRun:
     dataset: DatasetRef
     items: tuple[TrajectoryEvaluation, ...]
     evaluator_specs: tuple[EvaluatorSpec, ...] = ()
+    measurement_items: tuple[TrajectoryMeasurement, ...] = ()
+    measurer_specs: tuple[MeasurerSpec, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -125,12 +128,12 @@ class Metric:
 
 
 def aggregate_metrics(run: EvaluationRun) -> tuple[Metric, ...]:
-    """Aggregate execution facts, failures, and evaluator measurements."""
+    """Aggregate execution facts, evaluations, and independent measurements."""
 
     metrics: list[Metric] = []
-    items = run.items
-    metrics.append(_metric(run, "trajectory", len(items), "count", "count"))
-    executions = [item.trajectory.execution for item in items]
+    trajectories = _trajectories(run)
+    metrics.append(_metric(run, "trajectory", len(trajectories), "count", "count"))
+    executions = [trajectory.execution for trajectory in trajectories]
     known = [
         execution
         for execution in executions
@@ -185,15 +188,16 @@ def aggregate_metrics(run: EvaluationRun) -> tuple[Metric, ...]:
 
     metrics.extend(_failure_metrics(run))
     metrics.extend(_evaluation_metrics(run))
+    metrics.extend(_measurement_metrics(run))
     return tuple(metrics)
 
 
 def _failure_metrics(run: EvaluationRun) -> list[Metric]:
-    total = len(run.items)
+    trajectories = _trajectories(run)
+    total = len(trajectories)
     events: Counter[tuple[str, str, str, str]] = Counter()
     affected: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
-    for item in run.items:
-        trajectory = item.trajectory
+    for trajectory in trajectories:
         for step in trajectory.steps:
             if step.failure:
                 key = (
@@ -245,6 +249,14 @@ def _failure_metrics(run: EvaluationRun) -> list[Metric]:
     return result
 
 
+def _trajectories(run: EvaluationRun) -> tuple:
+    by_id = {
+        item.trajectory.trajectory_id: item.trajectory
+        for item in (*run.items, *run.measurement_items)
+    }
+    return tuple(by_id.values())
+
+
 def _evaluation_metrics(run: EvaluationRun) -> list[Metric]:
     result = []
     specs = {spec.evaluator_id: spec for spec in run.evaluator_specs}
@@ -257,7 +269,7 @@ def _evaluation_metrics(run: EvaluationRun) -> list[Metric]:
         ]
         for evaluator_id in specs
     }
-    for evaluator_id, spec in specs.items():
+    for evaluator_id in specs:
         evaluations = by_evaluator[evaluator_id]
         total = len(run.items)
         evaluated = [item for item in evaluations if item.status == "evaluated"]
@@ -314,23 +326,68 @@ def _evaluation_metrics(run: EvaluationRun) -> list[Metric]:
                 )
             )
 
-        for measurement in spec.measurements:
+    return result
+
+
+def _measurement_metrics(run: EvaluationRun) -> list[Metric]:
+    result = []
+    specs = {spec.measurer_id: spec for spec in run.measurer_specs}
+    by_measurer = {
+        measurer_id: [
+            measurement
+            for item in run.measurement_items
+            for measurement in item.results
+            if measurement.measurer_id == measurer_id
+        ]
+        for measurer_id in specs
+    }
+    for measurer_id, spec in specs.items():
+        measurements = by_measurer[measurer_id]
+        total = len(run.measurement_items)
+        measured = [item for item in measurements if item.status == "measured"]
+        errors = [item for item in measurements if item.status == "error"]
+        dimensions = (("measurer_id", measurer_id),)
+        if total:
+            result.extend(
+                (
+                    _metric(
+                        run,
+                        "measurement.applicability",
+                        len(measured) / total,
+                        "rate",
+                        "ratio",
+                        "neutral",
+                        dimensions,
+                    ),
+                    _metric(
+                        run,
+                        "measurement.error",
+                        len(errors) / total,
+                        "rate",
+                        "ratio",
+                        "lower_is_better",
+                        dimensions,
+                    ),
+                )
+            )
+
+        for measurement_spec in spec.measurements:
             values = [
-                float(item.measurements[measurement.name])
-                for item in evaluated
-                if measurement.name in item.measurements
+                float(item.measurements[measurement_spec.name])
+                for item in measured
+                if measurement_spec.name in item.measurements
             ]
             result.extend(
                 _distribution_metrics(
                     run,
-                    "evaluation.measurement",
+                    "measurement.value",
                     values,
-                    measurement.unit,
-                    measurement.direction,
-                    measurement.aggregations,
+                    measurement_spec.unit,
+                    measurement_spec.direction,
+                    measurement_spec.aggregations,
                     (
-                        ("evaluator_id", evaluator_id),
-                        ("measurement", measurement.name),
+                        ("measurer_id", measurer_id),
+                        ("measurement", measurement_spec.name),
                     ),
                 )
             )
@@ -351,7 +408,9 @@ def _distribution_metrics(
         return []
     result = []
     for aggregation in aggregations:
-        if aggregation == "mean":
+        if aggregation == "sum":
+            value = sum(collected)
+        elif aggregation == "mean":
             value = sum(collected) / len(collected)
         elif aggregation == "p50":
             value = _percentile(collected, 0.50)

@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from trajectory_harness.evaluate import (
-    EvaluationResult,
-    EvaluatorSpec,
-    MeasurementSpec,
-)
+from trajectory_harness.evaluate import EvaluationResult, EvaluatorSpec
 from trajectory_harness.model import Trajectory
 
 
@@ -17,24 +13,9 @@ class ToolSuccessEvaluator:
     spec: EvaluatorSpec = EvaluatorSpec(
         evaluator_id="tool_success",
         title="Tool success",
-        description="Measure successful tool executions in the trajectory.",
+        description="Judge whether tool executions in the trajectory succeeded.",
         kind="common",
         owner="trajectory_harness",
-        measurements=(
-            MeasurementSpec("tool_call_count", "count", "Executed tool calls."),
-            MeasurementSpec(
-                "failed_call_count",
-                "count",
-                "Tool calls ending in failure.",
-                "lower_is_better",
-            ),
-            MeasurementSpec(
-                "success_rate",
-                "ratio",
-                "Successful tool calls divided by executed tool calls.",
-                "higher_is_better",
-            ),
-        ),
     )
 
     def evaluate(
@@ -56,11 +37,6 @@ class ToolSuccessEvaluator:
             status="evaluated",
             verdict="pass" if not failed else "fail",
             score=success_rate,
-            measurements={
-                "tool_call_count": len(calls),
-                "failed_call_count": len(failed),
-                "success_rate": success_rate,
-            },
             explanation=(
                 f"{len(calls) - len(failed)} of {len(calls)} tool calls succeeded."
             ),

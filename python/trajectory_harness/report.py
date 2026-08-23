@@ -38,6 +38,7 @@ def build_report(
         _runs_section(ordered),
         _execution_section(tuple(latest_by_dataset.values())),
         _evaluators_section(ordered),
+        _measurers_section(ordered),
         _metrics_section(tuple(latest_by_dataset.values())),
         _trends_section(run_metrics),
     ]
@@ -122,7 +123,8 @@ def _runs_section(runs: Sequence[EvaluationRun]) -> Section:
                     "Created at",
                     "Dataset",
                     "Version",
-                    "Items",
+                    "Evaluated items",
+                    "Measured items",
                     "Declared samples",
                 ],
                 rows=[
@@ -132,6 +134,7 @@ def _runs_section(runs: Sequence[EvaluationRun]) -> Section:
                         run.dataset.label,
                         run.dataset.version or "—",
                         str(len(run.items)),
+                        str(len(run.measurement_items)),
                         (
                             str(run.dataset.sample_count)
                             if run.dataset.sample_count is not None
@@ -213,8 +216,11 @@ def _execution_section(
 
 def _failure_rows(run: EvaluationRun) -> list[list[str]]:
     rows = []
-    for item in run.items:
-        trajectory = item.trajectory
+    trajectories = {
+        item.trajectory.trajectory_id: item.trajectory
+        for item in (*run.items, *run.measurement_items)
+    }
+    for trajectory in trajectories.values():
         for step in trajectory.steps:
             if step.failure:
                 rows.append(
@@ -249,17 +255,42 @@ def _evaluators_section(runs: Sequence[EvaluationRun]) -> Section:
         heading="Evaluator catalog",
         blocks=[
             Table(
-                columns=["Evaluator", "Kind", "Owner", "Measurements", "Description"],
+                columns=["Evaluator", "Kind", "Owner", "Description"],
                 rows=[
                     [
                         spec.evaluator_id,
                         spec.kind,
                         spec.owner or "—",
-                        ", ".join(item.name for item in spec.measurements) or "—",
                         spec.description,
                     ]
                     for spec in sorted(
                         specs.values(), key=lambda item: item.evaluator_id
+                    )
+                ],
+            )
+        ],
+    )
+
+
+def _measurers_section(runs: Sequence[EvaluationRun]) -> Section:
+    specs = {}
+    for run in runs:
+        for spec in run.measurer_specs:
+            specs[spec.measurer_id] = spec
+    return Section(
+        heading="Measurer catalog",
+        blocks=[
+            Table(
+                columns=["Measurer", "Owner", "Measurements", "Description"],
+                rows=[
+                    [
+                        spec.measurer_id,
+                        spec.owner or "—",
+                        ", ".join(item.name for item in spec.measurements) or "—",
+                        spec.description,
+                    ]
+                    for spec in sorted(
+                        specs.values(), key=lambda item: item.measurer_id
                     )
                 ],
             )
