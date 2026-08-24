@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -20,7 +20,6 @@ from harness_common.report_kit import (
 )
 from trajectory_harness.build import DatasetBuildSummary
 from trajectory_harness.metrics import (
-    EvaluationSlice,
     Metric,
     TrajectoryEvaluationRun,
     aggregate_metrics,
@@ -31,11 +30,10 @@ REPORT_FILE = "report.html"
 
 
 @dataclass(frozen=True, slots=True)
-class _RunSlice:
-    """Presentation view that keeps a slice attached to its enclosing run."""
+class _RunView:
+    """Presentation view over one persisted Worksheet run."""
 
     run: TrajectoryEvaluationRun
-    slice: EvaluationSlice
 
     @property
     def run_id(self) -> str:
@@ -54,28 +52,24 @@ class _RunSlice:
         return self.run.dataset_version
 
     @property
-    def slice_id(self) -> str:
-        return self.slice.slice_id
-
-    @property
     def label(self) -> str:
-        return self.run.slice_label(self.slice)
+        return self.run.dataset_id
 
     @property
     def evaluations(self):
-        return self.slice.evaluations
+        return self.run.evaluations
 
     @property
     def measurements(self):
-        return self.slice.measurements
+        return self.run.measurements
 
     @property
     def evaluator_specs(self):
-        return self.slice.evaluator_specs
+        return self.run.evaluator_specs
 
     @property
     def measurer_specs(self):
-        return self.slice.measurer_specs
+        return self.run.measurer_specs
 
 
 class TrajectoryReportBuilder:
@@ -188,18 +182,18 @@ def build_report(
     """Build the canonical trajectory report from one or more evaluation runs."""
 
     ordered = sorted(runs, key=lambda run: (run.created_at, run.run_id))
-    slices = tuple(_RunSlice(run, slice_) for run in ordered for slice_ in run.slices)
-    run_metrics = _run_metrics(slices, metrics)
+    views = tuple(_RunView(run) for run in ordered)
+    run_metrics = _run_metrics(views, metrics)
     latest_by_dataset = {}
     for pair in run_metrics:
         latest_by_dataset[pair[0].label] = pair
     latest_runs = tuple(pair[0] for pair in latest_by_dataset.values())
     latest = ordered[-1] if ordered else None
     sections = [
-        _runs_section(slices),
+        _runs_section(views),
         _execution_section(tuple(latest_by_dataset.values())),
-        _evaluators_section(slices),
-        _measurers_section(slices),
+        _evaluators_section(views),
+        _measurers_section(views),
         _metrics_section(tuple(latest_by_dataset.values())),
         _evaluation_evidence_section(latest_runs),
         _measurement_evidence_section(latest_runs),
@@ -260,14 +254,13 @@ def write_report_html(
 
 
 def _run_metrics(
-    runs: Sequence[_RunSlice], metrics: Sequence[Metric] | None
-) -> list[tuple[_RunSlice, tuple[Metric, ...]]]:
+    runs: Sequence[_RunView], metrics: Sequence[Metric] | None
+) -> list[tuple[_RunView, tuple[Metric, ...]]]:
     if metrics is None:
         return [
             (
                 run,
-                run.slice.metrics
-                or aggregate_metrics(replace(run.run, slices=(run.slice,))),
+                run.run.metrics or aggregate_metrics(run.run),
             )
             for run in runs
         ]
@@ -278,7 +271,6 @@ def _run_metrics(
                 metric.run_id,
                 metric.dataset_id,
                 metric.dataset_version,
-                metric.dataset_slice,
             )
         ].append(metric)
     return [
@@ -290,7 +282,6 @@ def _run_metrics(
                         run.run_id,
                         run.dataset_id,
                         run.dataset_version,
-                        run.slice_id,
                     )
                 ]
             ),
@@ -299,7 +290,7 @@ def _run_metrics(
     ]
 
 
-def _runs_section(runs: Sequence[_RunSlice]) -> Section:
+def _runs_section(runs: Sequence[_RunView]) -> Section:
     return Section(
         heading="Evaluation runs and datasets",
         blocks=[
@@ -309,8 +300,8 @@ def _runs_section(runs: Sequence[_RunSlice]) -> Section:
                     "Created at",
                     "Dataset",
                     "Version",
-                    "Evaluated items",
-                    "Measured items",
+                    "Evaluation cells",
+                    "Measurement cells",
                     "Annotations",
                 ],
                 rows=[
@@ -322,8 +313,8 @@ def _runs_section(runs: Sequence[_RunSlice]) -> Section:
                         str(len(run.evaluations)),
                         str(len(run.measurements)),
                         (
-                            str(run.slice.annotation_count)
-                            if run.slice.annotation_count is not None
+                            str(run.run.annotation_count)
+                            if run.run.annotation_count is not None
                             else "—"
                         ),
                     ]
@@ -335,7 +326,7 @@ def _runs_section(runs: Sequence[_RunSlice]) -> Section:
 
 
 def _execution_section(
-    latest: Sequence[tuple[_RunSlice, tuple[Metric, ...]]],
+    latest: Sequence[tuple[_RunView, tuple[Metric, ...]]],
 ) -> Section:
     if not latest:
         return Section(heading="Execution and failures", blocks=[])
@@ -389,6 +380,7 @@ def _execution_section(
                 Table(
                     columns=[
                         "Trajectory",
+                        "Target",
                         "Impact",
                         "Failure",
                         "Code",
@@ -400,7 +392,7 @@ def _execution_section(
     return Section(heading="Execution and failures", blocks=blocks)
 
 
-def _failure_rows(run: _RunSlice) -> list[list[str]]:
+def _failure_rows(run: _RunView) -> list[list[str]]:
     rows = []
     trajectories = {
         item.trajectory.trajectory_id: item.trajectory
@@ -412,6 +404,7 @@ def _failure_rows(run: _RunSlice) -> list[list[str]]:
                 rows.append(
                     [
                         trajectory.trajectory_id,
+                        run.run.target_for(trajectory.trajectory_id) or "—",
                         f"step:{step.step_id}",
                         step.failure.key,
                         step.failure.code or "—",
@@ -423,6 +416,7 @@ def _failure_rows(run: _RunSlice) -> list[list[str]]:
             rows.append(
                 [
                     trajectory.trajectory_id,
+                    run.run.target_for(trajectory.trajectory_id) or "—",
                     "execution",
                     failure.key,
                     failure.code or "—",
@@ -432,7 +426,7 @@ def _failure_rows(run: _RunSlice) -> list[list[str]]:
     return rows
 
 
-def _evaluators_section(runs: Sequence[_RunSlice]) -> Section:
+def _evaluators_section(runs: Sequence[_RunView]) -> Section:
     specs = {}
     for run in runs:
         for spec in run.evaluator_specs:
@@ -441,10 +435,11 @@ def _evaluators_section(runs: Sequence[_RunSlice]) -> Section:
         heading="Evaluator catalog",
         blocks=[
             Table(
-                columns=["Evaluator", "Kind", "Owner", "Description"],
+                columns=["Evaluator", "Category", "Kind", "Owner", "Description"],
                 rows=[
                     [
                         spec.evaluator_id,
+                        spec.category,
                         spec.kind,
                         spec.owner or "—",
                         spec.description,
@@ -458,7 +453,7 @@ def _evaluators_section(runs: Sequence[_RunSlice]) -> Section:
     )
 
 
-def _measurers_section(runs: Sequence[_RunSlice]) -> Section:
+def _measurers_section(runs: Sequence[_RunView]) -> Section:
     specs = {}
     for run in runs:
         for spec in run.measurer_specs:
@@ -467,10 +462,17 @@ def _measurers_section(runs: Sequence[_RunSlice]) -> Section:
         heading="Measurer catalog",
         blocks=[
             Table(
-                columns=["Measurer", "Owner", "Measurements", "Description"],
+                columns=[
+                    "Measurer",
+                    "Category",
+                    "Owner",
+                    "Measurements",
+                    "Description",
+                ],
                 rows=[
                     [
                         spec.measurer_id,
+                        spec.category,
                         spec.owner or "—",
                         ", ".join(item.name for item in spec.measurements) or "—",
                         spec.description,
@@ -485,7 +487,7 @@ def _measurers_section(runs: Sequence[_RunSlice]) -> Section:
 
 
 def _metrics_section(
-    latest: Sequence[tuple[_RunSlice, tuple[Metric, ...]]],
+    latest: Sequence[tuple[_RunView, tuple[Metric, ...]]],
 ) -> Section:
     return Section(
         heading="Latest metrics",
@@ -510,7 +512,7 @@ def _metrics_section(
     )
 
 
-def _evaluation_evidence_section(runs: Sequence[_RunSlice]) -> Section:
+def _evaluation_evidence_section(runs: Sequence[_RunView]) -> Section:
     rows = []
     for run in sorted(runs, key=lambda item: item.label):
         for item in run.evaluations:
@@ -521,6 +523,8 @@ def _evaluation_evidence_section(runs: Sequence[_RunSlice]) -> Section:
                         [
                             run.label,
                             item.trajectory.trajectory_id,
+                            item.target or "—",
+                            item.category,
                             result.evaluator_id,
                             result.status,
                             result.verdict or "—",
@@ -545,6 +549,8 @@ def _evaluation_evidence_section(runs: Sequence[_RunSlice]) -> Section:
                 columns=[
                     "Dataset",
                     "Trajectory",
+                    "Target",
+                    "Category",
                     "Evaluator",
                     "Status",
                     "Verdict",
@@ -564,7 +570,7 @@ def _evaluation_evidence_section(runs: Sequence[_RunSlice]) -> Section:
     )
 
 
-def _measurement_evidence_section(runs: Sequence[_RunSlice]) -> Section:
+def _measurement_evidence_section(runs: Sequence[_RunView]) -> Section:
     rows = []
     for run in sorted(runs, key=lambda item: item.label):
         for item in run.measurements:
@@ -575,6 +581,8 @@ def _measurement_evidence_section(runs: Sequence[_RunSlice]) -> Section:
                         [
                             run.label,
                             item.trajectory.trajectory_id,
+                            item.target or "—",
+                            item.category,
                             result.measurer_id,
                             result.status,
                             str(name),
@@ -590,6 +598,8 @@ def _measurement_evidence_section(runs: Sequence[_RunSlice]) -> Section:
                 columns=[
                     "Dataset",
                     "Trajectory",
+                    "Target",
+                    "Category",
                     "Measurer",
                     "Status",
                     "Measurement",
@@ -606,7 +616,7 @@ def _measurement_evidence_section(runs: Sequence[_RunSlice]) -> Section:
 
 
 def _trends_section(
-    run_metrics: Sequence[tuple[_RunSlice, tuple[Metric, ...]]],
+    run_metrics: Sequence[tuple[_RunView, tuple[Metric, ...]]],
 ) -> Section:
     if len({(run.run_id, run.created_at) for run, _ in run_metrics}) < 2:
         return Section(heading="Metric trends", blocks=[])
@@ -619,7 +629,6 @@ def _trends_section(
                 run.run_id,
                 run.dataset_id,
                 run.dataset_version,
-                run.slice_id,
             )
         ] = run.created_at.isoformat()
         for metric in metrics:
@@ -635,17 +644,12 @@ def _trends_section(
     for identity, metrics in sorted(grouped.items(), key=lambda item: str(item[0])):
         by_dataset: dict[str, list[tuple[str, float]]] = defaultdict(list)
         for metric in metrics:
-            dataset = (
-                f"{metric.dataset_id}/{metric.dataset_slice}"
-                if metric.dataset_slice
-                else metric.dataset_id
-            )
+            dataset = metric.dataset_id
             timestamp = created_at[
                 (
                     metric.run_id,
                     metric.dataset_id,
                     metric.dataset_version,
-                    metric.dataset_slice,
                 )
             ]
             by_dataset[dataset].append((timestamp, metric.value))

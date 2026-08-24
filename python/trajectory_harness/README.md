@@ -7,7 +7,6 @@ metrics, and render comparable trajectory reports.
 from datetime import datetime, timezone
 
 from trajectory_harness import (
-    EvaluationSlice,
     ExecutionSuccessEvaluator,
     ModelUsageMeasurer,
     OTelJsonLoader,
@@ -22,20 +21,17 @@ from trajectory_harness import (
 evaluators = (ExecutionSuccessEvaluator(), RepeatedToolCallEvaluator())
 measurers = (ModelUsageMeasurer(),)
 trajectories = OTelJsonLoader().load("trace.json")
-slice_ = EvaluationSlice(
-    slice_id="unit",
-    trajectory_ids=tuple(item.trajectory_id for item in trajectories),
-    evaluations=tuple(evaluate(item, evaluators) for item in trajectories),
-    evaluator_specs=tuple(evaluator.spec for evaluator in evaluators),
-    measurements=tuple(measure(item, measurers) for item in trajectories),
-    measurer_specs=tuple(measurer.spec for measurer in measurers),
-)
 run = TrajectoryEvaluationRun(
     run_id="evaluation-001",
     created_at=datetime.now(timezone.utc),
     dataset_id="reviews",
     dataset_version="2026-W34",
-    slices=(slice_,),
+    trajectory_ids=tuple(item.trajectory_id for item in trajectories),
+    trajectory_targets=tuple((item.trajectory_id, "") for item in trajectories),
+    evaluations=tuple(evaluate(item, evaluators) for item in trajectories),
+    evaluator_specs=tuple(evaluator.spec for evaluator in evaluators),
+    measurements=tuple(measure(item, measurers) for item in trajectories),
+    measurer_specs=tuple(measurer.spec for measurer in measurers),
 )
 
 print([metric.to_dict() for metric in aggregate_metrics(run)])
@@ -66,7 +62,7 @@ class ReviewDatasetBuilder(TrajectoryDatasetBuilder):
 
 
 class ReviewRunner(TrajectoryEvaluationRunner):
-    def slice_for(self, trajectory, dataset):
+    def target_for(self, trajectory, dataset):
         return trajectory.metadata["review_stage"]
 
 
@@ -111,7 +107,7 @@ Source
   -> TrajectoryDataset (trajectories + annotations)
   -> Evaluator -> EvaluationResult (verdict + score + findings)
   -> Measurer  -> MeasurementResult (measurements)
-  -> TrajectoryEvaluationRun (slices + Worksheet results)
+  -> TrajectoryEvaluationRun (Worksheet results + target/category dimensions)
   -> Metric
   -> Report / HTML
 ```

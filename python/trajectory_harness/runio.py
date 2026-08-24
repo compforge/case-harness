@@ -12,15 +12,11 @@ from trajectory_harness.build import DatasetBuildResult, DatasetBuildSummary
 from trajectory_harness.dataset import TrajectoryDataset
 from trajectory_harness.evaluate import EvaluatorSpec, TrajectoryEvaluation
 from trajectory_harness.measure import MeasurerSpec, TrajectoryMeasurement
-from trajectory_harness.metrics import (
-    EvaluationSlice,
-    Metric,
-    TrajectoryEvaluationRun,
-)
+from trajectory_harness.metrics import Metric, TrajectoryEvaluationRun
 from trajectory_harness.model import Trajectory
 
 DATASET_SCHEMA = 2
-RUN_SCHEMA = 2
+RUN_SCHEMA = 3
 DATASET_FILE = "dataset.json"
 RUN_FILE = "run.json"
 
@@ -38,25 +34,24 @@ class TrajectoryRunArtifact:
         if (self.run.dataset_id, self.run.dataset_version) != identity:
             raise ValueError("trajectory run does not match its dataset artifact")
         known_trajectory_ids = set(dataset.trajectory_by_id)
-        for slice_ in self.run.slices:
-            slice_trajectory_ids = set(slice_.trajectory_ids)
-            if not slice_trajectory_ids <= known_trajectory_ids:
-                raise ValueError("evaluation slice references an unknown trajectory")
-            result_trajectory_ids = {
-                item.trajectory.trajectory_id
-                for item in (*slice_.evaluations, *slice_.measurements)
-            }
-            if not result_trajectory_ids <= slice_trajectory_ids:
-                raise ValueError(
-                    "slice result references a trajectory outside its slice"
-                )
-            for metric in slice_.metrics:
-                if (metric.dataset_id, metric.dataset_version) != identity:
-                    raise ValueError("metric does not match its trajectory run")
-                if metric.run_id != self.run.run_id:
-                    raise ValueError("metric does not match its enclosing run")
-                if metric.dataset_slice != slice_.slice_id:
-                    raise ValueError("metric does not match its enclosing slice")
+        if not set(self.run.trajectory_ids) <= known_trajectory_ids:
+            raise ValueError("evaluation run references an unknown trajectory")
+        target_trajectory_ids = {item[0] for item in self.run.trajectory_targets}
+        if len(self.run.trajectory_targets) != len(
+            self.run.trajectory_ids
+        ) or target_trajectory_ids != set(self.run.trajectory_ids):
+            raise ValueError("every trajectory must have exactly one evaluation target")
+        result_trajectory_ids = {
+            item.trajectory.trajectory_id
+            for item in (*self.run.evaluations, *self.run.measurements)
+        }
+        if not result_trajectory_ids <= set(self.run.trajectory_ids):
+            raise ValueError("run result references a trajectory outside its Worksheet")
+        for metric in self.run.metrics:
+            if (metric.dataset_id, metric.dataset_version) != identity:
+                raise ValueError("metric does not match its trajectory run")
+            if metric.run_id != self.run.run_id:
+                raise ValueError("metric does not match its enclosing run")
 
     @property
     def dataset(self) -> TrajectoryDataset:
@@ -126,7 +121,14 @@ def _run_to_dict(run: TrajectoryEvaluationRun) -> dict[str, Any]:
         "created_at": run.created_at.isoformat(),
         "dataset_id": run.dataset_id,
         "dataset_version": run.dataset_version,
-        "slices": [_slice_to_dict(item) for item in run.slices],
+        "trajectory_ids": list(run.trajectory_ids),
+        "trajectory_targets": dict(run.trajectory_targets),
+        "evaluations": [item.to_dict() for item in run.evaluations],
+        "evaluator_specs": [item.to_dict() for item in run.evaluator_specs],
+        "measurements": [item.to_dict() for item in run.measurements],
+        "measurer_specs": [item.to_dict() for item in run.measurer_specs],
+        "annotation_count": run.annotation_count,
+        "metrics": [item.to_dict() for item in run.metrics],
         "metadata": dict(run.metadata),
     }
 
@@ -141,35 +143,8 @@ def _run_from_dict(
         )
     run_id = str(value["run_id"])
     created_at = datetime.fromisoformat(str(value["created_at"]))
-    return TrajectoryEvaluationRun(
-        run_id=run_id,
-        created_at=created_at,
-        dataset_id=str(value["dataset_id"]),
-        dataset_version=str(value.get("dataset_version") or ""),
-        slices=tuple(
-            _slice_from_dict(item, trajectories) for item in value.get("slices", ())
-        ),
-        metadata=dict(value.get("metadata") or {}),
-    )
+    targets = value.get("trajectory_targets") or {}
 
-
-def _slice_to_dict(slice_: EvaluationSlice) -> dict[str, Any]:
-    return {
-        "slice_id": slice_.slice_id,
-        "trajectory_ids": list(slice_.trajectory_ids),
-        "evaluations": [item.to_dict() for item in slice_.evaluations],
-        "evaluator_specs": [item.to_dict() for item in slice_.evaluator_specs],
-        "measurements": [item.to_dict() for item in slice_.measurements],
-        "measurer_specs": [item.to_dict() for item in slice_.measurer_specs],
-        "annotation_count": slice_.annotation_count,
-        "metrics": [item.to_dict() for item in slice_.metrics],
-        "metadata": dict(slice_.metadata),
-    }
-
-
-def _slice_from_dict(
-    value: dict[str, Any], trajectories: dict[str, Trajectory]
-) -> EvaluationSlice:
     def trajectory_for(item: dict[str, Any]) -> Trajectory:
         trajectory_id = str(item["trajectory_id"])
         try:
@@ -179,9 +154,15 @@ def _slice_from_dict(
                 f"run item references unknown trajectory {trajectory_id!r}"
             ) from error
 
-    return EvaluationSlice(
-        slice_id=str(value.get("slice_id") or ""),
+    return TrajectoryEvaluationRun(
+        run_id=run_id,
+        created_at=created_at,
+        dataset_id=str(value["dataset_id"]),
+        dataset_version=str(value.get("dataset_version") or ""),
         trajectory_ids=tuple(str(item) for item in value.get("trajectory_ids", ())),
+        trajectory_targets=tuple(
+            (str(key), str(item)) for key, item in targets.items()
+        ),
         evaluations=tuple(
             TrajectoryEvaluation.from_dict(item, trajectory=trajectory_for(item))
             for item in value.get("evaluations", ())

@@ -23,7 +23,7 @@ trajectory_harness/
 ├── loaders/             # 外部记录 → Trajectory；base 契约 + OTel JSON 默认实现
 ├── evaluate.py          # EvaluatorSpec / EvaluationResult / Finding 与编排函数
 ├── measure.py           # MeasurerSpec / MeasurementResult 与测量编排函数
-├── metrics.py           # TrajectoryEvaluationRun / EvaluationSlice / Metric 与通用聚合
+├── metrics.py           # TrajectoryEvaluationRun / Metric 与 target/category 维度聚合
 ├── runner.py            # 固定 Dataset → TrajectoryEvaluationRun（evaluation + measurement）
 ├── runio.py             # dataset.json + 单次 run.json 持久化
 ├── report.py            # 纯 Run artifact → Report / HTML，历史外部加载
@@ -40,7 +40,8 @@ trajectory_harness/
   但核心模型不依赖某个 OTel SDK 或仍在演进的生成类型。
 - **Source 只负责选择和读取**：Source 返回轻量 `RecordingRef` 和原始 `Recording`，不解析为
   `Trajectory`，也不执行判定；领域标签作为 `TrajectoryAnnotation` 与 Dataset 组合，不塞进 Source 契约。
-- **Kernel 对齐**：Trajectory 是 Observation，`trajectory_id` 定义 Unit grain；`TrajectoryDataset` 固定 Case + Trajectory Unit 与 `TrajectoryAnnotation`，本次选择的 Evaluator / Measurer / slice / Policy 直接定义评估侧重点。每次 `TrajectoryEvaluationRun` 记录实际组件 spec 并只填充自己的 Worksheet，同一 Dataset 可按成本、效果或行为反复评估；详见 [`../../docs/kernel.md`](../../docs/kernel.md#dataset-与反复评估)。
+- **Kernel 对齐**：Trajectory 是 Observation，`trajectory_id` 定义 Unit grain；`TrajectoryDataset` 固定 Case + Trajectory Unit 与 `TrajectoryAnnotation`。每次 `TrajectoryEvaluationRun` 记录实际选择的 Evaluator / Measurer / Policy，并只填充自己的 Worksheet；同一 Dataset 可按成本、效果或行为反复评估，详见 [`../../docs/kernel.md`](../../docs/kernel.md#dataset-与反复评估)。
+- **Target 与 Category 正交**：`target` 表达一行当前评估谁，如 CCR 的 Review 1 / Review 2；Evaluator / Measurer spec 的 `category` 表达观察面，如 quality / cost。它们都是 Worksheet 与 Metric 的维度，不形成额外结果容器；报告通过 `group_by` 投影视图。
 - **只有 Loader 知道来源格式**：session/OTLP/框架私有字段止于 Loader；Evaluator 只读
   `Trajectory`。Dataset Builder 把 Source 的 `recording_id` 写入轨迹的一等 provenance
   字段；`source` 保留 URI/path。Source 与 Loader 通过内存文本组合，避免强制落临时文件。
@@ -59,7 +60,7 @@ trajectory_harness/
 - **通用 Evaluator 沉淀 Finding**：围绕 system prompt、tool set 和 loop mechanism 积累可复用
   的行为发现，但不把发现直接归因到某一组成；业务契约和跨 loop 编排由 domain Evaluator 负责。
 - **Metric 只表示批量聚合**：单轨迹的原始值叫 Measurement；Metric 从某个 EvaluationRun 的
-  Worksheet 聚合，并携带 Dataset version、组件 spec、run、slice 等比较维度。
+  Worksheet 聚合，并携带 Dataset version、组件 spec、run、target、category 等比较维度。
 - **HTML 由 trajectory_harness 对外提供**：本包决定 Dataset、Failure、Evaluator、Metric
   与趋势章节，再投影到中立的 `harness_common.report_kit`；业务消费者不自行拼 HTML。
 - **三段式生命周期**：`TrajectoryDatasetBuilder` 从 Source/Loader 构建带 annotation 的

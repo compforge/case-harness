@@ -22,6 +22,7 @@ class EvaluatorSpec:
     description: str
     kind: EvaluatorKind = "domain"
     owner: str = ""
+    category: str = "quality"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -30,6 +31,7 @@ class EvaluatorSpec:
             "description": self.description,
             "kind": self.kind,
             "owner": self.owner,
+            "category": self.category,
         }
 
     @classmethod
@@ -40,6 +42,7 @@ class EvaluatorSpec:
             description=str(value.get("description") or ""),
             kind=value.get("kind", "domain"),
             owner=str(value.get("owner") or ""),
+            category=str(value.get("category") or "quality"),
         )
 
 
@@ -128,10 +131,14 @@ class TrajectoryEvaluation:
 
     trajectory: Trajectory
     results: tuple[EvaluationResult, ...]
+    target: str = ""
+    category: str = "quality"
 
     def to_dict(self) -> dict:
         return {
             "trajectory_id": self.trajectory.trajectory_id,
+            "target": self.target,
+            "category": self.category,
             "results": [result.to_dict() for result in self.results],
         }
 
@@ -141,6 +148,8 @@ class TrajectoryEvaluation:
     ) -> TrajectoryEvaluation:
         return cls(
             trajectory=trajectory,
+            target=str(value.get("target") or ""),
+            category=str(value.get("category") or "quality"),
             results=tuple(
                 EvaluationResult.from_dict(item) for item in value.get("results", ())
             ),
@@ -152,6 +161,8 @@ def evaluate(
     evaluators: list[Evaluator] | tuple[Evaluator, ...],
     *,
     reference: Trajectory | None = None,
+    target: str = "",
+    category: str = "quality",
 ) -> TrajectoryEvaluation:
     """Run evaluators; evaluator failures remain health data, never a zero score."""
 
@@ -167,4 +178,9 @@ def evaluate(
                     explanation=f"{type(error).__name__}: {error}",
                 )
             )
-    return TrajectoryEvaluation(trajectory=trajectory, results=tuple(results))
+    return TrajectoryEvaluation(
+        trajectory=trajectory,
+        results=tuple(results),
+        target=target,
+        category=category,
+    )

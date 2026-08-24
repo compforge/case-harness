@@ -26,13 +26,15 @@ case-harness 是一组跨语言测试 SDK，用于回答已经无法由一条测
 
 ```text
 项目拥有的 canonical CaseSet
-    + 环境与执行代码
-    → CaseRun → Observation
-    → Unit → 版本化 Dataset
+    + 执行 / 采集
+    → Observation
+    → Unit（Case + Observation + Annotation）
+    → 版本化 Dataset
 
 Dataset + Evaluators / Measurers / optional Policy
-    → EvaluationRun → Worksheet
-    → JSON / verdict.json / HTML report
+    → EvaluationRun
+    → Worksheet（Unit + Evaluation + Measurement）
+    → Metric / Verdict / Report（JSON / HTML）
 ```
 
 | 概念 | 含义 |
@@ -40,14 +42,17 @@ Dataset + Evaluators / Measurers / optional Policy
 | **Case** | 由 `case_id` 标识的稳定、可复用测试输入与判定数据；canonical 格式由 [spec-case](https://github.com/compforge/spec-case) 持有。 |
 | **Observation** | Case 执行后实际发生的事实，例如 outcome、response、性能采样、trace 或 trajectory，并保留来源身份。 |
 | **Unit** | Harness 声明的评估单元，数据来源是 Case 与一个或多个 Observation；Worksheet 一行一个 Unit。 |
-| **Dataset** | 可复用、版本化的 Unit facts 集合，不包含某次具体评估运行的结果。 |
+| **Annotation** | 当前评估前已经存在的人工、外部系统或模型监督信息，例如 label、reference 和复核结论。 |
+| **Dataset** | 可复用、版本化的 Unit facts 与已有 Annotation 集合，不包含某次具体 EvaluationRun 的结果。 |
+| **EvaluationRun** | 对一个固定 Dataset version 执行一组 Evaluator、Measurer 与可选 Policy 的运行实例。 |
+| **Evaluation** | Judge 或 Evaluator 对 Unit 作出的质量判断，例如 verdict、score、explanation 和 Finding。 |
+| **Measurement** | 从 Unit 提取的 token、耗时、调用量和资源用量等事实，不携带质量 verdict。 |
 | **Worksheet** | 一次 EvaluationRun 基于 Dataset 的行式结果，为每个 Unit 追加 Evaluation 与 Measurement cell。 |
-| **CaseRun** | 一个 Case 在一个环境和 variant 上的真实执行，具有显式阶段预算与 cleanup 语义。 |
 | **Run** | 一次真实执行的生命周期和产物边界，携带环境与对齐身份。 |
 | **Report** | Worksheet 面向机器的 JSON 或面向人的 HTML 投影。 |
 | **Verdict** | 人、CI 和 Agent 开发闭环共同消费的机器可读结论。 |
 
-同一 Case 可以从多个角度观察。一次执行已经产生 response、性能采样、trace 或 trajectory 时，应将这些 Observation 固定为可复用 Dataset；选择不同 Judge、Measurer 或 Policy 即可生成新的 Worksheet 和报告，不重复执行系统。
+同一 Case 可以从多个角度观察。一次执行已经产生 response、性能采样、trace 或 trajectory 时，应将这些 Observation 固定为可复用 Dataset；选择不同 Evaluator、Measurer 或 Policy 即可生成新的 EvaluationRun、Worksheet 和报告，不重复执行系统。
 
 ## 共享平台工具箱
 
@@ -93,7 +98,7 @@ go test -tags=e2e -v ./...
 | Owner | 职责 |
 |---|---|
 | 被测项目 | 版本化 Case 资产、测试代码、业务动作、验收标准 |
-| case-harness | Case 执行、Runner / Driver、Judge、Run 产物、Verdict 投影、共享平台工具 |
+| case-harness | 执行机制、领域 Harness、Run 产物、报告基础设施、Verdict 契约、共享平台工具 |
 | spec-case | canonical Case 模型与代码到 Case 的意图标记 |
 | 部署工作流 | 环境、凭据、目标 revision、触发策略与发布门禁 |
 

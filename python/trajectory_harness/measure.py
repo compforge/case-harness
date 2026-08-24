@@ -51,6 +51,7 @@ class MeasurerSpec:
     title: str
     description: str
     owner: str = ""
+    category: str = "cost"
     measurements: tuple[MeasurementSpec, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -59,6 +60,7 @@ class MeasurerSpec:
             "title": self.title,
             "description": self.description,
             "owner": self.owner,
+            "category": self.category,
             "measurements": [item.to_dict() for item in self.measurements],
         }
 
@@ -69,6 +71,7 @@ class MeasurerSpec:
             title=str(value["title"]),
             description=str(value.get("description") or ""),
             owner=str(value.get("owner") or ""),
+            category=str(value.get("category") or "cost"),
             measurements=tuple(
                 MeasurementSpec.from_dict(item)
                 for item in value.get("measurements", ())
@@ -121,10 +124,14 @@ class TrajectoryMeasurement:
 
     trajectory: Trajectory
     results: tuple[MeasurementResult, ...]
+    target: str = ""
+    category: str = "cost"
 
     def to_dict(self) -> dict:
         return {
             "trajectory_id": self.trajectory.trajectory_id,
+            "target": self.target,
+            "category": self.category,
             "results": [result.to_dict() for result in self.results],
         }
 
@@ -134,6 +141,8 @@ class TrajectoryMeasurement:
     ) -> TrajectoryMeasurement:
         return cls(
             trajectory=trajectory,
+            target=str(value.get("target") or ""),
+            category=str(value.get("category") or "cost"),
             results=tuple(
                 MeasurementResult.from_dict(item) for item in value.get("results", ())
             ),
@@ -143,6 +152,9 @@ class TrajectoryMeasurement:
 def measure(
     trajectory: Trajectory,
     measurers: list[Measurer] | tuple[Measurer, ...],
+    *,
+    target: str = "",
+    category: str = "cost",
 ) -> TrajectoryMeasurement:
     """Run measurers; plugin failures remain health data, never measurements."""
 
@@ -158,4 +170,9 @@ def measure(
                     explanation=f"{type(error).__name__}: {error}",
                 )
             )
-    return TrajectoryMeasurement(trajectory=trajectory, results=tuple(results))
+    return TrajectoryMeasurement(
+        trajectory=trajectory,
+        results=tuple(results),
+        target=target,
+        category=category,
+    )

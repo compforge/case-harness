@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 
 from trajectory_harness import (
-    EvaluationSlice,
     ModelUsageMeasurer,
     MeasurementResult,
     MeasurerSpec,
@@ -142,21 +141,16 @@ def test_model_usage_measurements_aggregate_dataset_sum_and_distribution():
         created_at=datetime(2026, 8, 23, tzinfo=timezone.utc),
         dataset_id="reviews",
         dataset_version="",
-        slices=(
-            EvaluationSlice(
-                slice_id="",
-                trajectory_ids=tuple(item.trajectory_id for item in trajectories),
-                evaluations=(),
-                measurements=tuple(measure(item, [measurer]) for item in trajectories),
-                measurer_specs=(measurer.spec,),
-                annotation_count=2,
-            ),
-        ),
+        trajectory_ids=tuple(item.trajectory_id for item in trajectories),
+        trajectory_targets=tuple((item.trajectory_id, "") for item in trajectories),
+        measurements=tuple(measure(item, [measurer]) for item in trajectories),
+        measurer_specs=(measurer.spec,),
+        annotation_count=2,
     )
 
     metrics = {metric.qualified_name: metric.value for metric in aggregate_metrics(run)}
 
-    dimensions = "{measurer_id=model_usage,measurement=input_tokens}"
+    dimensions = "{category=cost,measurer_id=model_usage,measurement=input_tokens}"
     assert metrics[f"measurement.value.sum{dimensions}"] == 400
     assert metrics[f"measurement.value.mean{dimensions}"] == 200
     assert metrics[f"measurement.value.p50{dimensions}"] == 100
@@ -200,16 +194,11 @@ def test_report_lists_measurer_separately_from_evaluators():
         created_at=datetime(2026, 8, 23, tzinfo=timezone.utc),
         dataset_id="reviews",
         dataset_version="",
-        slices=(
-            EvaluationSlice(
-                slice_id="",
-                trajectory_ids=(trajectory.trajectory_id,),
-                evaluations=(),
-                measurements=(measure(trajectory, [measurer]),),
-                measurer_specs=(measurer.spec,),
-                annotation_count=1,
-            ),
-        ),
+        trajectory_ids=(trajectory.trajectory_id,),
+        trajectory_targets=((trajectory.trajectory_id, ""),),
+        measurements=(measure(trajectory, [measurer]),),
+        measurer_specs=(measurer.spec,),
+        annotation_count=1,
     )
 
     html = render_report_html([run])

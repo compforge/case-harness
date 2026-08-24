@@ -136,16 +136,12 @@ class _CCRDatasetBuilder(TrajectoryDatasetBuilder):
 
 
 class _CCRRunner(TrajectoryEvaluationRunner):
-    def slice_for(self, trajectory, dataset):
+    def target_for(self, trajectory, dataset):
         del dataset
         return trajectory.metadata["review_stage"]
 
-    def metadata_for(self, slice_id, trajectories, dataset):
-        return {
-            "domain": dataset.metadata["domain"],
-            "slice": slice_id,
-            "ids": [item.trajectory_id for item in trajectories],
-        }
+    def metadata_for(self, dataset):
+        return {"domain": dataset.metadata["domain"]}
 
 
 class _CCRReport(TrajectoryReportBuilder):
@@ -221,7 +217,11 @@ def test_harness_persists_current_run_and_rerenders_without_source(tmp_path):
         "load",
         "fetch",
     ]
-    assert result.artifact.run.slices[0].annotation_count == 1
+    assert result.artifact.run.annotation_count == 1
+    assert result.artifact.run.trajectory_targets == (("ok", "review1"),)
+    assert result.artifact.run.evaluations[0].target == "review1"
+    assert result.artifact.run.evaluations[0].category == "quality"
+    assert result.artifact.run.measurements[0].category == "cost"
     assert all(
         metric.dataset_version == "2026-W34" for metric in result.artifact.run.metrics
     )
@@ -266,6 +266,47 @@ def test_history_is_loaded_for_report_but_not_embedded_in_current_run(tmp_path):
     assert "2026-08-31T00:00:00+00:00" in trend_html
     assert '"type": "time"' in trend_html
     assert json.loads(second.verdict_path.read_text())["status"] == "skipped"
+
+
+def test_runner_preserves_target_and_category_as_worksheet_dimensions():
+    dataset = TrajectoryDataset(
+        dataset_id="ccr-reviews",
+        version="2026-W34",
+        trajectories=(
+            Trajectory(
+                trajectory_id="review-1",
+                steps=(),
+                metadata={"review_stage": "review1"},
+            ),
+            Trajectory(
+                trajectory_id="review-2",
+                steps=(),
+                metadata={"review_stage": "review2"},
+            ),
+        ),
+        metadata={"domain": "ccr"},
+    )
+
+    run = _CCRRunner(
+        evaluators=(RepeatedToolCallEvaluator(),),
+        measurers=(ModelUsageMeasurer(),),
+    ).run(dataset, run_id="compare-reviews")
+
+    assert run.trajectory_targets == (
+        ("review-1", "review1"),
+        ("review-2", "review2"),
+    )
+    assert {(item.target, item.category) for item in run.evaluations} == {
+        ("review1", "quality"),
+        ("review2", "quality"),
+    }
+    assert {(item.target, item.category) for item in run.measurements} == {
+        ("review1", "cost"),
+        ("review2", "cost"),
+    }
+    names = {metric.qualified_name for metric in run.metrics}
+    assert "trajectory.count{target=review1}" in names
+    assert "trajectory.count{target=review2}" in names
 
 
 def test_dataset_rejects_cross_recording_trajectory_reference():

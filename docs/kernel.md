@@ -77,7 +77,7 @@ Dataset 固定 Unit facts 和已有 Annotation；EvaluationRun 只向 Worksheet 
 Case、Observation 或 Annotation 改变会形成新的 Dataset version；只更换 Evaluator、Measurer、模型、
 规则、成本口径、Policy 或分析侧重点，应创建新的 EvaluationRun 并复用原 Dataset。EvaluationRun
 必须记录实际运行的组件 spec 与配置，以支持复现和比较。Metric
-是对已填充 Worksheet 按 run、slice、facet 或其它维度聚合后的结果，不是另一份与行数据脱节
+是对已填充 Worksheet 按 run 或领域维度聚合后的结果，不是另一份与行数据脱节
 的事实源。报告层只做 join、pivot、aggregate 和 render，不重新执行 Case、不重新读取远端 Source，
 也不重新运行 Judge。内部 JSON 保存无损、可恢复的数据，`verdict.json` 是统一机器判定投影，HTML
 是面向人的 UI 投影；需要 CSV 等格式时也从同一 Worksheet 派生。

@@ -26,13 +26,15 @@ Current e2e targets a single service's public boundary. Product-level Web, mobil
 
 ```text
 canonical CaseSet owned by the project
-    + environment and execution code
-    → CaseRun → Observation
-    → Unit → versioned Dataset
+    + execution / collection
+    → Observation
+    → Unit (Case + Observation + Annotation)
+    → versioned Dataset
 
 Dataset + Evaluators / Measurers / optional Policy
-    → EvaluationRun → Worksheet
-    → JSON / verdict.json / HTML report
+    → EvaluationRun
+    → Worksheet (Unit + Evaluation + Measurement)
+    → Metric / Verdict / Report (JSON / HTML)
 ```
 
 | Concept | Meaning |
@@ -40,14 +42,17 @@ Dataset + Evaluators / Measurers / optional Policy
 | **Case** | Stable, reusable test input and judgment data, identified by `case_id`; the canonical format is owned by [spec-case](https://github.com/compforge/spec-case). |
 | **Observation** | What actually happened when a Case ran: an outcome, response, performance sample, trace, or trajectory with source identity. |
 | **Unit** | A harness-defined evaluation unit sourced from a Case and one or more Observations; one Worksheet row represents one Unit. |
-| **Dataset** | A versioned, reusable collection of Unit facts. It does not contain results from one particular evaluation run. |
+| **Annotation** | Human, external-system, or model supervision that exists before the current evaluation, such as a label, reference, or review conclusion. |
+| **Dataset** | A versioned, reusable collection of Unit facts and existing Annotations. It does not contain results from one particular EvaluationRun. |
+| **EvaluationRun** | One configured application of Evaluators, Measurers, and an optional Policy to a fixed Dataset version. |
+| **Evaluation** | A Judge or Evaluator's quality conclusion about a Unit, such as a verdict, score, explanation, or Finding. |
+| **Measurement** | A factual value extracted from a Unit, such as tokens, latency, calls, or resource usage, without a quality verdict. |
 | **Worksheet** | One EvaluationRun's row-wise result over a Dataset, with Evaluation and Measurement cells added to each Unit. |
-| **CaseRun** | One Case executed in one environment and variant with explicit phase budgets and cleanup semantics. |
 | **Run** | The artifact and lifecycle boundary for one real execution, carrying environment and alignment identity. |
 | **Report** | A machine-facing JSON or human-facing HTML projection of a Worksheet. |
 | **Verdict** | The common machine-readable result consumed by humans, CI, and agent development loops. |
 
-A Case can be viewed from more than one angle. When one execution already produced responses, performance samples, traces, or a trajectory, those observations form a reusable Dataset. Selecting different judges, measurers, or policies then produces new Worksheets and reports without triggering duplicate execution.
+A Case can be viewed from more than one angle. When one execution already produced responses, performance samples, traces, or a trajectory, those observations form a reusable Dataset. Selecting different Evaluators, Measurers, or Policies then produces new EvaluationRuns, Worksheets, and reports without triggering duplicate execution.
 
 ## Shared platform toolbox
 
@@ -93,7 +98,7 @@ Both paths write a Run directory ending in `verdict.json`. Skipped or errored ca
 | Owner | Responsibility |
 |---|---|
 | Project under test | Versioned Case assets, test code, domain actions, acceptance criteria |
-| case-harness | Case execution, runners and drivers, judges, Run artifacts, Verdict projection, shared platform tools |
+| case-harness | Execution mechanisms, domain Harnesses, Run artifacts, reporting infrastructure, Verdict contracts, shared platform tools |
 | spec-case | Canonical Case model and code-to-Case intent markers |
 | Deployment workflow | Environment, credentials, target revision, trigger policy, and release gates |
 
