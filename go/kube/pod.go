@@ -73,13 +73,26 @@ func (c *Client) GetPod(ctx context.Context, name string) (Pod, error) {
 // precondition prevents a delayed fault action from deleting a replacement Pod
 // that reused the same name.
 func (c *Client) DeletePod(ctx context.Context, ref PodRef) error {
+	return c.deletePod(ctx, ref, nil)
+}
+
+// ForceDeletePod deletes exactly the physical Pod without allowing its normal
+// termination grace period. It is intended for explicit crash-recovery cases;
+// callers still own disruption authorization, target selection, and cleanup.
+func (c *Client) ForceDeletePod(ctx context.Context, ref PodRef) error {
+	gracePeriod := int64(0)
+	return c.deletePod(ctx, ref, &gracePeriod)
+}
+
+func (c *Client) deletePod(ctx context.Context, ref PodRef, gracePeriod *int64) error {
 	if err := validatePodRef(ref); err != nil {
 		return fmt.Errorf("delete Pod in namespace %q: %w", c.namespace, err)
 	}
 	propagation := metav1.DeletePropagationBackground
 	if err := c.client.CoreV1().Pods(c.namespace).Delete(ctx, ref.Name, metav1.DeleteOptions{
-		Preconditions:     &metav1.Preconditions{UID: &ref.UID},
-		PropagationPolicy: &propagation,
+		Preconditions:      &metav1.Preconditions{UID: &ref.UID},
+		PropagationPolicy:  &propagation,
+		GracePeriodSeconds: gracePeriod,
 	}); err != nil {
 		return fmt.Errorf("delete Pod %q uid %q in namespace %q: %w", ref.Name, ref.UID, c.namespace, err)
 	}

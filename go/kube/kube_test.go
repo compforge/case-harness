@@ -71,8 +71,36 @@ func TestDeletePodUsesUIDPrecondition(t *testing.T) {
 	if options.Preconditions == nil || options.Preconditions.UID == nil || *options.Preconditions.UID != ref.UID {
 		t.Fatalf("delete preconditions = %+v", options.Preconditions)
 	}
+	if options.GracePeriodSeconds != nil {
+		t.Fatalf("delete grace period = %d, want Kubernetes default", *options.GracePeriodSeconds)
+	}
 	if _, err := clientset.CoreV1().Pods(testNamespace).Get(context.Background(), ref.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Fatalf("get deleted Pod error = %v, want NotFound", err)
+	}
+}
+
+func TestForceDeletePodUsesZeroGracePeriodAndUIDPrecondition(t *testing.T) {
+	clientset := fake.NewSimpleClientset(pod("worker", "uid-worker", nil, corev1.PodRunning))
+	client, err := New(clientset, testNamespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := PodRef{Name: "worker", UID: "uid-worker"}
+	if err := client.ForceDeletePod(context.Background(), ref); err != nil {
+		t.Fatal(err)
+	}
+	actions := clientset.Actions()
+	deleteAction, ok := actions[len(actions)-1].(k8stesting.DeleteAction)
+	if !ok {
+		t.Fatalf("last action = %T, want DeleteAction", actions[len(actions)-1])
+	}
+	options := deleteAction.GetDeleteOptions()
+	if options.Preconditions == nil || options.Preconditions.UID == nil || *options.Preconditions.UID != ref.UID {
+		t.Fatalf("delete preconditions = %+v", options.Preconditions)
+	}
+	if options.GracePeriodSeconds == nil || *options.GracePeriodSeconds != 0 {
+		t.Fatalf("delete grace period = %v, want 0", options.GracePeriodSeconds)
 	}
 }
 
