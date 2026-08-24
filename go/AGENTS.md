@@ -17,7 +17,8 @@ go/
 │   ├── judge/          # 不依赖 testing.T 的 Assertion
 │   ├── burst/          # burst.Run[T] 泛型并发发射
 │   └── contract/       # +case marker 与 caserun.Ref(caseset,id) 的静态 coverage gate
-├── kube/               # e2e / perf 共用的 namespace-scoped Kubernetes 操作与观测
+├── toolbox/
+│   └── kube/           # e2e / perf 共用的 namespace-scoped Kubernetes 操作与观测
 ├── eval/  perf/        # 占位骨架（短期不实现，仅固定包边界与 import 路径）
 ├── report/             # Go Verdict wire projection
 ├── cmd/casegen/        # CLI：list / check
@@ -33,7 +34,7 @@ go/
 - **生命周期失败语义**：judge mismatch 用 `caserun.Fail` → fail；请求、环境、timeout、cleanup 异常 → error；cleanup 独立 context 且总执行。
 - **Run 是运行出口**：消费仓用 `testrun.Run.Assert` 记录每个 CaseRun，并在 `TestMain` 调 `testrun.Run.Main`；统一写入 `runs/<scope>/<run-id>/verdict.json`，未执行任何 Case 时不制造空 run。`testrun` 只是 Go testing adapter，稳定模型仍是 CaseRun → Run → Verdict。
 - **跨语言行为由 fixture 约束**：`../conformance/e2e/caserun.yaml` 同时被 Python/Go 测试消费，固定阶段顺序、状态、cleanup、variant/facets 与 Verdict rollup 语义。
-- **平台工具箱保持中立**：`kube` 只执行 namespace-scoped 的 Kubernetes 操作、稳定等待和证据采集，不解释业务 Worker、Case、故障场景或 Verdict；目标 selector、注入时机与通过条件由消费方拥有。详见 [`../docs/toolbox.md`](../docs/toolbox.md)。
+- **平台工具箱保持中立**：`toolbox/kube` 只执行 namespace-scoped 的 Kubernetes 操作、稳定等待和证据采集，不解释业务 Worker、Case、故障场景或 Verdict；目标 selector、注入时机与通过条件由消费方拥有。详见 [`../docs/toolbox.md`](../docs/toolbox.md)。
 - **单行 marker 天然躲开 gofmt**：每个 `+case` 是一行，没有续行就没有 Go 1.19+ doc-comment 把续行改 tab 缩进的问题。
 - **import 路径**：四层在 `e2e/` 下，如 `github.com/compforge/case-harness/go/e2e/core`。
 

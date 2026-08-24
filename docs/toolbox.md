@@ -5,14 +5,20 @@
 
 ## 1. Kubernetes
 
-Kubernetes Driver 是面向 e2e、perf 等多个 Harness 的中立工具，不是独立的 Kube Harness。当前
-Go 实现位于 `go/kube`，提供 namespace-scoped 的控制与观测原语：
+Kubernetes Driver 是面向 e2e、perf 等多个 Harness 的中立工具，不是独立的 Kube Harness。Go
+实现位于 `go/toolbox/kube`，Python async 实现位于 `python/harness_toolbox/kube`；两端使用语言惯用
+API，共享以下控制与观测语义：
 
-- 从显式 kubeconfig 或 Pod 内身份创建 client，并显式配置 request timeout、QPS 和 burst；
+- 从显式 kubeconfig 或 Pod 内身份创建 client，并显式配置 request timeout 与语言对应的 client 容量
+  （Go QPS / burst，Python connection pool）；
 - 按 label selector 获取确定顺序的 Pod 快照；
 - 以 Pod name + UID 锁定物理实例，避免延迟动作误操作同名替代 Pod；
 - 按正常终止流程或零宽限强制删除指定 Pod，等待替代实例、Ready 或 Unschedulable 状态；
 - 按 Pod UID 采集 Kubernetes Event，作为报告或失败分析证据。
+
+Python 使用者通过 `case-harness[kube]` 安装可选的 `kubernetes-asyncio` 依赖。两种实现都要求调用方
+显式提供 namespace、请求超时和客户端容量参数；Go 使用 context 控制等待期限，Python 使用 async
+方法的 `timeout_s` 控制等待期限。
 
 Driver 只返回平台事实和执行结果。消费方仍负责提供 namespace、selector、动作时机和超时，并由所属
 Harness 或被测项目判断这些事实表示恢复成功、容量不足还是其它结果。例如，恢复 e2e 可以组合删除
@@ -37,5 +43,6 @@ LitmusChaos 已经包含 Workflow、Probe 和 Result 等平台模型。接入这
 
 - 跨 Harness 通用内核：[`kernel.md`](kernel.md)
 - e2e Target Driver 边界：[`e2e-harness.md`](e2e-harness.md)
-- Go SDK 与当前 Kubernetes 实现：[`../go/AGENTS.md`](../go/AGENTS.md)、[`../go/kube`](../go/kube)
+- Go Kubernetes 实现：[`../go/toolbox/kube`](../go/toolbox/kube)
+- Python Kubernetes 实现：[`../python/harness_toolbox/kube`](../python/harness_toolbox/kube)
 - Perf 跨语言契约：[`../spec/perf-contract.md`](../spec/perf-contract.md)
