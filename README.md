@@ -53,7 +53,7 @@ A Case can be viewed from more than one angle. When one execution already produc
 
 Some execution mechanics serve more than one harness. Recovery E2E and performance tests, for example, both need reliable Kubernetes workload discovery, state convergence, and Event evidence. The Go `kube` package provides namespace-scoped Kubernetes control and observation without owning any business Case, load profile, or Verdict.
 
-The consuming project still decides which workload to target, when a disruption is allowed, and what proves recovery or acceptable performance. Additional fault-injection backends can join this toolbox without moving experiment intent out of the project.
+The consuming project still decides which workload to target, when a disruption is allowed, and what proves recovery or acceptable performance. Additional fault-injection backends can join this toolbox without moving experiment intent out of the project. See the [Harness toolbox](docs/toolbox.md) for its boundary and current capabilities.
 
 ## Get started
 

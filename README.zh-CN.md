@@ -53,7 +53,7 @@ Dataset + Evaluators / Measurers / optional Policy
 
 部分执行机制会服务多个 Harness。例如，恢复 E2E 和性能测试都需要可靠地发现 Kubernetes 工作负载、等待状态收敛并采集 Event 证据。Go `kube` 包统一提供 namespace-scoped 的 Kubernetes 控制与观测，但不拥有任何业务 Case、负载模型或 Verdict。
 
-消费项目仍负责选择目标工作负载、决定何时允许注入故障，以及什么结果足以证明恢复或性能达标。其它故障注入后端可以继续加入工具箱，而不把实验意图从项目中搬走。
+消费项目仍负责选择目标工作负载、决定何时允许注入故障，以及什么结果足以证明恢复或性能达标。其它故障注入后端可以继续加入工具箱，而不把实验意图从项目中搬走。具体边界和现有能力见 [Harness 工具箱](docs/toolbox.md)。
 
 ## 快速开始
 

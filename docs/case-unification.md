@@ -24,6 +24,11 @@ E2E 通常在 CaseRun 内立即应用 assertion 并写 Verdict，因此 Dataset 
 同一 Run 目录；语义上仍要保留原始 Outcome、Case/variant identity 和判断结果的边界。已有 Outcome Unit
 应能使用另一版 assertion engine 或 soft metric 离线复判，而不重新调用被测系统。
 
+Unit identity 可以在 Outcome 产生前由 `case_id + variant` 确定。prepare、execute 或 judge 失败时，
+对应 Unit 仍应保留失败状态和阶段证据，不能为了得到“干净 Dataset”而静默丢弃。Experiment 等执行
+overlay 只负责 Case 选择、variant、负载和环境，不覆盖 canonical Case 的 input、facets、sources 或
+judgment。
+
 ## 编写与执行流程
 
 Case 有两个编写前端：

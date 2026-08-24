@@ -14,7 +14,7 @@
 
 **边界**：跨语言（Go + Python + TypeScript）测试框架聚合仓库，各语言目录是独立工程。框架不 import 被测服务的 internal 代码，纯黑盒（HTTP / SSE / DB-query 由服务侧自己包装）。
 
-核心模型、长期功能测试边界、资产到 Verdict 的主流程与 owner 分工统一见 [`docs/kernel.md`](docs/kernel.md)。当前已实现 Case 路径；Playbook → Script → Web / Android / iOS / 产品 API Target 是长期边界，尚未实现。
+跨 Harness 的通用模型与 owner 分工见 [`docs/kernel.md`](docs/kernel.md)；e2e 的 Case 路径及 Playbook → Script → Web / Android / iOS / 产品 API Target 长期边界见 [`docs/e2e-harness.md`](docs/e2e-harness.md)。
 
 ## 代码地图与核心模块
 
@@ -41,14 +41,15 @@ case-harness/
 ## 关键约定
 
 - **md 文档分工**：`AGENTS.md` 给 developer 看（代码地图、约定、扩展点），`README.md` 给 user 看（怎么接入、怎么跑）。两者会共用一部分项目定位/边界的内容，但侧重点不同——允许适度重复，不允许混淆受众。
-- **资产与执行分工遵循 Kernel**：Case / Playbook 等稳定资产格式只有一个 canonical owner；case-harness 负责编译、Runner / Driver、Judge、Run 产物与 Verdict。具体约束见 [`docs/kernel.md`](docs/kernel.md)。
+- **资产与执行分工遵循 Kernel**：稳定资产格式只有一个 canonical owner；case-harness 负责运行机制、领域 Harness、Run 产物与 Verdict。通用约束见 [`docs/kernel.md`](docs/kernel.md)，Playbook / Target 领域边界见 [`docs/e2e-harness.md`](docs/e2e-harness.md)。
 - **同一 CaseSet，多种执行视角**：Eval / Perf 直接消费 spec-case CaseSet；Experiment 只能选择 Case、设置 weight 或其它运行参数，不能复制或覆盖资产字段。跨语言约束由 `conformance/case/` 证明。
 - **Case → Observation → Unit → Dataset → EvaluationRun / Worksheet → Report**：所有 Harness 都按这套顶层语义对齐。Dataset 固定可复用的 Unit facts；每次运行选择的 Evaluator、Measurer 与可选 Policy 直接表达评估侧重点，并在不重新执行 Case 的前提下为同一 Dataset 产生新的 Worksheet、Verdict 与 JSON / HTML Report。各 Harness 保留自己的 Unit grain、强类型 key、调度和聚合模型，详见 [`docs/kernel.md`](docs/kernel.md#dataset-与反复评估)。
 - **可验证交付从开发期开始**：被测项目随需求、外部行为变更和缺陷修复维护 Spec / Case，再由 case-harness 在部署后针对指定版本与环境执行为 Verdict。项目拥有验证资产与判定标准，部署领域拥有环境、凭据、触发和发布策略；API、CLI、Pipeline、Job 只是可替换适配。
 - 五个 Python SDK 共享同一个 uv 工程与 `spec/` 约定，**互不 import**；公共能力集中在 `common`（case / verdict / llm / facets + report_kit 报告 IR）这一中立共享层，而不是 SDK 之间互相复用。各 SDK 仍自带一小撮协议原语（Outcome 形状、runner、SSEParser；perf 自带 httpx 发压栈、trace 自带薄 driver）——**先复制后收敛**，确属公共再收进 `common`。trace 的 parquet 持久化走可选 extra `[trace-corpus]`，不给其它 SDK 增重。
 - 新增能力先想清楚归哪类问题（对错 / 效果 / 容量 / 归因），落到对应 SDK；跨 SDK 的"公共抽象"冲动默认抑制，先复制后收敛，确属公共再进 `common`。
 - Go/Python e2e 共享 CaseRun 语义（prepare/execute/judge/cleanup、阶段 budget、Verdict），API 保持各自语言习惯；资产模型仍统一由 spec-case 持有。
-- Kubernetes 等平台工具箱不拥有 Case、负载模型或 Verdict；e2e / perf 及消费仓用它们完成环境操作与观测，具体目标选择、故障时机和通过条件仍由对应 Harness 与项目决定。
+- Kubernetes 等[平台工具箱](docs/toolbox.md)不拥有 Case、负载模型或 Verdict；e2e / perf 及消费仓用
+  它们完成环境操作与观测，具体目标选择、故障时机和通过条件仍由对应 Harness 与项目决定。
 - Go/Python e2e 的共同语义由 `conformance/e2e/` fixture 约束；Go 项目通过 `e2e/testrun.Run` 将一次 `go test` 中的 CaseRun 聚合到统一 run 目录，不在消费仓重复实现 Recorder/TestMain/Verdict 胶水。它是 Go testing adapter，不引入跨语言 Suite 概念。
 - Trace Harness 的 canonical 定义是 [`spec/trace-harness.md`](spec/trace-harness.md) 与
   `schema/trace/v1/`；Python 和 TypeScript 是对等实现，共用 `conformance/trace/`
@@ -86,7 +87,9 @@ cd ../perf-harness && bun install --frozen-lockfile && bun test && bun run typec
 ## References
 
 - 暂缓能力与启动条件：[`docs/backlog.md`](docs/backlog.md)
-- 内核模型、测试边界与长期功能测试：[`docs/kernel.md`](docs/kernel.md)
+- 跨 Harness 通用内核：[`docs/kernel.md`](docs/kernel.md)
+- 跨 Harness 环境操作与观测工具箱：[`docs/toolbox.md`](docs/toolbox.md)
+- e2e、Playbook 与 Target：[`docs/e2e-harness.md`](docs/e2e-harness.md)
 - Quality Harness 的定位、发现式评估与异步触发模型：[`docs/quality-harness.md`](docs/quality-harness.md)
 - e2e_harness（API 测试）：[`python/e2e_harness/AGENTS.md`](python/e2e_harness/AGENTS.md)
 - eval_harness（效果测试）：[`python/eval_harness/AGENTS.md`](python/eval_harness/AGENTS.md)，使用指南 [`python/eval_harness/README.md`](python/eval_harness/README.md)

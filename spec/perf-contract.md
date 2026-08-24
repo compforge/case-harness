@@ -43,6 +43,9 @@ Case input 变成一次 HTTP/SSE 等请求并返回一次 Outcome，必须支持
 内部再启动隐藏的加压循环。这样，同一个 Case runner 可被 Perf、单 Case 调试或其它 Case Harness
 入口复用，而调度策略仍只有一个权威实现。
 
+完整 Perf 是高影响验证，只能在合适环境和明确授权下运行。运行窗口、凭据、目标 revision 与发布
+门禁由部署领域持有；Harness 提供 CLI、API 或 Job 入口，不表示可以绕过这些约束。
+
 ## 负载语义
 
 - `closed` 表示 N 个虚拟用户循环 `fire → pacing → fire`，强度单位是并发用户数。
@@ -63,8 +66,8 @@ Case input 变成一次 HTTP/SSE 等请求并返回一次 Outcome，必须支持
 2. `judge(outcome)` 是单请求成功/失败的唯一权威，必须是纯函数；
 3. Trial 生命周期固定为 `setup → measurement → deactivate → cleanup`，cleanup 总会尝试执行。
 
-资源观测与请求判定正交。Prombed、Prometheus、Kubernetes 等 Probe 可以由具体实现或消费方提供，
-其缺失不能改变 Outcome 的原始事实。
+资源观测与请求判定正交。Prombed、Prometheus、Kubernetes 等 Probe 可以由具体实现、消费方或
+[Harness 工具箱](../docs/toolbox.md)提供；其缺失不能改变 Outcome 的原始事实。
 
 ## Window 与统计
 
