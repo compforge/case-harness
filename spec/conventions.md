@@ -125,17 +125,31 @@ custom:                    # 服务自定义扩展区，框架透传
 
 四类都收敛到 `MetricResult(name, score, judgement)`。Assert 和 Metric 可在同一 case 并存：assert 全过 + metric 全达标 → case pass。
 
-## 使用模式（三类 harness）
+## 使用模式（五类 Harness）
+
+五类 Harness 都映射到同一条 Kernel 数据主线：
+
+```text
+Case → Observation → Unit → versioned Dataset
+Dataset + Evaluators / Measurers / Policy → EvaluationRun / Worksheet → Verdict / Report
+```
+
+Dataset 保存可复用的 Case、Observation 和 Annotation facts；Worksheet 保存某次评估追加的
+Evaluation 与 Measurement。实现可以融合执行、填表和 checkpoint，但必须保留两类数据边界，以便
+在不重新执行 Case 的情况下换规则、Judge、SLO 或分析侧重点。
 
 - **e2e（API 测试）**: canonical CaseSet + CaseRun 四阶段 + sync/async runner + 结构化 assertion / OutcomeMetric。
 - **eval（效果测试）**: `EvalEngine` 驱动大表 + reconciler 填表，per-case async runner + builder + metric set。
 - **perf（压力测试）**: `Engine` 把资源档 × 负载档解析为 Arm，逐 Trial 采样并按 Window 聚合，出容量与资源画像。
-- **trajectory（轨迹评估）**: Dataset Builder 将录制轨迹与 annotation 固化为版本化
-  Dataset，Runner 产出 Evaluation/Measurement/Metric，Reporter 从当前与历史 Run 生成 HTML。
+- **trace（链路分析）**: raw span 经 assemble 形成 Node Observation / Unit Dataset，detector profile
+  追加 Finding Evaluation，再按 node、trace 或 cohort grain 生成 Worksheet 与报告。
+- **trajectory（轨迹评估）**: Dataset Builder 将 Case、Trajectory Observation 与 annotation 固化为
+  版本化 Unit Dataset；不同 Evaluator / Measurer / Policy 组合生成各自 EvaluationRun、Worksheet、Metric 与报告。
 
-三者**互不 import、不抽公共依赖**（耦合成本 > 省下的重复）：e2e/eval 各自复制一小撮 L2 原语
+五者**互不 import、不抽领域公共依赖**（耦合成本 > 省下的重复）：e2e/eval 各自复制一小撮 L2 原语
 （Outcome 形状 / runner / SSEParser / build_auth_headers），perf 自带 httpx 发压栈。唯一例外是
-业务无关的 `report_kit`（eval/perf 共用）。一致性落在 `spec/` 的**数据格式**，不落在共享代码。
+业务无关的 `common` / `report_kit`。一致性落在 Kernel 语义、`spec/` 数据格式与 conformance，
+不落在共享领域代码。
 
 ## Run 产物与 verdict 出口（跨 harness）
 

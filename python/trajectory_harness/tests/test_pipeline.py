@@ -21,7 +21,7 @@ from trajectory_harness import (
     TrajectoryEvaluationRunner,
     TrajectoryHarness,
     TrajectoryReportBuilder,
-    TrajectorySample,
+    TrajectoryAnnotation,
     load_dataset_artifact,
     load_run_artifact,
 )
@@ -116,11 +116,11 @@ class _CCRDatasetBuilder(TrajectoryDatasetBuilder):
             )
             for recording in recordings
         }
-        samples = tuple(
-            TrajectorySample(
-                sample_id=f"sample-{recording.recording_id}",
+        annotations = tuple(
+            TrajectoryAnnotation(
+                annotation_id=f"annotation-{recording.recording_id}",
                 recording_id=recording.recording_id,
-                trajectory_ids=by_recording[recording.recording_id],
+                trajectory_ids=by_recording.get(recording.recording_id, ()),
                 annotation={"label": "correct"},
                 dimensions={"lane": "review1"},
             )
@@ -130,7 +130,7 @@ class _CCRDatasetBuilder(TrajectoryDatasetBuilder):
             dataset_id="ccr-reviews",
             version=self.version,
             trajectories=tuple(trajectories),
-            samples=samples,
+            annotations=annotations,
             metadata={"domain": "ccr"},
         )
 
@@ -140,10 +140,10 @@ class _CCRRunner(TrajectoryEvaluationRunner):
         del dataset
         return trajectory.metadata["review_stage"]
 
-    def metadata_for(self, dataset, trajectories, source_dataset):
+    def metadata_for(self, slice_id, trajectories, dataset):
         return {
-            "domain": source_dataset.metadata["domain"],
-            "slice": dataset.slice,
+            "domain": dataset.metadata["domain"],
+            "slice": slice_id,
             "ids": [item.trajectory_id for item in trajectories],
         }
 
@@ -154,7 +154,8 @@ class _CCRReport(TrajectoryReportBuilder):
     def extra_sections(self, current, history):
         del history
         labels = sorted(
-            str(sample.annotation["label"]) for sample in current.dataset.samples
+            str(annotation.annotation["label"])
+            for annotation in current.dataset.annotations
         )
         return [Section("CCR details", [Prose(", ".join(labels))])]
 
@@ -210,8 +211,8 @@ def test_harness_persists_current_run_and_rerenders_without_source(tmp_path):
     assert result.artifact.build.summary.selected_recordings == 3
     assert result.artifact.build.summary.fetched_recordings == 2
     assert result.artifact.build.summary.loaded_trajectories == 1
-    assert result.artifact.build.summary.included_samples == 1
-    assert result.artifact.build.summary.unmatched_samples == 0
+    assert result.artifact.build.summary.included_annotations == 3
+    assert result.artifact.build.summary.unmatched_annotations == 2
     assert result.artifact.dataset.trajectories[0].recording_id == "ok"
     dataset_doc = json.loads(result.dataset_path.read_text())
     assert "bundles" not in dataset_doc["dataset"]
@@ -220,7 +221,7 @@ def test_harness_persists_current_run_and_rerenders_without_source(tmp_path):
         "load",
         "fetch",
     ]
-    assert result.artifact.run.evaluations[0].dataset.sample_count == 1
+    assert result.artifact.run.slices[0].annotation_count == 1
     assert all(
         metric.dataset_version == "2026-W34" for metric in result.artifact.run.metrics
     )
@@ -279,9 +280,9 @@ def test_dataset_rejects_cross_recording_trajectory_reference():
                     recording_id="recording-a",
                 ),
             ),
-            samples=(
-                TrajectorySample(
-                    sample_id="sample",
+            annotations=(
+                TrajectoryAnnotation(
+                    annotation_id="annotation",
                     recording_id="recording-b",
                     trajectory_ids=("trajectory",),
                 ),

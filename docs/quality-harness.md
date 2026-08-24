@@ -123,6 +123,11 @@ Quality Harness 驱动已有能力执行，消费各 harness 的原生 Run、Ver
 对同一次执行能够复用输出、trace 或 trajectory 时，应尽量从同一 Run 形成多个观察视角，不为了形式
 上的完整而重复请求或发压。
 
+底层 Harness 按 Kernel 的 `Case → Observation → Unit → Dataset → EvaluationRun / Worksheet`
+语义保存结果。Quality Harness 可以为已有 Dataset 选择另一组 Evaluator、Measurer 与 Policy，复用
+Observation 生成新的 EvaluationRun、Worksheet 与 Report；它不复制各 Harness 的 Unit 模型，也不另建一张抹平 e2e、eval、perf、
+trace 和 trajectory 语义的总 Worksheet。
+
 ### 4.5 输出结论
 
 评估结果是对已有执行产物的项目级解释和汇总，至少回答：

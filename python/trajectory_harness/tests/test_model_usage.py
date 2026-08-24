@@ -4,13 +4,13 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 
 from trajectory_harness import (
-    DatasetRef,
-    EvaluationRun,
+    EvaluationSlice,
     ModelUsageMeasurer,
     MeasurementResult,
     MeasurerSpec,
     Step,
     Trajectory,
+    TrajectoryEvaluationRun,
     aggregate_metrics,
     measure,
     render_report_html,
@@ -137,13 +137,21 @@ def test_model_usage_measurements_aggregate_dataset_sum_and_distribution():
             steps=(_model_step("s2", prompt_tokens=300, completion_tokens=30),),
         ),
     )
-    run = EvaluationRun(
+    run = TrajectoryEvaluationRun(
         run_id="weekly",
         created_at=datetime(2026, 8, 23, tzinfo=timezone.utc),
-        dataset=DatasetRef("reviews", sample_count=2),
-        items=(),
-        measurement_items=tuple(measure(item, [measurer]) for item in trajectories),
-        measurer_specs=(measurer.spec,),
+        dataset_id="reviews",
+        dataset_version="",
+        slices=(
+            EvaluationSlice(
+                slice_id="",
+                trajectory_ids=tuple(item.trajectory_id for item in trajectories),
+                evaluations=(),
+                measurements=tuple(measure(item, [measurer]) for item in trajectories),
+                measurer_specs=(measurer.spec,),
+                annotation_count=2,
+            ),
+        ),
     )
 
     metrics = {metric.qualified_name: metric.value for metric in aggregate_metrics(run)}
@@ -187,13 +195,21 @@ def test_report_lists_measurer_separately_from_evaluators():
         trajectory_id="t1",
         steps=(_model_step("s1", prompt_tokens=100),),
     )
-    run = EvaluationRun(
+    run = TrajectoryEvaluationRun(
         run_id="weekly",
         created_at=datetime(2026, 8, 23, tzinfo=timezone.utc),
-        dataset=DatasetRef("reviews", sample_count=1),
-        items=(),
-        measurement_items=(measure(trajectory, [measurer]),),
-        measurer_specs=(measurer.spec,),
+        dataset_id="reviews",
+        dataset_version="",
+        slices=(
+            EvaluationSlice(
+                slice_id="",
+                trajectory_ids=(trajectory.trajectory_id,),
+                evaluations=(),
+                measurements=(measure(trajectory, [measurer]),),
+                measurer_specs=(measurer.spec,),
+                annotation_count=1,
+            ),
+        ),
     )
 
     html = render_report_html([run])

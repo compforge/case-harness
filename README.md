@@ -27,26 +27,33 @@ Current e2e targets a single service's public boundary. Product-level Web, mobil
 ```text
 canonical CaseSet owned by the project
     + environment and execution code
-    + one judgment view
-    → CaseRun (prepare → execute → judge → cleanup)
-    → Run artifacts
-    → verdict.json
+    → CaseRun → Observation
+    → Unit → versioned Dataset
+
+Dataset + Evaluators / Measurers / optional Policy
+    → EvaluationRun → Worksheet
+    → JSON / verdict.json / HTML report
 ```
 
 | Concept | Meaning |
 |---|---|
 | **Case** | Stable, reusable test input and judgment data, identified by `case_id`; the canonical format is owned by [spec-case](https://github.com/compforge/spec-case). |
+| **Observation** | What actually happened when a Case ran: an outcome, response, performance sample, trace, or trajectory with source identity. |
+| **Unit** | A harness-defined evaluation unit sourced from a Case and one or more Observations; one Worksheet row represents one Unit. |
+| **Dataset** | A versioned, reusable collection of Unit facts. It does not contain results from one particular evaluation run. |
+| **Worksheet** | One EvaluationRun's row-wise result over a Dataset, with Evaluation and Measurement cells added to each Unit. |
 | **CaseRun** | One Case executed in one environment and variant with explicit phase budgets and cleanup semantics. |
 | **Run** | The artifact and lifecycle boundary for one real execution, carrying environment and alignment identity. |
+| **Report** | A machine-facing JSON or human-facing HTML projection of a Worksheet. |
 | **Verdict** | The common machine-readable result consumed by humans, CI, and agent development loops. |
 
-A Case can be viewed from more than one angle. When one execution already produced responses, traces, metrics, or a trajectory, those observations should feed multiple judgments instead of triggering duplicate work.
+A Case can be viewed from more than one angle. When one execution already produced responses, performance samples, traces, or a trajectory, those observations form a reusable Dataset. Selecting different judges, measurers, or policies then produces new Worksheets and reports without triggering duplicate execution.
 
 ## Shared platform toolbox
 
 Some execution mechanics serve more than one harness. Recovery E2E and performance tests, for example, both need reliable Kubernetes workload discovery, state convergence, and Event evidence. The Go `kube` package provides namespace-scoped Kubernetes control and observation without owning any business Case, load profile, or Verdict.
 
-The consuming project still decides which workload to target, when a disruption is allowed, and what proves recovery or acceptable performance. Additional fault-injection backends can join this toolbox without moving experiment intent out of the project.
+The consuming project still decides which workload to target, when a disruption is allowed, and what proves recovery or acceptable performance. Additional fault-injection backends can join this toolbox without moving experiment intent out of the project. See the [Harness toolbox](docs/toolbox.md) for its boundary and current capabilities.
 
 ## Get started
 

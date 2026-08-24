@@ -30,9 +30,10 @@ eval_harness/
 - **Experiment** = `target`（基线 SUT 配置）+ `arms` + CaseSet 引用 + `metrics` + `weights`
 - **CaseSet 归 spec-case**：Eval 完整加载其 identity / sources / facets / cases，只解释
   `input` 与 `judge.eval`；Experiment 不得覆盖资产字段
+- **Kernel 对齐**：Solver 填入的 response / retrieval / citation 是 Observation，`arm_id × corpus × case_id` 是 Unit grain；已完成 solve cell 的 Unit facts 构成可复评 Dataset，本次选择的 scorer / metric / weight / judge model 直接定义评估侧重点。当前 Worksheet 同时 checkpoint Observation production 与评分结果，但 score cell 必须可在复用 solve cell 的前提下重新填充；详见 [`../../docs/kernel.md`](../../docs/kernel.md#dataset-与反复评估)。
 - **Arm**（对照配置）= `target ⊕ overrides`，分 **heavy**（provisioned resource+sources，有 prepare/clean 和复用 key）+ **light**（model/params，按调用施加）；`Arm.key` 只 hash heavy 字段 → 只换模型的 Arm 共享同一份 provision
 - **Trial** = 某个 Arm 的一次真实执行，Worksheet 以显式 `arm_id` 记录并对齐其结果
-- **Worksheet**（大表）= rows = (arm_id × case)，每 cell 带 PENDING/OK/FAILED；引擎唯一真相 + checkpoint
+- **Worksheet**（大表）= 一次 EvaluationRun 对 Dataset 的 rows = (arm_id × case) 填表结果；每 cell 带 PENDING/OK/FAILED，引擎唯一真相 + checkpoint
 - **reconciler**（缺啥补啥）= 扫描非 OK 且依赖就绪（provision→solve→score）的 cell 派工填；per-endpoint rate-gate；resume = reload 后再扫一遍
 - **MetricResult 双通道**：quality（0~1 → 加权 overall）vs measurement（value+unit，p50/p95，不进 overall）；`score=None` = 弃权（不当 0）
 - **产物两形态**：`worksheet.jsonl`（无损 checkpoint，可断点续跑）vs `results.csv`（有损扁平投影，人工 review 用）

@@ -16,6 +16,12 @@ Outcome = 一次已发请求的原始事实
 Verdict = Workload 对 Outcome 的纯判定
 ```
 
+按 case-harness Kernel 语义，Outcome 和 Probe sample 是 Observation。Perf 必须为每张分析表声明一个
+Unit grain：request、window、run 是不同 Unit，不能混成同一行。raw/model Run facts 构成可离线复用
+Dataset；每次 EvaluationRun 直接记录所选 Workload judge、SLO 与 analysis 组件及其配置，并形成
+对应 Worksheet。更换 SLO、gate 或分析透镜不得重新发压。具体顶层定义见
+[`../docs/kernel.md`](../docs/kernel.md#dataset-与反复评估)。
+
 - `case_id` 标识稳定输入资产；同一 Case 进入不同 Arm 时保持不变。
 - `arm_id` 是 Experiment 内对照配置的稳定键。
 - `window_id` 是 Trial 内时间切片的局部键。
@@ -37,6 +43,9 @@ Case input 变成一次 HTTP/SSE 等请求并返回一次 Outcome，必须支持
 内部再启动隐藏的加压循环。这样，同一个 Case runner 可被 Perf、单 Case 调试或其它 Case Harness
 入口复用，而调度策略仍只有一个权威实现。
 
+完整 Perf 是高影响验证，只能在合适环境和明确授权下运行。运行窗口、凭据、目标 revision 与发布
+门禁由部署领域持有；Harness 提供 CLI、API 或 Job 入口，不表示可以绕过这些约束。
+
 ## 负载语义
 
 - `closed` 表示 N 个虚拟用户循环 `fire → pacing → fire`，强度单位是并发用户数。
@@ -53,12 +62,12 @@ Case input 变成一次 HTTP/SSE 等请求并返回一次 Outcome，必须支持
 
 服务协议通过 Workload 扩展：
 
-1. `fire` 只记录 HTTP/SSE、耗时、业务 ID 和异常等原始 Outcome；
+1. `fire` 只记录 HTTP/SSE、耗时、业务 ID 和异常等原始 `Outcome`，即 request Observation；
 2. `judge(outcome)` 是单请求成功/失败的唯一权威，必须是纯函数；
 3. Trial 生命周期固定为 `setup → measurement → deactivate → cleanup`，cleanup 总会尝试执行。
 
-资源观测与请求判定正交。Prombed、Prometheus、Kubernetes 等 Probe 可以由具体实现或消费方提供，
-其缺失不能改变 Outcome 的原始事实。
+资源观测与请求判定正交。Prombed、Prometheus、Kubernetes 等 Probe 可以由具体实现、消费方或
+[Harness 工具箱](../docs/toolbox.md)提供；其缺失不能改变 Outcome 的原始事实。
 
 ## Window 与统计
 

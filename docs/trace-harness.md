@@ -27,6 +27,11 @@ span），回答"链路内部发生了什么、哪一层先反常"。它是另�
 案例"为什么错"、eval 坏 case"模型实际收到/吐了什么"、perf 慢"时间花在哪一层"，都由
 它回答——这是顶层 AGENTS.md 思想 #4"一次执行，多面观测"缺的最后一面。
 
+按 case-harness Kernel 语义，assemble 后的 Node 是 Observation，`trace_id + node_id` 定义 node-grain
+Unit，nodes / corpus 构成可复评 Dataset；每次 EvaluationRun 记录所选 detector 与 gate，并生成带
+Finding Evaluation 的 Worksheet。若分析粒度提升到 trace 或 cohort，应建立对应 grain 的 Worksheet，不能把
+不同含义的行混在一张表。更换 detector、gate 或报告侧重点时复用 Dataset，不重新抓取 trace。
+
 | 问题 | 类型 | 视角 |
 |------|------|------|
 | 接口对不对 | e2e | 黑盒：发请求看响应 |

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,12 +12,15 @@ from trajectory_harness.build import DatasetBuildResult, DatasetBuildSummary
 from trajectory_harness.dataset import TrajectoryDataset
 from trajectory_harness.evaluate import EvaluatorSpec, TrajectoryEvaluation
 from trajectory_harness.measure import MeasurerSpec, TrajectoryMeasurement
-from trajectory_harness.metrics import DatasetRef, EvaluationRun, Metric
+from trajectory_harness.metrics import (
+    EvaluationSlice,
+    Metric,
+    TrajectoryEvaluationRun,
+)
 from trajectory_harness.model import Trajectory
-from trajectory_harness.runner import TrajectoryRun
 
-DATASET_SCHEMA = 1
-RUN_SCHEMA = 1
+DATASET_SCHEMA = 2
+RUN_SCHEMA = 2
 DATASET_FILE = "dataset.json"
 RUN_FILE = "run.json"
 
@@ -27,26 +30,33 @@ class TrajectoryRunArtifact:
     """The fixed dataset plus one evaluation run over that exact version."""
 
     build: DatasetBuildResult
-    run: TrajectoryRun
+    run: TrajectoryEvaluationRun
 
     def __post_init__(self) -> None:
         dataset = self.build.dataset
         identity = (dataset.dataset_id, dataset.version)
         if (self.run.dataset_id, self.run.dataset_version) != identity:
             raise ValueError("trajectory run does not match its dataset artifact")
-        for evaluation in self.run.evaluations:
-            if (evaluation.dataset.dataset_id, evaluation.dataset.version) != identity:
-                raise ValueError("evaluation slice does not match its trajectory run")
-            if (evaluation.run_id, evaluation.created_at) != (
-                self.run.run_id,
-                self.run.created_at,
-            ):
-                raise ValueError("evaluation slice does not match its enclosing run")
-        for metric in self.run.metrics:
-            if (metric.dataset_id, metric.dataset_version) != identity:
-                raise ValueError("metric does not match its trajectory run")
-            if metric.run_id != self.run.run_id:
-                raise ValueError("metric does not match its enclosing run")
+        known_trajectory_ids = set(dataset.trajectory_by_id)
+        for slice_ in self.run.slices:
+            slice_trajectory_ids = set(slice_.trajectory_ids)
+            if not slice_trajectory_ids <= known_trajectory_ids:
+                raise ValueError("evaluation slice references an unknown trajectory")
+            result_trajectory_ids = {
+                item.trajectory.trajectory_id
+                for item in (*slice_.evaluations, *slice_.measurements)
+            }
+            if not result_trajectory_ids <= slice_trajectory_ids:
+                raise ValueError(
+                    "slice result references a trajectory outside its slice"
+                )
+            for metric in slice_.metrics:
+                if (metric.dataset_id, metric.dataset_version) != identity:
+                    raise ValueError("metric does not match its trajectory run")
+                if metric.run_id != self.run.run_id:
+                    raise ValueError("metric does not match its enclosing run")
+                if metric.dataset_slice != slice_.slice_id:
+                    raise ValueError("metric does not match its enclosing slice")
 
     @property
     def dataset(self) -> TrajectoryDataset:
@@ -109,22 +119,21 @@ def load_run_artifact(run_dir: str | Path) -> TrajectoryRunArtifact:
     return TrajectoryRunArtifact(build=build, run=run)
 
 
-def _run_to_dict(run: TrajectoryRun) -> dict[str, Any]:
+def _run_to_dict(run: TrajectoryEvaluationRun) -> dict[str, Any]:
     return {
         "schema": RUN_SCHEMA,
         "run_id": run.run_id,
         "created_at": run.created_at.isoformat(),
         "dataset_id": run.dataset_id,
         "dataset_version": run.dataset_version,
-        "evaluations": [_evaluation_to_dict(item) for item in run.evaluations],
-        "metrics": [item.to_dict() for item in run.metrics],
+        "slices": [_slice_to_dict(item) for item in run.slices],
         "metadata": dict(run.metadata),
     }
 
 
 def _run_from_dict(
     value: dict[str, Any], trajectories: dict[str, Trajectory]
-) -> TrajectoryRun:
+) -> TrajectoryEvaluationRun:
     if value.get("schema") != RUN_SCHEMA:
         raise ValueError(
             f"unsupported trajectory run schema {value.get('schema')!r}; "
@@ -132,39 +141,35 @@ def _run_from_dict(
         )
     run_id = str(value["run_id"])
     created_at = datetime.fromisoformat(str(value["created_at"]))
-    evaluations = tuple(
-        replace(
-            _evaluation_from_dict(item, trajectories),
-            run_id=run_id,
-            created_at=created_at,
-        )
-        for item in value.get("evaluations", ())
-    )
-    return TrajectoryRun(
+    return TrajectoryEvaluationRun(
         run_id=run_id,
         created_at=created_at,
         dataset_id=str(value["dataset_id"]),
         dataset_version=str(value.get("dataset_version") or ""),
-        evaluations=evaluations,
-        metrics=tuple(Metric.from_dict(item) for item in value.get("metrics", ())),
+        slices=tuple(
+            _slice_from_dict(item, trajectories) for item in value.get("slices", ())
+        ),
         metadata=dict(value.get("metadata") or {}),
     )
 
 
-def _evaluation_to_dict(run: EvaluationRun) -> dict[str, Any]:
+def _slice_to_dict(slice_: EvaluationSlice) -> dict[str, Any]:
     return {
-        "dataset": run.dataset.to_dict(),
-        "items": [item.to_dict() for item in run.items],
-        "evaluator_specs": [item.to_dict() for item in run.evaluator_specs],
-        "measurement_items": [item.to_dict() for item in run.measurement_items],
-        "measurer_specs": [item.to_dict() for item in run.measurer_specs],
-        "metadata": dict(run.metadata),
+        "slice_id": slice_.slice_id,
+        "trajectory_ids": list(slice_.trajectory_ids),
+        "evaluations": [item.to_dict() for item in slice_.evaluations],
+        "evaluator_specs": [item.to_dict() for item in slice_.evaluator_specs],
+        "measurements": [item.to_dict() for item in slice_.measurements],
+        "measurer_specs": [item.to_dict() for item in slice_.measurer_specs],
+        "annotation_count": slice_.annotation_count,
+        "metrics": [item.to_dict() for item in slice_.metrics],
+        "metadata": dict(slice_.metadata),
     }
 
 
-def _evaluation_from_dict(
+def _slice_from_dict(
     value: dict[str, Any], trajectories: dict[str, Trajectory]
-) -> EvaluationRun:
+) -> EvaluationSlice:
     def trajectory_for(item: dict[str, Any]) -> Trajectory:
         trajectory_id = str(item["trajectory_id"])
         try:
@@ -174,24 +179,29 @@ def _evaluation_from_dict(
                 f"run item references unknown trajectory {trajectory_id!r}"
             ) from error
 
-    return EvaluationRun(
-        run_id="",
-        created_at=datetime.min,
-        dataset=DatasetRef.from_dict(value["dataset"]),
-        items=tuple(
+    return EvaluationSlice(
+        slice_id=str(value.get("slice_id") or ""),
+        trajectory_ids=tuple(str(item) for item in value.get("trajectory_ids", ())),
+        evaluations=tuple(
             TrajectoryEvaluation.from_dict(item, trajectory=trajectory_for(item))
-            for item in value.get("items", ())
+            for item in value.get("evaluations", ())
         ),
         evaluator_specs=tuple(
             EvaluatorSpec.from_dict(item) for item in value.get("evaluator_specs", ())
         ),
-        measurement_items=tuple(
+        measurements=tuple(
             TrajectoryMeasurement.from_dict(item, trajectory=trajectory_for(item))
-            for item in value.get("measurement_items", ())
+            for item in value.get("measurements", ())
         ),
         measurer_specs=tuple(
             MeasurerSpec.from_dict(item) for item in value.get("measurer_specs", ())
         ),
+        annotation_count=(
+            int(value["annotation_count"])
+            if value.get("annotation_count") is not None
+            else None
+        ),
+        metrics=tuple(Metric.from_dict(item) for item in value.get("metrics", ())),
         metadata=dict(value.get("metadata") or {}),
     )
 

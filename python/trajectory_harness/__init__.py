@@ -7,7 +7,9 @@ from trajectory_harness.build import (
     TrajectoryDatasetBuilder as TrajectoryDatasetBuilder,
 )
 from trajectory_harness.dataset import TrajectoryDataset as TrajectoryDataset
-from trajectory_harness.dataset import TrajectorySample as TrajectorySample
+from trajectory_harness.dataset import (
+    TrajectoryAnnotation as TrajectoryAnnotation,
+)
 from trajectory_harness.evaluate import EvaluationResult as EvaluationResult
 from trajectory_harness.evaluate import Evaluator as Evaluator
 from trajectory_harness.evaluate import EvaluatorSpec as EvaluatorSpec
@@ -39,9 +41,11 @@ from trajectory_harness.measure import measure as measure
 from trajectory_harness.measurers.model_usage import (
     ModelUsageMeasurer as ModelUsageMeasurer,
 )
-from trajectory_harness.metrics import DatasetRef as DatasetRef
-from trajectory_harness.metrics import EvaluationRun as EvaluationRun
+from trajectory_harness.metrics import EvaluationSlice as EvaluationSlice
 from trajectory_harness.metrics import Metric as Metric
+from trajectory_harness.metrics import (
+    TrajectoryEvaluationRun as TrajectoryEvaluationRun,
+)
 from trajectory_harness.metrics import aggregate_metrics as aggregate_metrics
 from trajectory_harness.model import ExecutionResult as ExecutionResult
 from trajectory_harness.model import Failure as Failure
@@ -69,7 +73,6 @@ from trajectory_harness.runio import write_run_artifact as write_run_artifact
 from trajectory_harness.runner import (
     TrajectoryEvaluationRunner as TrajectoryEvaluationRunner,
 )
-from trajectory_harness.runner import TrajectoryRun as TrajectoryRun
 from trajectory_harness.source import Recording as Recording
 from trajectory_harness.source import RecordingQuery as RecordingQuery
 from trajectory_harness.source import RecordingRef as RecordingRef
