@@ -1,10 +1,10 @@
 """Cross-harness ``verdict.json`` schema — the neutral wire shape (see
-``spec/verdict-schema.yaml``), shared by e2e / eval / perf / trace.
+``spec/verdict-schema.yaml``), shared by e2e / eval / perf / trace / trajectory.
 
 Harness-neutral by design: this holds the SERIALIZATION (the `Verdict` shape, omit-empty
 `to_dict`, the rollup precedence) — never a harness's PROJECTION. Each SDK keeps its own thin
 projector (its internal state → these `CaseVerdict`s) and calls `build_run_verdict` +
-`write_verdict`. The run-dir layout it writes into lives in `common.run`. The 4 SDKs depend
+`write_verdict`. The run-dir layout it writes into lives in `common.run`. The SDKs depend
 on `common` but not on each other.
 
 Status vocabulary: pass / fail / error / skipped. `error` wins the rollup over `fail` — a
@@ -35,6 +35,10 @@ from typing import Literal
 from spec_case.model import (
     Face,
 )  # the judgment-face enum, shared with the case model (input↔output)
+
+# Trajectory evaluates recorded execution evidence rather than ``case.judge`` criteria,
+# so it is a verdict-producing harness without becoming a canonical Case judgment face.
+HarnessFace = Face | Literal["trajectory"]
 
 SCHEMA_VERSION = 1
 
@@ -122,7 +126,7 @@ class CheckVerdict:
 
 @dataclass
 class RunVerdict:
-    harness: Face
+    harness: HarnessFace
     scope: str
     run_id: str
     status: Status
@@ -196,7 +200,7 @@ def rollup_reason(cases: list[CaseVerdict], run_status: Status) -> str | None:
 
 
 def build_run_verdict(
-    harness: Face,
+    harness: HarnessFace,
     scope: str,
     run_id: str,
     cases: list[CaseVerdict],

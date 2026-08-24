@@ -38,16 +38,76 @@ print([metric.to_dict() for metric in aggregate_metrics(run)])
 write_report_html("trajectory-report.html", [run])
 ```
 
+For a repeatable source-to-report workflow, provide three focused components and compose them
+with the one-click facade:
+
+```python
+from trajectory_harness import (
+    TrajectoryDataset,
+    TrajectoryDatasetBuilder,
+    TrajectoryEvaluationRunner,
+    TrajectoryHarness,
+    TrajectoryReportBuilder,
+)
+
+
+class ReviewDatasetBuilder(TrajectoryDatasetBuilder):
+    def assemble(self, recordings, trajectories, query):
+        return TrajectoryDataset(
+            dataset_id="reviews",
+            version="2026-W34",
+            trajectories=tuple(trajectories),
+            samples=join_review_labels(recordings, trajectories),
+        )
+
+
+class ReviewRunner(TrajectoryEvaluationRunner):
+    def slice_for(self, trajectory, dataset):
+        return trajectory.metadata["review_stage"]
+
+
+class ReviewReport(TrajectoryReportBuilder):
+    report_title = "Weekly review trajectories"
+
+
+harness = TrajectoryHarness(
+    builder=ReviewDatasetBuilder(source=review_source, loader=review_loader),
+    runner=ReviewRunner(
+        evaluators=review_evaluators,
+        measurers=review_measurers,
+    ),
+    reporter=ReviewReport(),
+)
+result = harness.run("runs", scope="reviews", run_id="2026-W34")
+
+# Prior run directories are read only while rendering trends.
+harness.run(
+    "runs",
+    scope="reviews",
+    run_id="2026-W35",
+    history_dirs=["runs/reviews/2026-W34"],
+)
+
+# Rebuild report.html from dataset.json + run.json without source or plugins.
+ReviewReport().rerender(result.run_dir)
+```
+
+`TrajectoryDatasetBuilder` owns selection/fetch/load isolation and lets the domain assemble
+labels into `TrajectorySample.annotation`. `TrajectoryEvaluationRunner` owns evaluator,
+measurer, and metric execution over that fixed dataset. `TrajectoryReportBuilder` owns the
+canonical report and accepts domain `Section` values. Source-specific queries, labels, and
+business concepts remain in those domain components; `TrajectoryHarness` only composes them.
+
 The processing boundary is:
 
 ```text
 Source
   -> RecordingRef / Recording
   -> TrajectoryLoader
-  -> Trajectory (Step + Failure + ExecutionResult)
+  -> TrajectoryDataset (trajectories + labeled samples)
   -> Evaluator -> EvaluationResult (verdict + score + findings)
   -> Measurer  -> MeasurementResult (measurements)
-  -> EvaluationRun
+  -> TrajectoryRun / EvaluationRun
   -> Metric
   -> Report / HTML
 ```
@@ -106,6 +166,13 @@ trends. Trend time comes from `EvaluationRun.created_at`; `run_id` is only an op
 so callers may schedule runs weekly, per release, or on demand. The final low-level document
 rendering remains in `harness_common.report_kit`, so consumers can append business-specific
 `Section` values without writing HTML.
+
+The facade writes `dataset.json`, one current `run.json`, `report.html`, and `verdict.json` under
+`runs/<scope>/<run-id>/`. The dataset artifact contains trajectories, labels, and build health;
+the run artifact contains evaluator findings, measurement evidence, metrics, and references to
+trajectory IDs. Historical runs are report inputs rather than copies inside the current run,
+avoiding quadratic storage. Without a domain verdict policy, successful analysis is `skipped`
+rather than silently treating findings as gates.
 
 See [`../../docs/trajectory-harness.md`](../../docs/trajectory-harness.md) for the model and
 its boundary with eval/trace analysis.

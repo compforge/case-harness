@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from trajectory_harness.model import Trajectory
 
@@ -23,6 +23,25 @@ class MeasurementSpec:
     direction: MetricDirection = "neutral"
     aggregations: tuple[Aggregation, ...] = ("mean",)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "unit": self.unit,
+            "description": self.description,
+            "direction": self.direction,
+            "aggregations": list(self.aggregations),
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> MeasurementSpec:
+        return cls(
+            name=str(value["name"]),
+            unit=str(value.get("unit") or ""),
+            description=str(value.get("description") or ""),
+            direction=value.get("direction", "neutral"),
+            aggregations=tuple(value.get("aggregations", ("mean",))),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class MeasurerSpec:
@@ -33,6 +52,28 @@ class MeasurerSpec:
     description: str
     owner: str = ""
     measurements: tuple[MeasurementSpec, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "measurer_id": self.measurer_id,
+            "title": self.title,
+            "description": self.description,
+            "owner": self.owner,
+            "measurements": [item.to_dict() for item in self.measurements],
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> MeasurerSpec:
+        return cls(
+            measurer_id=str(value["measurer_id"]),
+            title=str(value["title"]),
+            description=str(value.get("description") or ""),
+            owner=str(value.get("owner") or ""),
+            measurements=tuple(
+                MeasurementSpec.from_dict(item)
+                for item in value.get("measurements", ())
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +94,16 @@ class MeasurementResult:
             "explanation": self.explanation,
             "step_ids": list(self.step_ids),
         }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> MeasurementResult:
+        return cls(
+            measurer_id=str(value["measurer_id"]),
+            status=value["status"],
+            measurements=dict(value.get("measurements") or {}),
+            explanation=str(value.get("explanation") or ""),
+            step_ids=tuple(str(item) for item in value.get("step_ids", ())),
+        )
 
 
 @runtime_checkable
@@ -76,6 +127,17 @@ class TrajectoryMeasurement:
             "trajectory_id": self.trajectory.trajectory_id,
             "results": [result.to_dict() for result in self.results],
         }
+
+    @classmethod
+    def from_dict(
+        cls, value: dict[str, Any], *, trajectory: Trajectory
+    ) -> TrajectoryMeasurement:
+        return cls(
+            trajectory=trajectory,
+            results=tuple(
+                MeasurementResult.from_dict(item) for item in value.get("results", ())
+            ),
+        )
 
 
 def measure(

@@ -1,5 +1,13 @@
 """Normalize, evaluate, aggregate, and report agent trajectories."""
 
+from trajectory_harness.build import DatasetBuildResult as DatasetBuildResult
+from trajectory_harness.build import DatasetBuildSummary as DatasetBuildSummary
+from trajectory_harness.build import DatasetIssue as DatasetIssue
+from trajectory_harness.build import (
+    TrajectoryDatasetBuilder as TrajectoryDatasetBuilder,
+)
+from trajectory_harness.dataset import TrajectoryDataset as TrajectoryDataset
+from trajectory_harness.dataset import TrajectorySample as TrajectorySample
 from trajectory_harness.evaluate import EvaluationResult as EvaluationResult
 from trajectory_harness.evaluate import Evaluator as Evaluator
 from trajectory_harness.evaluate import EvaluatorSpec as EvaluatorSpec
@@ -39,10 +47,39 @@ from trajectory_harness.model import ExecutionResult as ExecutionResult
 from trajectory_harness.model import Failure as Failure
 from trajectory_harness.model import Step as Step
 from trajectory_harness.model import Trajectory as Trajectory
+from trajectory_harness.pipeline import (
+    TrajectoryHarness as TrajectoryHarness,
+)
+from trajectory_harness.pipeline import (
+    TrajectoryHarnessResult as TrajectoryHarnessResult,
+)
+from trajectory_harness.report import (
+    TrajectoryReportBuilder as TrajectoryReportBuilder,
+)
 from trajectory_harness.report import build_report as build_report
 from trajectory_harness.report import render_report_html as render_report_html
 from trajectory_harness.report import write_report_html as write_report_html
+from trajectory_harness.runio import (
+    TrajectoryRunArtifact as TrajectoryRunArtifact,
+)
+from trajectory_harness.runio import load_dataset_artifact as load_dataset_artifact
+from trajectory_harness.runio import load_run_artifact as load_run_artifact
+from trajectory_harness.runio import write_dataset_artifact as write_dataset_artifact
+from trajectory_harness.runio import write_run_artifact as write_run_artifact
+from trajectory_harness.runner import (
+    TrajectoryEvaluationRunner as TrajectoryEvaluationRunner,
+)
+from trajectory_harness.runner import TrajectoryRun as TrajectoryRun
 from trajectory_harness.source import Recording as Recording
 from trajectory_harness.source import RecordingQuery as RecordingQuery
 from trajectory_harness.source import RecordingRef as RecordingRef
 from trajectory_harness.source import RecordingSource as RecordingSource
+from trajectory_harness.verdict import (
+    TrajectoryVerdictPolicy as TrajectoryVerdictPolicy,
+)
+from trajectory_harness.verdict import (
+    build_trajectory_verdict as build_trajectory_verdict,
+)
+from trajectory_harness.verdict import (
+    write_trajectory_verdict as write_trajectory_verdict,
+)

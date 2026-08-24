@@ -1,6 +1,6 @@
-"""The run-layout contract — shared by all three harnesses (e2e / eval / perf).
+"""The run-layout contract shared by the harness family.
 
-One constraint, three harnesses, stated once here so it has an owner instead of living as
+One constraint, stated once here so it has an owner instead of living as
 prose plus three hand-rolled paths:
 
 - **one config = one experiment.** A single config/experiment yaml defines one experiment; a
@@ -8,7 +8,8 @@ prose plus three hand-rolled paths:
   segment) — harness-neutral: eval/perf use the experiment name, e2e a suite/service name.
 - **one run = one run-id, unique within the scope.** Each execution of an experiment gets a
   run-id. How it is DERIVED is each harness's own call and deliberately NOT unified: perf/e2e
-  use a timestamp (every run a fresh history entry); eval uses ``experiment_hash`` (a
+  and trajectory use a timestamp (every run a fresh history entry); eval uses
+  ``experiment_hash`` (a
   same-config rerun lands in the SAME dir and resumes in place — a content-addressed reuse
   namespace, not a history snapshot). The shared contract is only that it is unique per scope.
 - **products land under** ``runs/<scope>/<run-id>/``. The verdict.json + the rich artifacts

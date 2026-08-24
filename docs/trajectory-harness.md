@@ -17,10 +17,10 @@ trajectory_harness 回答的是：**agent 为得到结果而采取的决策与�
 Source
   -> RecordingRef / Recording
   -> TrajectoryLoader
-  -> Trajectory (Step + Failure + ExecutionResult)
+  -> TrajectoryDataset (Trajectory + Sample annotation)
   -> Evaluator -> EvaluationResult (verdict + score + findings)
   -> Measurer  -> MeasurementResult (measurements)
-  -> EvaluationRun (Dataset + separate evaluation/measurement items)
+  -> TrajectoryRun (one or more sliced EvaluationRun)
   -> Metric
   -> Report / HTML
 ```
@@ -241,7 +241,14 @@ rate、completion/timeout 与单位有效 finding 成本。有限时间或 token
 计费和长上下文阶梯价，应由带 pricing provenance 的消费侧 Measurement 逐调用计算后再聚合，未知
 价格保持 unknown，不能静默当作零成本。
 
-## 4. EvaluationRun 与 Metric
+## 4. Dataset、EvaluationRun 与 Metric
+
+`TrajectoryDataset` 是评价之前固定的、带版本的输入。每条 `Trajectory` 通过一等
+`recording_id` 保留它从哪份 Recording 投影而来，`source` 保留 URI/path；同一 Recording
+解析出的多条轨迹共享 recording id，无需额外的分组容器。`TrajectorySample` 用
+`recording_id / trajectory_ids` 把 MR comment label 等领域 annotation 与运行证据连接。
+一个 Sample 可对应多条轨迹；也可暂时没有 trajectory id，以便保留“有 label 但
+未匹配到轨迹”这类 Dataset 事实。
 
 `EvaluationRun` 把同批轨迹的 Evaluation 和 Measurement 分栏绑定到 `DatasetRef`、run id、时间、
 Evaluator 目录与 Measurer 目录。两类结果使用独立 item/spec 字段，不能互相冒充。run id
@@ -270,20 +277,51 @@ measurement.value.sum{measurer_id=model_usage,measurement=input_tokens}
 多个 EvaluationRun 上同一地址的 Metric 按 `created_at` 构成趋势序列。报告接口也可直接
 接收已经持久化的 Metric，因此生成历史趋势不需要重新加载完整轨迹。
 
+### 4.1 Dataset 与 Run 模型产物
+
+`TrajectoryHarness` 把产物写到 `runs/<scope>/<run-id>/`：
+
+- `dataset.json`：固定 Dataset，包含 Trajectory、Sample annotation、RecordingQuery 与构建健康。
+- `run.json`：只保存本次 TrajectoryRun，Evaluation/Measurement 通过 trajectory id 引用 Dataset，
+  不重复存轨迹。
+- `report.html`：可从上述两个模型产物纯重渲染的视图。
+- `verdict.json`：跨 Harness 统一出口；Finding 不自动成为 check，无领域 Policy 时为 `skipped`。
+
+生成周报或版本报告时，`TrajectoryReportBuilder` 从 `history_dirs` 只读加载历史。
+历史不写入当前 `run.json`，避免每周复制全量旧轨迹导致 O(n²) 存储和来源混淆。
+纯重渲染只需 Reporter 和持久化产物，不需要 Source、Loader、Evaluator 或 Measurer 实例。
+
+生命周期分为三个可独立使用的阶段，一键门面只做编排：
+
+```text
+TrajectoryDatasetBuilder:   select -> fetch -> load -> label join -> TrajectoryDataset
+TrajectoryEvaluationRunner: fixed Dataset -> evaluate + measure -> TrajectoryRun + Metric
+TrajectoryReportBuilder:    current Run + external history -> Report IR -> report.html
+```
+
+领域只负责 Dataset Builder 的 label join、Runner 的 slice/插件选择、可选 Verdict Policy，
+以及 Reporter 的业务 `Section`。GitHub MR、comment label、Review 1/2 等概念因此留在
+CCR，不进入 trajectory_harness；HTML 模板和数据到视图的控制流则只有 Harness 一份。
+
 ## 5. 报告
 
 trajectory_harness 拥有轨迹领域报告语义，对外提供 `build_report`、`render_report_html` 和
-`write_report_html`。固定章节覆盖：
+`write_report_html`，并由 `TrajectoryReportBuilder` 提供持久化产物到 HTML 的纯构建入口。固定章节覆盖：
 
 1. EvaluationRun 与 Dataset。
 2. 执行结果与 Failure 分类。
 3. common/domain Evaluator 目录。
 4. Measurer 目录。
 5. 最新 Metric。
-6. 多个 Run 的 Metric 趋势。
+6. 最新 Run 的 Evaluation Finding 与 step evidence。
+7. 最新 Run 的 Measurement 明细与 step evidence。
+8. 多个 Run 的 Metric 趋势。
+9. Source/Loader 的 Dataset build health（通过一键 Harness 生成时）。
 
 实现上先投影为 `harness_common.report_kit.Report`，再使用公共 HTML renderer。report_kit 只
-理解 Section、Table、Chart 等中立文档块；业务可以追加 Section，但不自行维护 HTML 模板。
+理解 Section、Table、Chart 等中立文档块；业务子类可以从持久化模型追加 Section，但不自行维护
+HTML 模板。这个“模型产物先落盘、报告可独立重建”的做法与 perf_harness 的 run model/report
+分层一致；各 Harness 仍拥有自己的生命周期，不引入跨 Harness 的通用 Engine。
 
 ## 6. 外部语义
 

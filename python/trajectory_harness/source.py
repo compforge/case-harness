@@ -25,6 +25,20 @@ class RecordingQuery:
         if self.limit is not None and self.limit <= 0:
             raise ValueError("recording query limit must be positive")
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "started_at_or_after": (
+                self.started_at_or_after.isoformat()
+                if self.started_at_or_after
+                else None
+            ),
+            "started_before": (
+                self.started_before.isoformat() if self.started_before else None
+            ),
+            "attributes": dict(self.attributes),
+            "limit": self.limit,
+        }
+
 
 @dataclass(frozen=True)
 class RecordingRef:
@@ -42,6 +56,16 @@ class RecordingRef:
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "attributes": dict(self.attributes),
         }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> RecordingRef:
+        started_at = value.get("started_at")
+        return cls(
+            recording_id=str(value["recording_id"]),
+            uri=str(value.get("uri") or ""),
+            started_at=datetime.fromisoformat(str(started_at)) if started_at else None,
+            attributes=dict(value.get("attributes") or {}),
+        )
 
 
 @dataclass(frozen=True)

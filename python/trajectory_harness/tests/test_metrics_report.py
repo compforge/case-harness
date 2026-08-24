@@ -69,6 +69,9 @@ def test_aggregate_metrics_combines_execution_failure_and_evaluation():
         == 1
     )
     assert Metric.from_dict(metrics[0].to_dict()) == metrics[0]
+    assert EvaluationRun.from_dict(_run("roundtrip", 2, False).to_dict()) == _run(
+        "roundtrip", 2, False
+    )
 
 
 def test_html_report_contains_catalog_failures_and_categorical_trends():

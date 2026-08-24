@@ -98,5 +98,5 @@ cd ../perf-harness && bun install --frozen-lockfile && bun test && bun run typec
 - TypeScript trace-harness：[`typescript/trace-harness/AGENTS.md`](typescript/trace-harness/AGENTS.md)，使用指南 [`typescript/trace-harness/README.md`](typescript/trace-harness/README.md)
 - 顶层导览：[`README.md`](README.md)
 - 跨语言约定：[`spec/conventions.md`](spec/conventions.md)
-- 统一判定出口（run 目录 + verdict.json，四家共用，devloop 消费）：[`spec/verdict-schema.yaml`](spec/verdict-schema.yaml) + conventions.md「Run 产物与 verdict 出口」
+- 统一判定出口（run 目录 + verdict.json，五家共用，devloop 消费）：[`spec/verdict-schema.yaml`](spec/verdict-schema.yaml) + conventions.md「Run 产物与 verdict 出口」
 - 接入示例：[`examples/api-test/`](examples/api-test/) / [`examples/agent-test/`](examples/agent-test/)

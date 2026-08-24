@@ -147,12 +147,14 @@ class Trajectory:
     trajectory_id: str
     steps: tuple[Step, ...]
     execution: ExecutionResult | None = None
+    recording_id: str = ""
     source: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "trajectory_id": self.trajectory_id,
+            "recording_id": self.recording_id,
             "source": self.source,
             "execution": self.execution.to_dict() if self.execution else None,
             "metadata": dict(self.metadata),
@@ -163,6 +165,7 @@ class Trajectory:
     def from_dict(cls, value: dict[str, Any]) -> Trajectory:
         return cls(
             trajectory_id=value["trajectory_id"],
+            recording_id=str(value.get("recording_id") or ""),
             execution=(
                 ExecutionResult.from_dict(value["execution"])
                 if isinstance(value.get("execution"), dict)

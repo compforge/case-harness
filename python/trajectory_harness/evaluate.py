@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from trajectory_harness.model import Trajectory
 
@@ -22,6 +22,25 @@ class EvaluatorSpec:
     description: str
     kind: EvaluatorKind = "domain"
     owner: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "evaluator_id": self.evaluator_id,
+            "title": self.title,
+            "description": self.description,
+            "kind": self.kind,
+            "owner": self.owner,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> EvaluatorSpec:
+        return cls(
+            evaluator_id=str(value["evaluator_id"]),
+            title=str(value["title"]),
+            description=str(value.get("description") or ""),
+            kind=value.get("kind", "domain"),
+            owner=str(value.get("owner") or ""),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +61,16 @@ class Finding:
             "step_ids": list(self.step_ids),
             "hypotheses": list(self.hypotheses),
         }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Finding:
+        return cls(
+            code=str(value["code"]),
+            severity=value["severity"],
+            summary=str(value.get("summary") or ""),
+            step_ids=tuple(str(item) for item in value.get("step_ids", ())),
+            hypotheses=tuple(str(item) for item in value.get("hypotheses", ())),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +96,20 @@ class EvaluationResult:
             "findings": [finding.to_dict() for finding in self.findings],
         }
 
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> EvaluationResult:
+        return cls(
+            evaluator_id=str(value["evaluator_id"]),
+            status=value["status"],
+            verdict=value.get("verdict"),
+            score=(float(value["score"]) if value.get("score") is not None else None),
+            explanation=str(value.get("explanation") or ""),
+            step_ids=tuple(str(item) for item in value.get("step_ids", ())),
+            findings=tuple(
+                Finding.from_dict(item) for item in value.get("findings", ())
+            ),
+        )
+
 
 @runtime_checkable
 class Evaluator(Protocol):
@@ -91,6 +134,17 @@ class TrajectoryEvaluation:
             "trajectory_id": self.trajectory.trajectory_id,
             "results": [result.to_dict() for result in self.results],
         }
+
+    @classmethod
+    def from_dict(
+        cls, value: dict[str, Any], *, trajectory: Trajectory
+    ) -> TrajectoryEvaluation:
+        return cls(
+            trajectory=trajectory,
+            results=tuple(
+                EvaluationResult.from_dict(item) for item in value.get("results", ())
+            ),
+        )
 
 
 def evaluate(

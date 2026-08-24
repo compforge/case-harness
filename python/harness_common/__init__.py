@@ -1,6 +1,6 @@
 """common — harness-neutral shared code (report_kit / verdict / llm / run / overlay).
 
-The 4 harnesses (e2e / eval / perf / trace) depend on this package but never on each
+The harnesses (e2e / eval / perf / trace / trajectory) depend on this package but never on each
 other; only genuinely neutral code lives here (no harness domain concept leaks in).
 
 The canonical case model — `Case` / `CaseSet` / `FacetSchema` and the `Face` / `FACES`
