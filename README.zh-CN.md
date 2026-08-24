@@ -56,7 +56,7 @@ Dataset + Evaluators / Measurers / optional Policy
 
 ## 共享平台工具箱
 
-部分执行机制会服务多个 Harness。例如，恢复 E2E 和性能测试都需要可靠地发现 Kubernetes 工作负载、等待状态收敛并采集 Event 证据。Go `kube` 包统一提供 namespace-scoped 的 Kubernetes 控制与观测，但不拥有任何业务 Case、负载模型或 Verdict。
+部分执行机制会服务多个 Harness。例如，恢复 E2E 和性能测试都需要可靠地发现 Kubernetes 工作负载、等待状态收敛并采集 Event 证据。Go `toolbox/kube` 与 Python async `harness_toolbox.kube` 对等提供 namespace-scoped 的 Kubernetes 控制与观测，但不拥有任何业务 Case、负载模型或 Verdict。Python 使用者通过可选依赖 `case-harness[kube]` 安装。
 
 消费项目仍负责选择目标工作负载、决定何时允许注入故障，以及什么结果足以证明恢复或性能达标。其它故障注入后端可以继续加入工具箱，而不把实验意图从项目中搬走。具体边界和现有能力见 [Harness 工具箱](docs/toolbox.md)。
 
@@ -113,7 +113,7 @@ go test -tags=e2e -v ./...
 | `python/perf_harness` / `typescript/perf-harness` | 发压、SLO 与容量证据 |
 | `python/trace_harness` / `typescript/trace-harness` | Trace 归一、归因与 Finding |
 | `python/trajectory_harness` | Agent 轨迹归一与评估 |
-| `go/kube` | e2e / perf 共用的 Kubernetes 控制与观测 |
+| `go/toolbox/kube` / `python/harness_toolbox/kube` | e2e / perf 共用的 Kubernetes 控制与观测 |
 
 ## 仓库开发
 

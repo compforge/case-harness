@@ -56,7 +56,7 @@ A Case can be viewed from more than one angle. When one execution already produc
 
 ## Shared platform toolbox
 
-Some execution mechanics serve more than one harness. Recovery E2E and performance tests, for example, both need reliable Kubernetes workload discovery, state convergence, and Event evidence. The Go `kube` package provides namespace-scoped Kubernetes control and observation without owning any business Case, load profile, or Verdict.
+Some execution mechanics serve more than one harness. Recovery E2E and performance tests, for example, both need reliable Kubernetes workload discovery, state convergence, and Event evidence. The Go `toolbox/kube` package and Python async `harness_toolbox.kube` package provide equivalent namespace-scoped Kubernetes control and observation without owning any business Case, load profile, or Verdict. Python consumers install the optional `case-harness[kube]` dependency.
 
 The consuming project still decides which workload to target, when a disruption is allowed, and what proves recovery or acceptable performance. Additional fault-injection backends can join this toolbox without moving experiment intent out of the project. See the [Harness toolbox](docs/toolbox.md) for its boundary and current capabilities.
 
@@ -113,7 +113,7 @@ This split keeps test intent close to the product while allowing execution mecha
 | `python/perf_harness` / `typescript/perf-harness` | Load generation, SLOs, and capacity evidence |
 | `python/trace_harness` / `typescript/trace-harness` | Trace normalization, attribution, and findings |
 | `python/trajectory_harness` | Agent trajectory normalization and evaluation |
-| `go/kube` | Kubernetes control and observation shared by e2e and perf |
+| `go/toolbox/kube` / `python/harness_toolbox/kube` | Kubernetes control and observation shared by e2e and perf |
 
 ## Repository development
 
