@@ -9,15 +9,15 @@ from trajectory_harness.model import Trajectory
 
 
 @dataclass(frozen=True, slots=True)
-class TrajectorySample:
-    """One labeled unit that joins domain annotation to recorded trajectories.
+class TrajectoryAnnotation:
+    """Pre-existing supervision joined to one or more trajectories.
 
-    A sample may reference multiple trajectories (for example, multiple review stages).
+    An annotation may reference multiple trajectories (for example, review stages).
     An empty ``trajectory_ids`` is allowed so a dataset can retain a known label whose
     recording produced no usable trajectory.
     """
 
-    sample_id: str
+    annotation_id: str
     recording_id: str
     trajectory_ids: tuple[str, ...] = ()
     annotation: dict[str, Any] = field(default_factory=dict)
@@ -26,7 +26,7 @@ class TrajectorySample:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "sample_id": self.sample_id,
+            "annotation_id": self.annotation_id,
             "recording_id": self.recording_id,
             "trajectory_ids": list(self.trajectory_ids),
             "annotation": dict(self.annotation),
@@ -35,9 +35,9 @@ class TrajectorySample:
         }
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> TrajectorySample:
+    def from_dict(cls, value: dict[str, Any]) -> TrajectoryAnnotation:
         return cls(
-            sample_id=str(value["sample_id"]),
+            annotation_id=str(value["annotation_id"]),
             recording_id=str(value["recording_id"]),
             trajectory_ids=tuple(str(item) for item in value.get("trajectory_ids", ())),
             annotation=dict(value.get("annotation") or {}),
@@ -56,7 +56,7 @@ class TrajectoryDataset:
     dataset_id: str
     version: str
     trajectories: tuple[Trajectory, ...]
-    samples: tuple[TrajectorySample, ...] = ()
+    annotations: tuple[TrajectoryAnnotation, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -70,21 +70,24 @@ class TrajectoryDataset:
                 raise ValueError(f"duplicate trajectory_id {trajectory_id!r}")
             trajectories[trajectory_id] = trajectory.recording_id
 
-        sample_ids: set[str] = set()
-        for sample in self.samples:
-            if sample.sample_id in sample_ids:
-                raise ValueError(f"duplicate sample_id {sample.sample_id!r}")
-            sample_ids.add(sample.sample_id)
-            for trajectory_id in sample.trajectory_ids:
+        annotation_ids: set[str] = set()
+        for annotation in self.annotations:
+            if annotation.annotation_id in annotation_ids:
+                raise ValueError(
+                    f"duplicate annotation_id {annotation.annotation_id!r}"
+                )
+            annotation_ids.add(annotation.annotation_id)
+            for trajectory_id in annotation.trajectory_ids:
                 owner = trajectories.get(trajectory_id)
                 if owner is None:
                     raise ValueError(
-                        f"sample {sample.sample_id!r} references unknown trajectory "
+                        f"annotation {annotation.annotation_id!r} references unknown "
+                        "trajectory "
                         f"{trajectory_id!r}"
                     )
-                if owner != sample.recording_id:
+                if owner != annotation.recording_id:
                     raise ValueError(
-                        f"sample {sample.sample_id!r} references trajectory "
+                        f"annotation {annotation.annotation_id!r} references trajectory "
                         f"{trajectory_id!r} from recording {owner!r}"
                     )
 
@@ -97,7 +100,7 @@ class TrajectoryDataset:
             "dataset_id": self.dataset_id,
             "version": self.version,
             "trajectories": [item.to_dict() for item in self.trajectories],
-            "samples": [item.to_dict() for item in self.samples],
+            "annotations": [item.to_dict() for item in self.annotations],
             "metadata": dict(self.metadata),
         }
 
@@ -109,8 +112,9 @@ class TrajectoryDataset:
             trajectories=tuple(
                 Trajectory.from_dict(item) for item in value.get("trajectories", ())
             ),
-            samples=tuple(
-                TrajectorySample.from_dict(item) for item in value.get("samples", ())
+            annotations=tuple(
+                TrajectoryAnnotation.from_dict(item)
+                for item in value.get("annotations", ())
             ),
             metadata=dict(value.get("metadata") or {}),
         )

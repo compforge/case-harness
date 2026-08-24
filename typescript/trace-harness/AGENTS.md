@@ -20,6 +20,7 @@ Python runtime 的环境中完成 trace 建模与渲染。规范、IR schema 与
    spec、Feature、Detector、Facet 和 `agentRunExtractor`，不依赖模块导入副作用。
    Extractor 从完整 Node Tree 产出 AgentRun IR（Operation/AgentRun 均可递归嵌套）；不接管递归和输出序列化。
 4. Python 与 TypeScript 的公开 IR 字段保持同名，便于 fixture 与产物交叉验证。
+5. Kernel 对齐：assemble 后的 Node 是 Observation，`trace_id + node_id` 是 node-grain Unit key；nodes / corpus 是可复评 Dataset，本次选择的 detector / gate 直接定义评估侧重点并由 EvaluationRun 记录，Finding 是 Evaluation。不同 Unit grain 使用不同 Worksheet；详见 `../../docs/kernel.md#dataset-与反复评估`。
 
 ## References
 

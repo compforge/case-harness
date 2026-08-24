@@ -11,10 +11,18 @@ CaseSet + environment + variant
               ↓
 CaseRun: prepare → execute → judge → cleanup
               ↓
-Outcome + phase evidence → Verdict
+Outcome Observation → Unit（Case + Outcome）→ Dataset
+              ↓
+assertion / judge / metric → EvaluationRun / Worksheet
+              ↓
+Verdict + Report
 ```
 
 判定即数据适用于确定性 API 契约：`judge.e2e.assert` 直接描述 `{path, op, value}`，engine 可跨 case 复用。同一 case 需要前置资源、多步操作、异步收敛或昂贵收尾时，过程代码进入 CaseRun，而不是回到每-case 继承基类。
+
+E2E 通常在 CaseRun 内立即应用 assertion 并写 Verdict，因此 Dataset build 与 EvaluationRun 可以落在
+同一 Run 目录；语义上仍要保留原始 Outcome、Case/variant identity 和判断结果的边界。已有 Outcome Unit
+应能使用另一版 assertion engine 或 soft metric 离线复判，而不重新调用被测系统。
 
 ## 编写与执行流程
 

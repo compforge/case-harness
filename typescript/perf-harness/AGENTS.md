@@ -29,6 +29,7 @@ Prometheus、Kubernetes 等资源观测由消费方通过 Prombed 或自己的�
 4. `trace_id` 等跨平面对齐键放在 `Outcome.meta`，落盘时不得丢失。
 5. 通用包不写业务 SSE 语义；业务 Plugin/consumer 实现 Workload。
 6. Case/CaseSet 归 spec-case；Perf Experiment 只通过 `caseMix` 选择 id 和设置 weight。
+7. Kernel 对齐：Outcome 是 request Observation；request、window、run 是不同 Unit grain，应分别形成 Dataset / Worksheet。raw/model Run facts 可由不同 Workload judge、SLO 和 analysis 组件离线复评，实际组件配置由 EvaluationRun 记录，不得因换判定口径重新发压；详见 `../../docs/kernel.md#dataset-与反复评估`。
 
 ## References
 

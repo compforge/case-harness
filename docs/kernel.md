@@ -20,11 +20,20 @@ case-harness 的价值不是再提供一个测试 runner，而是让稳定的测
 | 概念 | 语义 |
 |---|---|
 | **Case** | 一个可重用的结构化测试输入，具有稳定 `case_id`；与 sources、facet vocabulary 一起归属 canonical CaseSet，可被 e2e、eval、perf 等不同视角消费。 |
+| **Observation** | 执行 Case 后实际观察到的领域事实，例如 response、outcome、perf sample、trace 或 trajectory。它可以直接产生，也可以从 recording 等中间产物归一化而来；必须保留来源 identity 与 provenance，不包含质量判断。 |
+| **Unit** | Harness 声明的评估单元，也是 Worksheet 一行所代表的基本粒度；其数据来源是对齐后的 Case 与一个或多个 Observation。Unit 拥有自己的稳定 key，唯一确定一行；Observation 尚未产生或失败时，该行可以保留 pending / failed 状态。 |
+| **Annotation** | 运行当前评估前已经存在的人工、外部系统或模型监督信息，例如 label、reference 和复核结论；按 Unit 对齐并保留 producer 与 provenance。 |
+| **Dataset** | 一组可复用、版本化的 Unit facts，固定 Case、Observation、Annotation 及其来源关系，不包含某次 EvaluationRun 的 Evaluation 或 Measurement。相同 Dataset 可以按不同侧重点反复评估。 |
+| **EvaluationRun** | 对一个确定 Dataset version 执行一组 Evaluator、Measurer 与可选 Policy 的运行实例；它记录实际组件的 spec、模型、规则、版本和配置，并拥有 run identity、执行健康与对应 Worksheet。 |
+| **Evaluation** | Judge / Evaluator 对 Unit 作出的质量判断，包括状态、verdict、score、explanation 和 Finding；使用确定性规则还是 LLM 是实现方式，不改变其语义。 |
+| **Measurement** | 从 Unit 直接提取的 token、耗时、调用量和资源用量等中性事实，不携带质量 verdict。 |
+| **Worksheet** | 一个 EvaluationRun 的行式工作模型：以 Dataset Unit 为行，保存 seed 事实以及本次追加的 Evaluation、Measurement 和 cell state。它是生成报告和聚合指标的事实输入，不等于某一种物理文件格式。 |
 | **Playbook** | 用自然语言表达的产品功能测试剧本：用户目标、前置条件、有序动作、关键检查点和最终验收结果。它与 Web / Android / iOS / API 等执行目标解耦。 |
 | **Script** | Playbook 针对某个 Target 编译出的可执行代码。它是可 review、可重放、可再生成的派生产物，不是功能需求的事实源。 |
 | **Target** | 脚本真正操作的系统边界，例如 Web、Android、iOS、产品 API 或单服务 API。Target 决定 Script 使用的 SDK / Driver 和可观测证据。 |
 | **CaseRun** | 一条 Case 在某个环境和 variant 上的运行实例；拥有 prepare/execute/judge/cleanup 生命周期、阶段预算和证据。 |
 | **Run** | 一次真实执行的生命周期和产物边界，记录输入版本、Target、环境、输出、证据和对齐键。Experiment / Arm / Trial 是在 Run 之上组织对照的编排语义。 |
+| **Report** | Worksheet 的下游投影；JSON 面向机器和内部系统，HTML 面向人。Report 不重新执行 Case、读取远端 Source 或运行 Evaluator。 |
 | **Verdict** | 对一次 Run 的可机器消费判定。人、CI 和 agent 开发循环都通过它判断是否通过、为何失败，以及下一步应读哪些证据。 |
 
 ### 为什么叫 Playbook，不叫 Scenario
@@ -38,13 +47,99 @@ case-harness 的价值不是再提供一个测试 runner，而是让稳定的测
 ### Case 路径（当前主路径）
 
 ```text
-CaseSet + Experiment overlay（选择 / weight / 环境）
+CaseSet + execution overlay（选择 / variant / 环境）
     → Case + Variant
     → CaseRun(prepare → execute → judge → cleanup)
-    → Verdict
+    → Observation → Unit → Dataset
+    → Dataset + Evaluators / Measurers / optional Policy
+    → EvaluationRun → Worksheet
+    → Verdict + Report
 ```
 
-CaseSet 是资产边界；Experiment 只叠加选择、权重、负载和环境等运行参数，不覆盖 Case 的 input、facets、sources 或 judgment。CaseRun 承担环境相关的过程。prepare/cleanup 不进入 Case；cleanup 总执行并使用独立预算，失败必须进入 Verdict error。耗时收敛检查属于 execute/judge，可复用 deadline-aware poll/retry/consistently。不同 harness 可以对同一次执行做确定性断言、效果评估、容量观测或链路归因，不必为每个视角重复发起请求。
+CaseSet 是资产边界；Experiment 的执行 overlay 只叠加选择、负载和环境等运行参数，不覆盖 Case 的
+input、facets、sources 或 judgment。CaseRun 承担环境相关的过程；prepare/cleanup 不进入 Case，cleanup
+总执行并使用独立预算，失败必须进入 Verdict error。Unit identity 可以在 Observation 产生前确定，
+Dataset build 也可以保留 missing / failed Observation，不能为了得到“干净数据”而丢失执行失败。
+E2E 等 Harness 可以在 CaseRun 内联执行所选 judge；落盘时仍须区分 Dataset
+facts 与 EvaluationRun results，才能在不重新 execute 的情况下离线复判。
+
+### Dataset 与反复评估
+
+所有 Harness 都按同一组顶层概念组织数据：先基于 Case 得到真实 Observation，以两者为数据来源建立
+评估 Unit，再将一组 Unit 固定为可复用 Dataset。每次运行选择的确定性规则、LLM Judge、Measurer
+与可选 Policy 直接定义评估侧重点；每次 EvaluationRun 形成自己的 Worksheet 和 Report。
+
+```text
+Case + Variant / Arm / Environment
+    -> Action / Run
+       -> Observation                           直接产出
+       -> intermediate artifact -> Observation  经采集、转换或归一化后产出
+          response / outcome / samples / trace / trajectory
+          + source identity / provenance
+    -> Unit                                    evaluation unit
+       <- Case + Observation                   aligned data sources
+       + Annotation
+    -> Dataset                                 versioned Unit facts
+
+Dataset + Evaluators / Measurers / Policy A -> EvaluationRun A -> Worksheet A -> JSON / HTML
+        + Evaluators / Measurers / Policy B -> EvaluationRun B -> Worksheet B -> JSON / HTML
+        + Evaluators / Measurers / Policy C -> EvaluationRun C -> Worksheet C -> JSON / HTML
+
+Worksheet row
+    = Unit seed
+    + evaluations
+    + measurements
+    -> aggregate / pivot
+    -> metrics / verdict.json / report
+```
+
+Dataset 和 Worksheet 使用相同 Unit grain。Eval 通常以 `arm_id × case_id` 为 Unit，Trajectory 以
+`trajectory_id` 为 Unit；Perf、Trace 和 E2E 按各自稳定的 request/window、trace 或 case-run identity
+定义 Unit。一个 Harness 存在多种基本粒度时，应形成多个明确 grain 的 Dataset / Worksheet，不能把
+request、window、run 等不同层级的行混进一张无从解释的大表。
+
+一个 Case 可以产生一个或多个 Observation；直接产出的 response、outcome 与经过采集、转换后形成的
+trace、trajectory 在这一层没有本质差别。Observation 必须携带足够的来源 identity 和 provenance，
+使其能够稳定对齐原始 Case、Run 和中间产物，不能依赖文件名或报告渲染阶段猜测关系。Case 提供输入、
+预期、facets 和 ground truth 等稳定 seed，Observation 提供系统实际做了什么；Unit 在 Harness 声明的
+grain 上将两者形成独立、可寻址的评估单元。
+
+Dataset 固定 Unit facts 和已有 Annotation；EvaluationRun 只向 Worksheet 同行追加不同语义的列族：
+
+- **Annotation**：人工、外部系统或模型预先提供的 label、reference 与复核信息；保留 producer 和
+  provenance。数据由 LLM 生成并不会自动使它成为 Evaluation，语义取决于它是否在表达监督信息。
+- **Evaluation**：Judge / Evaluator 对 Unit 作出的质量判断、分数和 Finding；即使内部调用
+  LLM，它仍属于 Evaluation。
+- **Measurement**：从 Unit 直接提取的 token、耗时、调用量和资源用量等中性事实。
+
+Case、Observation 或 Annotation 改变会形成新的 Dataset version；只更换 Evaluator、Measurer、模型、
+规则、成本口径、Policy 或分析侧重点，应创建新的 EvaluationRun 并复用原 Dataset。EvaluationRun
+必须记录实际运行的组件 spec 与配置，以支持复现和比较。Metric
+是对已填充 Worksheet 按 run、slice、facet 或其它维度聚合后的结果，不是另一份与行数据脱节
+的事实源。报告层只做 join、pivot、aggregate 和 render，不重新执行 Case、不重新读取远端 Source，
+也不重新运行 Judge。内部 JSON 保存无损、可恢复的数据，`verdict.json` 是统一机器判定投影，HTML
+是面向人的 UI 投影；需要 CSV 等格式时也从同一 Worksheet 派生。
+
+所有 Harness 必须能映射到这套共同语义，但不要求共享同一个 `Dataset` / `Unit` / `Worksheet` 类或
+schema。各 Harness 拥有自己的 Unit grain、强类型 key、列类型、调度和聚合语义；物理实现也可以把
+Dataset build、Observation production 和 Evaluation 融合在一个带 cell state 的 Worksheet/checkpoint
+中，只要事实列与本次评估列可分离，并能在不重新执行 Case 的情况下复用 Observation 重新评估。
+`harness_common.report_kit` 只拥有中立报告 IR 与 HTML 渲染，不能反向拥有 Case、Trajectory、Trace
+或 Metric 等领域模型。
+
+各 Harness 对顶层概念的映射如下。表中的名字描述稳定语义，不要求实现公开同名 class：
+
+| Harness | Observation | Unit grain / key | Dataset | Run components | Worksheet |
+|---|---|---|---|---|---|
+| e2e | Runner `Outcome` 与阶段证据 | 一次 CaseRun / `case_id + variant` | 可复判的 CaseRun Unit 集 | assertion / deterministic judge / soft metric 配置 | Unit + assertion Evaluation + timing Measurement |
+| eval | 某 Arm 的 response、retrieval、citation 与调用观测 | `arm_id + corpus + case_id` | 已完成 solve cell 的 Unit 集 | scorer / metric / weight / judge model 配置 | 当前 table-centric Worksheet；score cell 是 Evaluation 或 Measurement |
+| perf | request Outcome、probe sample 及其 window-aligned 归约事实 | 一个明确的 request、window 或 run grain；不同 grain 分表 | 可离线重算的 raw/model Run facts | Workload judge、SLO 与 analysis 配置 | 指定 grain 的 Unit + verdict / measurement / caveat |
+| trace | raw span 归一、assemble 后得到的 `Node` | `trace_id + node_id` | nodes / corpus 中的 Node Unit 集 | detector 与 gate 配置 | Node facts + Finding Evaluation；trace/cohort Metric 为聚合 |
+| trajectory | Recording 经 Loader 得到的 `Trajectory` | `trajectory_id` | `TrajectoryDataset`，含 Unit 与 Annotation | Evaluator / Measurer / slice / Policy 配置 | Trajectory Unit + Evaluation + Measurement |
+
+E2E 等路径可以在执行后立即评估并只落一个 Run 目录；Eval 等引擎也可以用一张带 cell state 的
+Worksheet 同时推进 Observation production 与 Evaluation。它们仍须能够区分 Dataset facts 和
+EvaluationRun results，使已有 Observation 可以离线重判、换模型评分或按另一侧重点生成新报告。
 
 ### Playbook 路径（长期功能测试）
 
@@ -53,9 +148,10 @@ Playbook + Target
     → AI Compiler
     → Script
     → Target SDK / Driver
-    → Outcome + screenshots / video / logs / traces
-    → Judge
-    → Verdict
+    → Observation（Outcome + screenshots / video / logs / traces）
+    → Unit → Dataset
+    → EvaluationRun / Worksheet（Judge / Evaluation / Measurement）
+    → Verdict + Report
 ```
 
 AI 只参与编写期 / build-time 编译。生成的 Script 应进入被测产品仓库，经过 review 并随代码提交；运行时执行已确定的 Script，不临时调用 LLM 决定测试步骤。Script 应保留 Playbook 版本 / hash、Target、编译器与 SDK 版本等 provenance，以便发现漂移和重现失败。

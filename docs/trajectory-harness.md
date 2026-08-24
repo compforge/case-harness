@@ -8,22 +8,37 @@ trajectory_harness 回答的是：**agent 为得到结果而采取的决策与�
 | 视角 | 主要问题 | 分析本体 |
 |------|----------|----------|
 | eval_harness | 最终回答好不好 | response / sample |
-| trajectory_harness | 行动过程是否合理、失败和指标如何变化 | ordered Step / EvaluationRun |
+| trajectory_harness | 行动过程是否合理、失败和指标如何变化 | trajectory-keyed Worksheet |
 | trace_harness | 物理链路哪层先反常 | span 投影出的 Node |
 
-稳定处理链路为：
+稳定处理链路是不断把不同来源的信息对齐到同一条 Trajectory，而不是在互不相干的模型之间搬运数据：
 
 ```text
-Source
-  -> RecordingRef / Recording
+RecordingSource
+  -> Recording                         原始 record / trace，中间产物
   -> TrajectoryLoader
-  -> TrajectoryDataset (Trajectory + Sample annotation)
-  -> Evaluator -> EvaluationResult (verdict + score + findings)
-  -> Measurer  -> MeasurementResult (measurements)
-  -> TrajectoryRun (one or more sliced EvaluationRun)
-  -> Metric
-  -> Report / HTML
+  -> Trajectory Observation            带 recording / case / run 来源身份的过程事实
+       + TrajectoryAnnotation          人工、外部系统或模型提供的监督信息
+  -> Trajectory Unit                   以 Case + Trajectory 为数据来源
+  -> TrajectoryDataset                 可复用、版本化的 Unit facts
+  -> Evaluator / Measurer / slice / Policy
+  -> TrajectoryEvaluationRun / Worksheet
+       + EvaluationResult              向同行追加质量判断
+       + MeasurementResult             向同行追加成本与运行事实
+       + slices / aggregate Metrics    对 Worksheet 分组和聚合
+  -> internal JSON / verdict.json / report.html
 ```
+
+`Trajectory` 是 trajectory_harness 的 Observation，也是贯穿全链路的主记录；`trajectory_id` 是
+Unit key 和 Worksheet 行键。它必须保留从 Recording、
+Case 和 Run 回溯所需的来源 identity；Dataset Builder 负责把 Case seed、人工 label、reference 和
+LLM 生成的监督信息对齐到 Unit，形成可反复评估的 TrajectoryDataset。每组实际选择的 Evaluator、
+Measurer 与可选 Policy 分别产生自己的 EvaluationRun / Worksheet；报告只对 Worksheet 做筛选、分组、聚合和展示，不重新
+读取 Source，也不重新解释原始 trace。
+
+这里的“大表”是逻辑模型，不要求 JSON 把整条 Trajectory 在每个结果中重复一遍。Dataset 保存
+Trajectory 与 Annotation seed，Run 保存本次 Evaluation 与 Measurement，再通过 `trajectory_id`
+无损恢复 Worksheet；同一 Dataset 可以对应多张不同侧重点或不同 evaluator 版本的 Worksheet。
 
 这里评估的对象是一次面向目标的 agent/workflow 执行。一个 Trajectory 可以只包含一个 agent
 loop，也可以包含由多个 agent loop 和确定性操作共同组成的 pipeline。每个 agent loop 的行为通常由
@@ -49,9 +64,10 @@ Finding；除非存在明确契约，不能直接把它定性成 Failure。
 和数量上限；仓库、租户等领域过滤可由具体 Source 扩展。
 
 Source 不理解 ATIF、OTLP 等格式，不构造 `Trajectory`，也不拥有人工标签。格式解析属于
-`TrajectoryLoader`；forge comment 等监督信号属于 Dataset annotation，由业务 Dataset builder
-将 recording、trajectory identity 与 label 组合。Loader 同时提供文件 `load` 与内存文本 `loads`，
-因此远端 API、CLI 导出或本地 session Source 不需要先创建临时文件。
+`TrajectoryLoader`；forge comment 等监督信号属于 `TrajectoryAnnotation`，由业务 Dataset builder
+通过 `trajectory_id` 与主记录连接。一个 Annotation 可以关联一条或多条 Trajectory，也可以暂时没有
+匹配结果，从而保留“监督信息已存在，但原始记录拉取或解析失败”的事实。Loader 同时提供文件 `load`
+与内存文本 `loads`，因此远端 API、CLI 导出或本地 session Source 不需要先创建临时文件。
 
 ### 1.2 Tool set 的两个评估层级
 
@@ -208,8 +224,8 @@ Evaluator 自身执行异常。报告分别展示 Failure 与 Evaluator 结果�
 调用次数、时长等能直接计数或求和的观测必须进入 Measurement；如果一个 Finding 只是在换名字包装
 原始事实，就不应作为 Finding。
 
-Failure 在评估前已经由 Loader 确定，Evaluator 不修改它。EvaluationRun 把 Failure、Trajectory
-身份和 Dataset 重新连接，既可聚合“哪些 slice 的 `llm.request.timeout` 比例更高”，也可在报告中
+Failure 在评估前已经由 Loader 确定，Evaluator 不修改它。TrajectoryEvaluationRun 通过 Worksheet
+行键连接 Failure、Trajectory 和 Dataset，既可聚合“哪些 slice 的 `llm.request.timeout` 比例更高”，也可在报告中
 回看受影响的具体 trajectory/case。诸如“长上下文更容易 timeout，可能暴露 inference 能力不足”属于
 基于 Failure 与 case 特征的关联和归因假设，不属于 Failure 本身。
 
@@ -241,22 +257,57 @@ rate、completion/timeout 与单位有效 finding 成本。有限时间或 token
 计费和长上下文阶梯价，应由带 pricing provenance 的消费侧 Measurement 逐调用计算后再聚合，未知
 价格保持 unknown，不能静默当作零成本。
 
-## 4. Dataset、EvaluationRun 与 Metric
+## 4. Trajectory Dataset 与 Worksheet
 
-`TrajectoryDataset` 是评价之前固定的、带版本的输入。每条 `Trajectory` 通过一等
-`recording_id` 保留它从哪份 Recording 投影而来，`source` 保留 URI/path；同一 Recording
-解析出的多条轨迹共享 recording id，无需额外的分组容器。`TrajectorySample` 用
-`recording_id / trajectory_ids` 把 MR comment label 等领域 annotation 与运行证据连接。
-一个 Sample 可对应多条轨迹；也可暂时没有 trajectory id，以便保留“有 label 但
-未匹配到轨迹”这类 Dataset 事实。
+`TrajectoryDataset` 是可复用、版本化的 Unit facts 集合；其中 Trajectory 是 Observation，Case 与
+Trajectory 是 Unit 的数据来源，`trajectory_id` 是稳定 Unit key。Dataset 先固定 Unit 和已有监督
+信息；每个 EvaluationRun 再以相同 grain 建立 Worksheet，并填充本次结果列：
 
-`EvaluationRun` 把同批轨迹的 Evaluation 和 Measurement 分栏绑定到 `DatasetRef`、run id、时间、
-Evaluator 目录与 Measurer 目录。两类结果使用独立 item/spec 字段，不能互相冒充。run id
-只是身份，趋势横轴使用 `created_at`；按周、按版本或按需运行都是调用方策略。Dataset
-的版本和 slice 是 Metric 可比较性的组成部分，例如 CCR 的 Unit 与 Lane 应使用不同 slice。
+```text
+Trajectory Unit
+├── case                        input / expected behavior / dimensions
+├── observation: trajectory     ordered steps / execution result / source identity
+└── annotations[]               human / external / LLM-provided supervision
 
-Measurement 是单条轨迹上的原始测量；Metric 是 EvaluationRun 上的聚合结果。Metric 可以
-来自四类事实：
+EvaluationRun Worksheet row
+├── unit                         dataset seed by trajectory_id
+├── evaluations[]               evaluator verdict / score / findings
+└── measurements[]              token / latency / calls / resource facts
+```
+
+每条 `Trajectory` 通过一等 `recording_id` 保留它从哪份 Recording 投影而来，`source` 保留
+URI/path；同一 Recording 解析出的多条轨迹共享 recording id。`TrajectoryAnnotation` 通过
+`trajectory_ids` 把 MR comment label、reference 等监督信息连接到一条或多条主记录。Annotation
+也可以暂时没有匹配到 trajectory，以保留“label 已存在，但 Recording 获取或解析失败”这一事实；
+它不能因此被静默丢弃。
+
+数据的生产者和数据的语义是两条独立轴。人工和外部系统通常产生 Annotation；LLM 既可以产生待评估
+的监督信息，也可以作为 Evaluator 的实现。前者仍是 Annotation，后者输出 EvaluationResult。
+Evaluator 的 verdict、score 和 Finding 不回填 Annotation；Measurer 的原始事实也不伪装成
+Evaluation。
+
+`TrajectoryDataset` 固定 `Unit + Annotation` seed。`TrajectoryEvaluationRun` 把本次实际选择的
+Evaluator / Measurer / slice / Policy 施加到确定的 Dataset version，记录组件 spec 与配置，为同一批
+Unit 填充 Evaluation 和 Measurement 列，并按用途组织 slice：
+
+```text
+TrajectoryEvaluationRun
+└── slices[]
+    ├── trajectory_ids[]
+    ├── evaluations[]
+    ├── measurements[]
+    └── metrics[]
+```
+
+Dataset 是可复用事实底座，Worksheet 是某个 EvaluationRun 的填表状态与结果。两者通过
+`trajectory_id` 无损连接，但 Evaluation 和 Measurement 不写回 Dataset。Case、Trajectory 或
+Annotation 变化会形成新的 Dataset version；只更换 evaluator、judge model、成本口径或分析侧重点，
+应复用 Dataset 并产生新的 EvaluationRun。run id 表示一次填表过程，趋势横轴使用 `created_at`；
+Dataset version、实际组件 spec 和 slice 共同构成结果可比较性，例如 CCR 的 Unit 与 Lane 应使用
+不同 slice。
+
+Measurement 是单条 trajectory row 上的原始测量；Metric 是对 Worksheet 按 run、slice 或 dimension
+聚合后的结果。Metric 可以来自四类事实：
 
 ```text
 Trajectory / ExecutionResult -> completion rate, duration p95
@@ -274,17 +325,19 @@ evaluation.pass.rate{evaluator_id=repeated_tool_call}
 measurement.value.sum{measurer_id=model_usage,measurement=input_tokens}
 ```
 
-多个 EvaluationRun 上同一地址的 Metric 按 `created_at` 构成趋势序列。报告接口也可直接
-接收已经持久化的 Metric，因此生成历史趋势不需要重新加载完整轨迹。
+多个 TrajectoryEvaluationRun 上同一地址的 Metric 按 `created_at` 构成趋势序列。报告接口也可直接
+接收已经持久化的 Metric，因此生成历史趋势不需要重新读取 Source 或重跑 Evaluator。
 
 ### 4.1 Dataset 与 Run 模型产物
 
-`TrajectoryHarness` 把产物写到 `runs/<scope>/<run-id>/`：
+`TrajectoryHarness` 把 Dataset 和 EvaluationRun 规范化保存到 `runs/<scope>/<run-id>/`。文件拆分
+是为了复用和避免重复大体积轨迹，不改变“一行一个 trajectory_id”的 Worksheet grain：
 
-- `dataset.json`：固定 Dataset，包含 Trajectory、Sample annotation、RecordingQuery 与构建健康。
-- `run.json`：只保存本次 TrajectoryRun，Evaluation/Measurement 通过 trajectory id 引用 Dataset，
+- `dataset.json`：Worksheet 的固定 seed，包含 Trajectory、TrajectoryAnnotation、RecordingQuery
+  与构建健康。
+- `run.json`：本次 TrajectoryEvaluationRun，Evaluation/Measurement 通过 trajectory id 引用 Dataset，
   不重复存轨迹。
-- `report.html`：可从上述两个模型产物纯重渲染的视图。
+- `report.html`：从 Worksheet 纯投影出的 UI-friendly 视图。
 - `verdict.json`：跨 Harness 统一出口；Finding 不自动成为 check，无领域 Policy 时为 `skipped`。
 
 生成周报或版本报告时，`TrajectoryReportBuilder` 从 `history_dirs` 只读加载历史。
@@ -294,12 +347,12 @@ measurement.value.sum{measurer_id=model_usage,measurement=input_tokens}
 生命周期分为三个可独立使用的阶段，一键门面只做编排：
 
 ```text
-TrajectoryDatasetBuilder:   select -> fetch -> load -> label join -> TrajectoryDataset
-TrajectoryEvaluationRunner: fixed Dataset -> evaluate + measure -> TrajectoryRun + Metric
-TrajectoryReportBuilder:    current Run + external history -> Report IR -> report.html
+TrajectoryDatasetBuilder:   select -> fetch -> load -> annotation join -> versioned Dataset
+TrajectoryEvaluationRunner: Dataset + Evaluators / Measurers / Policy -> Worksheet -> Run + Metric
+TrajectoryReportBuilder:    Worksheet + external history -> Report IR -> report.html
 ```
 
-领域只负责 Dataset Builder 的 label join、Runner 的 slice/插件选择、可选 Verdict Policy，
+领域只负责 Dataset Builder 的 annotation join、Runner 的 slice/插件选择、可选 Verdict Policy，
 以及 Reporter 的业务 `Section`。GitHub MR、comment label、Review 1/2 等概念因此留在
 CCR，不进入 trajectory_harness；HTML 模板和数据到视图的控制流则只有 Harness 一份。
 
@@ -308,13 +361,13 @@ CCR，不进入 trajectory_harness；HTML 模板和数据到视图的控制流�
 trajectory_harness 拥有轨迹领域报告语义，对外提供 `build_report`、`render_report_html` 和
 `write_report_html`，并由 `TrajectoryReportBuilder` 提供持久化产物到 HTML 的纯构建入口。固定章节覆盖：
 
-1. EvaluationRun 与 Dataset。
+1. TrajectoryEvaluationRun、Dataset 与 slice。
 2. 执行结果与 Failure 分类。
 3. common/domain Evaluator 目录。
 4. Measurer 目录。
 5. 最新 Metric。
-6. 最新 Run 的 Evaluation Finding 与 step evidence。
-7. 最新 Run 的 Measurement 明细与 step evidence。
+6. 最新 Worksheet 各行的 Annotation、Evaluation Finding 与 step evidence。
+7. 最新 Worksheet 各行的 Measurement 明细与 step evidence。
 8. 多个 Run 的 Metric 趋势。
 9. Source/Loader 的 Dataset build health（通过一键 Harness 生成时）。
 

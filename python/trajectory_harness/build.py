@@ -49,8 +49,8 @@ class DatasetBuildSummary:
     fetched_recordings: int = 0
     loaded_trajectories: int = 0
     included_trajectories: int = 0
-    included_samples: int = 0
-    unmatched_samples: int = 0
+    included_annotations: int = 0
+    unmatched_annotations: int = 0
     query: dict[str, Any] = field(default_factory=dict)
     issues: tuple[DatasetIssue, ...] = ()
 
@@ -60,8 +60,8 @@ class DatasetBuildSummary:
             "fetched_recordings": self.fetched_recordings,
             "loaded_trajectories": self.loaded_trajectories,
             "included_trajectories": self.included_trajectories,
-            "included_samples": self.included_samples,
-            "unmatched_samples": self.unmatched_samples,
+            "included_annotations": self.included_annotations,
+            "unmatched_annotations": self.unmatched_annotations,
             "query": dict(self.query),
             "issues": [item.to_dict() for item in self.issues],
         }
@@ -73,8 +73,8 @@ class DatasetBuildSummary:
             fetched_recordings=int(value.get("fetched_recordings", 0)),
             loaded_trajectories=int(value.get("loaded_trajectories", 0)),
             included_trajectories=int(value.get("included_trajectories", 0)),
-            included_samples=int(value.get("included_samples", 0)),
-            unmatched_samples=int(value.get("unmatched_samples", 0)),
+            included_annotations=int(value.get("included_annotations", 0)),
+            unmatched_annotations=int(value.get("unmatched_annotations", 0)),
             query=dict(value.get("query") or {}),
             issues=tuple(
                 DatasetIssue.from_dict(item) for item in value.get("issues", ())
@@ -106,7 +106,6 @@ class TrajectoryDatasetBuilder(ABC):
 
     def build(self, query: RecordingQuery | None = None) -> DatasetBuildResult:
         refs = self.source.select(query)
-        recordings: list[RecordingRef] = []
         trajectories: list[Trajectory] = []
         issues: list[DatasetIssue] = []
         fetched = 0
@@ -126,13 +125,14 @@ class TrajectoryDatasetBuilder(ABC):
             except Exception as error:  # loaders isolate source-specific formats
                 issues.append(_issue(ref, "load", error))
                 continue
-            recordings.append(recording.ref)
             trajectories.extend(
                 replace(item, recording_id=recording.ref.recording_id)
                 for item in loaded_trajectories
             )
 
-        dataset = self.assemble(tuple(recordings), tuple(trajectories), query)
+        # Assembly sees every selected recording so domain annotations survive even
+        # when fetching or loading the corresponding observation failed.
+        dataset = self.assemble(tuple(refs), tuple(trajectories), query)
         return DatasetBuildResult(
             dataset=dataset,
             summary=DatasetBuildSummary(
@@ -140,9 +140,9 @@ class TrajectoryDatasetBuilder(ABC):
                 fetched_recordings=fetched,
                 loaded_trajectories=loaded,
                 included_trajectories=len(dataset.trajectories),
-                included_samples=len(dataset.samples),
-                unmatched_samples=sum(
-                    not sample.trajectory_ids for sample in dataset.samples
+                included_annotations=len(dataset.annotations),
+                unmatched_annotations=sum(
+                    not annotation.trajectory_ids for annotation in dataset.annotations
                 ),
                 query=query.to_dict() if query else {},
                 issues=tuple(issues),

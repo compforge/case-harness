@@ -7,12 +7,12 @@ metrics, and render comparable trajectory reports.
 from datetime import datetime, timezone
 
 from trajectory_harness import (
-    DatasetRef,
-    EvaluationRun,
+    EvaluationSlice,
     ExecutionSuccessEvaluator,
     ModelUsageMeasurer,
     OTelJsonLoader,
     RepeatedToolCallEvaluator,
+    TrajectoryEvaluationRun,
     aggregate_metrics,
     evaluate,
     measure,
@@ -22,16 +22,20 @@ from trajectory_harness import (
 evaluators = (ExecutionSuccessEvaluator(), RepeatedToolCallEvaluator())
 measurers = (ModelUsageMeasurer(),)
 trajectories = OTelJsonLoader().load("trace.json")
-items = tuple(evaluate(trajectory, evaluators) for trajectory in trajectories)
-measurement_items = tuple(measure(trajectory, measurers) for trajectory in trajectories)
-run = EvaluationRun(
+slice_ = EvaluationSlice(
+    slice_id="unit",
+    trajectory_ids=tuple(item.trajectory_id for item in trajectories),
+    evaluations=tuple(evaluate(item, evaluators) for item in trajectories),
+    evaluator_specs=tuple(evaluator.spec for evaluator in evaluators),
+    measurements=tuple(measure(item, measurers) for item in trajectories),
+    measurer_specs=tuple(measurer.spec for measurer in measurers),
+)
+run = TrajectoryEvaluationRun(
     run_id="evaluation-001",
     created_at=datetime.now(timezone.utc),
-    dataset=DatasetRef("reviews", slice="unit", sample_count=len(items)),
-    items=items,
-    evaluator_specs=tuple(evaluator.spec for evaluator in evaluators),
-    measurement_items=measurement_items,
-    measurer_specs=tuple(measurer.spec for measurer in measurers),
+    dataset_id="reviews",
+    dataset_version="2026-W34",
+    slices=(slice_,),
 )
 
 print([metric.to_dict() for metric in aggregate_metrics(run)])
@@ -57,7 +61,7 @@ class ReviewDatasetBuilder(TrajectoryDatasetBuilder):
             dataset_id="reviews",
             version="2026-W34",
             trajectories=tuple(trajectories),
-            samples=join_review_labels(recordings, trajectories),
+            annotations=join_review_labels(recordings, trajectories),
         )
 
 
@@ -93,7 +97,7 @@ ReviewReport().rerender(result.run_dir)
 ```
 
 `TrajectoryDatasetBuilder` owns selection/fetch/load isolation and lets the domain assemble
-labels into `TrajectorySample.annotation`. `TrajectoryEvaluationRunner` owns evaluator,
+labels into `TrajectoryAnnotation.annotation`. `TrajectoryEvaluationRunner` owns evaluator,
 measurer, and metric execution over that fixed dataset. `TrajectoryReportBuilder` owns the
 canonical report and accepts domain `Section` values. Source-specific queries, labels, and
 business concepts remain in those domain components; `TrajectoryHarness` only composes them.
@@ -104,10 +108,10 @@ The processing boundary is:
 Source
   -> RecordingRef / Recording
   -> TrajectoryLoader
-  -> TrajectoryDataset (trajectories + labeled samples)
+  -> TrajectoryDataset (trajectories + annotations)
   -> Evaluator -> EvaluationResult (verdict + score + findings)
   -> Measurer  -> MeasurementResult (measurements)
-  -> TrajectoryRun / EvaluationRun
+  -> TrajectoryEvaluationRun (slices + Worksheet results)
   -> Metric
   -> Report / HTML
 ```
@@ -162,7 +166,7 @@ dimensions.
 
 `trajectory_harness` owns the trajectory-specific report sections and HTML entry point.
 Report functions can aggregate full runs or accept persisted `Metric` values for historical
-trends. Trend time comes from `EvaluationRun.created_at`; `run_id` is only an opaque identity,
+trends. Trend time comes from `TrajectoryEvaluationRun.created_at`; `run_id` is only an opaque identity,
 so callers may schedule runs weekly, per release, or on demand. The final low-level document
 rendering remains in `harness_common.report_kit`, so consumers can append business-specific
 `Section` values without writing HTML.

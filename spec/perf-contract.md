@@ -16,6 +16,12 @@ Outcome = 一次已发请求的原始事实
 Verdict = Workload 对 Outcome 的纯判定
 ```
 
+按 case-harness Kernel 语义，Outcome 和 Probe sample 是 Observation。Perf 必须为每张分析表声明一个
+Unit grain：request、window、run 是不同 Unit，不能混成同一行。raw/model Run facts 构成可离线复用
+Dataset；每次 EvaluationRun 直接记录所选 Workload judge、SLO 与 analysis 组件及其配置，并形成
+对应 Worksheet。更换 SLO、gate 或分析透镜不得重新发压。具体顶层定义见
+[`../docs/kernel.md`](../docs/kernel.md#dataset-与反复评估)。
+
 - `case_id` 标识稳定输入资产；同一 Case 进入不同 Arm 时保持不变。
 - `arm_id` 是 Experiment 内对照配置的稳定键。
 - `window_id` 是 Trial 内时间切片的局部键。
@@ -53,7 +59,7 @@ Case input 变成一次 HTTP/SSE 等请求并返回一次 Outcome，必须支持
 
 服务协议通过 Workload 扩展：
 
-1. `fire` 只记录 HTTP/SSE、耗时、业务 ID 和异常等原始 Outcome；
+1. `fire` 只记录 HTTP/SSE、耗时、业务 ID 和异常等原始 `Outcome`，即 request Observation；
 2. `judge(outcome)` 是单请求成功/失败的唯一权威，必须是纯函数；
 3. Trial 生命周期固定为 `setup → measurement → deactivate → cleanup`，cleanup 总会尝试执行。
 

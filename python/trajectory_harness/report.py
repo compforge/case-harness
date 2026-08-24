@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -18,10 +19,63 @@ from harness_common.report_kit import (
     render_html,
 )
 from trajectory_harness.build import DatasetBuildSummary
-from trajectory_harness.metrics import EvaluationRun, Metric, aggregate_metrics
+from trajectory_harness.metrics import (
+    EvaluationSlice,
+    Metric,
+    TrajectoryEvaluationRun,
+    aggregate_metrics,
+)
 from trajectory_harness.runio import TrajectoryRunArtifact, load_run_artifact
 
 REPORT_FILE = "report.html"
+
+
+@dataclass(frozen=True, slots=True)
+class _RunSlice:
+    """Presentation view that keeps a slice attached to its enclosing run."""
+
+    run: TrajectoryEvaluationRun
+    slice: EvaluationSlice
+
+    @property
+    def run_id(self) -> str:
+        return self.run.run_id
+
+    @property
+    def created_at(self):
+        return self.run.created_at
+
+    @property
+    def dataset_id(self) -> str:
+        return self.run.dataset_id
+
+    @property
+    def dataset_version(self) -> str:
+        return self.run.dataset_version
+
+    @property
+    def slice_id(self) -> str:
+        return self.slice.slice_id
+
+    @property
+    def label(self) -> str:
+        return self.run.slice_label(self.slice)
+
+    @property
+    def evaluations(self):
+        return self.slice.evaluations
+
+    @property
+    def measurements(self):
+        return self.slice.measurements
+
+    @property
+    def evaluator_specs(self):
+        return self.slice.evaluator_specs
+
+    @property
+    def measurer_specs(self):
+        return self.slice.measurer_specs
 
 
 class TrajectoryReportBuilder:
@@ -43,20 +97,12 @@ class TrajectoryReportBuilder:
         history: Sequence[TrajectoryRunArtifact] = (),
     ) -> Report:
         artifacts = (*history, current)
-        evaluations = tuple(
-            evaluation
-            for artifact in artifacts
-            for evaluation in artifact.run.evaluations
-        )
-        metrics = tuple(
-            metric for artifact in artifacts for metric in artifact.run.metrics
-        )
+        runs = tuple(artifact.run for artifact in artifacts)
         sections = [_collection_section(current.build.summary)]
         sections.extend(self.extra_sections(current, history))
         return build_report(
-            evaluations,
+            runs,
             title=self.report_title,
-            metrics=metrics,
             extra_sections=sections,
         )
 
@@ -96,8 +142,11 @@ def _collection_section(summary: DatasetBuildSummary) -> Section:
                 ("Fetched recordings", str(summary.fetched_recordings)),
                 ("Loaded trajectories", str(summary.loaded_trajectories)),
                 ("Included trajectories", str(summary.included_trajectories)),
-                ("Dataset samples", str(summary.included_samples)),
-                ("Samples without trajectory", str(summary.unmatched_samples)),
+                ("Dataset annotations", str(summary.included_annotations)),
+                (
+                    "Annotations without trajectory",
+                    str(summary.unmatched_annotations),
+                ),
                 ("Dataset issues", str(len(summary.issues))),
                 (
                     "Started at or after",
@@ -130,7 +179,7 @@ def _collection_section(summary: DatasetBuildSummary) -> Section:
 
 
 def build_report(
-    runs: Sequence[EvaluationRun],
+    runs: Sequence[TrajectoryEvaluationRun],
     *,
     title: str = "Trajectory evaluation",
     metrics: Sequence[Metric] | None = None,
@@ -139,17 +188,18 @@ def build_report(
     """Build the canonical trajectory report from one or more evaluation runs."""
 
     ordered = sorted(runs, key=lambda run: (run.created_at, run.run_id))
-    run_metrics = _run_metrics(ordered, metrics)
+    slices = tuple(_RunSlice(run, slice_) for run in ordered for slice_ in run.slices)
+    run_metrics = _run_metrics(slices, metrics)
     latest_by_dataset = {}
     for pair in run_metrics:
-        latest_by_dataset[pair[0].dataset.label] = pair
+        latest_by_dataset[pair[0].label] = pair
     latest_runs = tuple(pair[0] for pair in latest_by_dataset.values())
     latest = ordered[-1] if ordered else None
     sections = [
-        _runs_section(ordered),
+        _runs_section(slices),
         _execution_section(tuple(latest_by_dataset.values())),
-        _evaluators_section(ordered),
-        _measurers_section(ordered),
+        _evaluators_section(slices),
+        _measurers_section(slices),
         _metrics_section(tuple(latest_by_dataset.values())),
         _evaluation_evidence_section(latest_runs),
         _measurement_evidence_section(latest_runs),
@@ -161,14 +211,14 @@ def build_report(
         meta.extend(
             (
                 ("Latest run", latest.run_id),
-                ("Datasets", ", ".join(sorted({run.dataset.label for run in ordered}))),
+                ("Datasets", ", ".join(sorted({run.dataset_id for run in ordered}))),
             )
         )
     return Report(title=title, meta=meta, sections=sections)
 
 
 def render_report_html(
-    runs: Sequence[EvaluationRun],
+    runs: Sequence[TrajectoryEvaluationRun],
     *,
     title: str = "Trajectory evaluation",
     metrics: Sequence[Metric] | None = None,
@@ -188,7 +238,7 @@ def render_report_html(
 
 def write_report_html(
     path: str | Path,
-    runs: Sequence[EvaluationRun],
+    runs: Sequence[TrajectoryEvaluationRun],
     *,
     title: str = "Trajectory evaluation",
     metrics: Sequence[Metric] | None = None,
@@ -210,10 +260,17 @@ def write_report_html(
 
 
 def _run_metrics(
-    runs: Sequence[EvaluationRun], metrics: Sequence[Metric] | None
-) -> list[tuple[EvaluationRun, tuple[Metric, ...]]]:
+    runs: Sequence[_RunSlice], metrics: Sequence[Metric] | None
+) -> list[tuple[_RunSlice, tuple[Metric, ...]]]:
     if metrics is None:
-        return [(run, aggregate_metrics(run)) for run in runs]
+        return [
+            (
+                run,
+                run.slice.metrics
+                or aggregate_metrics(replace(run.run, slices=(run.slice,))),
+            )
+            for run in runs
+        ]
     grouped = defaultdict(list)
     for metric in metrics:
         grouped[
@@ -231,9 +288,9 @@ def _run_metrics(
                 grouped[
                     (
                         run.run_id,
-                        run.dataset.dataset_id,
-                        run.dataset.version,
-                        run.dataset.slice,
+                        run.dataset_id,
+                        run.dataset_version,
+                        run.slice_id,
                     )
                 ]
             ),
@@ -242,7 +299,7 @@ def _run_metrics(
     ]
 
 
-def _runs_section(runs: Sequence[EvaluationRun]) -> Section:
+def _runs_section(runs: Sequence[_RunSlice]) -> Section:
     return Section(
         heading="Evaluation runs and datasets",
         blocks=[
@@ -254,19 +311,19 @@ def _runs_section(runs: Sequence[EvaluationRun]) -> Section:
                     "Version",
                     "Evaluated items",
                     "Measured items",
-                    "Declared samples",
+                    "Annotations",
                 ],
                 rows=[
                     [
                         run.run_id,
                         run.created_at.isoformat(),
-                        run.dataset.label,
-                        run.dataset.version or "—",
-                        str(len(run.items)),
-                        str(len(run.measurement_items)),
+                        run.label,
+                        run.dataset_version or "—",
+                        str(len(run.evaluations)),
+                        str(len(run.measurements)),
                         (
-                            str(run.dataset.sample_count)
-                            if run.dataset.sample_count is not None
+                            str(run.slice.annotation_count)
+                            if run.slice.annotation_count is not None
                             else "—"
                         ),
                     ]
@@ -278,13 +335,13 @@ def _runs_section(runs: Sequence[EvaluationRun]) -> Section:
 
 
 def _execution_section(
-    latest: Sequence[tuple[EvaluationRun, tuple[Metric, ...]]],
+    latest: Sequence[tuple[_RunSlice, tuple[Metric, ...]]],
 ) -> Section:
     if not latest:
         return Section(heading="Execution and failures", blocks=[])
 
     blocks = []
-    for run, metrics in sorted(latest, key=lambda pair: pair[0].dataset.label):
+    for run, metrics in sorted(latest, key=lambda pair: pair[0].label):
         summary_names = {
             "trajectory",
             "execution.completion",
@@ -300,7 +357,7 @@ def _execution_section(
         ]
         blocks.extend(
             (
-                Heading(run.dataset.label),
+                Heading(run.label),
                 KV(
                     items=[
                         (_metric_label(metric), _metric_value(metric))
@@ -343,11 +400,11 @@ def _execution_section(
     return Section(heading="Execution and failures", blocks=blocks)
 
 
-def _failure_rows(run: EvaluationRun) -> list[list[str]]:
+def _failure_rows(run: _RunSlice) -> list[list[str]]:
     rows = []
     trajectories = {
         item.trajectory.trajectory_id: item.trajectory
-        for item in (*run.items, *run.measurement_items)
+        for item in (*run.evaluations, *run.measurements)
     }
     for trajectory in trajectories.values():
         for step in trajectory.steps:
@@ -375,7 +432,7 @@ def _failure_rows(run: EvaluationRun) -> list[list[str]]:
     return rows
 
 
-def _evaluators_section(runs: Sequence[EvaluationRun]) -> Section:
+def _evaluators_section(runs: Sequence[_RunSlice]) -> Section:
     specs = {}
     for run in runs:
         for spec in run.evaluator_specs:
@@ -401,7 +458,7 @@ def _evaluators_section(runs: Sequence[EvaluationRun]) -> Section:
     )
 
 
-def _measurers_section(runs: Sequence[EvaluationRun]) -> Section:
+def _measurers_section(runs: Sequence[_RunSlice]) -> Section:
     specs = {}
     for run in runs:
         for spec in run.measurer_specs:
@@ -428,7 +485,7 @@ def _measurers_section(runs: Sequence[EvaluationRun]) -> Section:
 
 
 def _metrics_section(
-    latest: Sequence[tuple[EvaluationRun, tuple[Metric, ...]]],
+    latest: Sequence[tuple[_RunSlice, tuple[Metric, ...]]],
 ) -> Section:
     return Section(
         heading="Latest metrics",
@@ -437,7 +494,7 @@ def _metrics_section(
                 columns=["Dataset", "Metric", "Value", "Unit", "Direction"],
                 rows=[
                     [
-                        run.dataset.label,
+                        run.label,
                         _metric_label(metric),
                         _format_number(metric.value),
                         metric.unit or "—",
@@ -453,16 +510,16 @@ def _metrics_section(
     )
 
 
-def _evaluation_evidence_section(runs: Sequence[EvaluationRun]) -> Section:
+def _evaluation_evidence_section(runs: Sequence[_RunSlice]) -> Section:
     rows = []
-    for run in sorted(runs, key=lambda item: item.dataset.label):
-        for item in run.items:
+    for run in sorted(runs, key=lambda item: item.label):
+        for item in run.evaluations:
             for result in item.results:
                 findings = result.findings or (None,)
                 for finding in findings:
                     rows.append(
                         [
-                            run.dataset.label,
+                            run.label,
                             item.trajectory.trajectory_id,
                             result.evaluator_id,
                             result.status,
@@ -507,16 +564,16 @@ def _evaluation_evidence_section(runs: Sequence[EvaluationRun]) -> Section:
     )
 
 
-def _measurement_evidence_section(runs: Sequence[EvaluationRun]) -> Section:
+def _measurement_evidence_section(runs: Sequence[_RunSlice]) -> Section:
     rows = []
-    for run in sorted(runs, key=lambda item: item.dataset.label):
-        for item in run.measurement_items:
+    for run in sorted(runs, key=lambda item: item.label):
+        for item in run.measurements:
             for result in item.results:
                 measurements = result.measurements.items() or (("—", "—"),)
                 for name, value in measurements:
                     rows.append(
                         [
-                            run.dataset.label,
+                            run.label,
                             item.trajectory.trajectory_id,
                             result.measurer_id,
                             result.status,
@@ -549,9 +606,9 @@ def _measurement_evidence_section(runs: Sequence[EvaluationRun]) -> Section:
 
 
 def _trends_section(
-    run_metrics: Sequence[tuple[EvaluationRun, tuple[Metric, ...]]],
+    run_metrics: Sequence[tuple[_RunSlice, tuple[Metric, ...]]],
 ) -> Section:
-    if len(run_metrics) < 2:
+    if len({(run.run_id, run.created_at) for run, _ in run_metrics}) < 2:
         return Section(heading="Metric trends", blocks=[])
 
     grouped: dict[tuple, list[Metric]] = defaultdict(list)
@@ -560,9 +617,9 @@ def _trends_section(
         created_at[
             (
                 run.run_id,
-                run.dataset.dataset_id,
-                run.dataset.version,
-                run.dataset.slice,
+                run.dataset_id,
+                run.dataset_version,
+                run.slice_id,
             )
         ] = run.created_at.isoformat()
         for metric in metrics:

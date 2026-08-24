@@ -12,6 +12,13 @@ requirements.
 Collection, environment discovery, credentials, ID resolution, and delivery of evidence bundles
 belong to the host. A Trace Harness starts from raw span documents or normalized spans.
 
+In the case-harness kernel vocabulary, an assembled `Node` is an Observation and
+`trace_id + node_id` identifies a node-grain Unit. A nodes/corpus collection is the reusable
+Dataset; each EvaluationRun records the selected detector and gate configuration; diagnosis fills
+a run-scoped Worksheet with Finding Evaluations. A trace- or cohort-grain analysis MUST use a distinct Unit
+grain rather than mixing row meanings. These semantic mappings do not require peer
+implementations to share a Worksheet class or storage layout.
+
 ## 2. Pipeline
 
 One configured harness executes these stages in order:
@@ -53,9 +60,9 @@ The canonical JSON projection is `trace-harness/analysis@1`, defined by
 [`analysis.schema.json`](../schema/trace/v1/analysis.schema.json).
 
 - `NormSpan` is one normalized physical span and retains raw data for provenance.
-- `Node` is the analysis unit: one logical operation backed by one or more physical spans.
+- `Node` is the node-grain Unit Observation: one logical operation backed by one or more physical spans.
 - `facts` contains named, JSON-compatible values derived from raw domain fields.
-- `Finding` is an observation attached to a node, trace, or cohort. A finding is not a verdict.
+- `Finding` is a diagnostic Evaluation attached to a node, trace, or cohort. A finding is not a verdict.
 - `brief` is the baked, language-neutral field projection used by renderers.
 
 Implementations MUST order nodes by `(start_ms, node_id)` and findings by

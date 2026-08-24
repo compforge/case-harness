@@ -93,14 +93,14 @@ def _health_errors(artifact: TrajectoryRunArtifact) -> list[str]:
         f"dataset build issue for {item.recording_id}: {item.error}"
         for item in artifact.build.summary.issues
     ]
-    for evaluation in artifact.run.evaluations:
-        for item in evaluation.items:
+    for slice_ in artifact.run.slices:
+        for item in slice_.evaluations:
             errors.extend(
                 f"evaluator {result.evaluator_id} failed: {result.explanation}"
                 for result in item.results
                 if result.status == "error"
             )
-        for item in evaluation.measurement_items:
+        for item in slice_.measurements:
             errors.extend(
                 f"measurer {result.measurer_id} failed: {result.explanation}"
                 for result in item.results

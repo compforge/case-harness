@@ -1,23 +1,24 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from trajectory_harness import (
-    DatasetRef,
-    EvaluationRun,
+    EvaluationSlice,
     ExecutionResult,
     ExecutionSuccessEvaluator,
     Failure,
     Metric,
     Step,
     Trajectory,
+    TrajectoryEvaluationRun,
     aggregate_metrics,
     evaluate,
     render_report_html,
 )
 
 
-def _run(run_id: str, day: int, success: bool) -> EvaluationRun:
+def _run(run_id: str, day: int, success: bool) -> TrajectoryEvaluationRun:
     failure = None
     if not success:
         failure = Failure(
@@ -47,12 +48,20 @@ def _run(run_id: str, day: int, success: bool) -> EvaluationRun:
         ),
     )
     evaluator = ExecutionSuccessEvaluator()
-    return EvaluationRun(
+    return TrajectoryEvaluationRun(
         run_id=run_id,
         created_at=datetime(2026, 8, day, tzinfo=timezone.utc),
-        dataset=DatasetRef("reviews", slice="unit", sample_count=1),
-        items=(evaluate(trajectory, [evaluator]),),
-        evaluator_specs=(evaluator.spec,),
+        dataset_id="reviews",
+        dataset_version="",
+        slices=(
+            EvaluationSlice(
+                slice_id="unit",
+                trajectory_ids=(trajectory.trajectory_id,),
+                evaluations=(evaluate(trajectory, [evaluator]),),
+                evaluator_specs=(evaluator.spec,),
+                annotation_count=1,
+            ),
+        ),
     )
 
 
@@ -69,9 +78,9 @@ def test_aggregate_metrics_combines_execution_failure_and_evaluation():
         == 1
     )
     assert Metric.from_dict(metrics[0].to_dict()) == metrics[0]
-    assert EvaluationRun.from_dict(_run("roundtrip", 2, False).to_dict()) == _run(
-        "roundtrip", 2, False
-    )
+    assert TrajectoryEvaluationRun.from_dict(
+        _run("roundtrip", 2, False).to_dict()
+    ) == _run("roundtrip", 2, False)
 
 
 def test_html_report_contains_catalog_failures_and_categorical_trends():
@@ -91,3 +100,21 @@ def test_html_report_contains_catalog_failures_and_categorical_trends():
     assert '"type": "time"' in html
     assert "2026-08-01T00:00:00+00:00" in html
     assert "2026-08-03T00:00:00+00:00" in html
+
+
+def test_html_counts_top_level_runs_instead_of_slices():
+    run = _run("multi-slice", 2, True)
+    run = replace(
+        run,
+        slices=(
+            run.slices[0],
+            replace(run.slices[0], slice_id="another-unit"),
+        ),
+    )
+
+    html = render_report_html([run])
+
+    assert "Runs:</b> 1" in html
+    assert "reviews/unit" in html
+    assert "reviews/another-unit" in html
+    assert '"type": "time"' not in html
