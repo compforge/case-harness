@@ -11,7 +11,7 @@ Go 实现位于 `go/kube`，提供 namespace-scoped 的控制与观测原语：
 - 从显式 kubeconfig 或 Pod 内身份创建 client，并显式配置 request timeout、QPS 和 burst；
 - 按 label selector 获取确定顺序的 Pod 快照；
 - 以 Pod name + UID 锁定物理实例，避免延迟动作误操作同名替代 Pod；
-- 删除指定 Pod，等待替代实例、Ready 或 Unschedulable 状态；
+- 按正常终止流程或零宽限强制删除指定 Pod，等待替代实例、Ready 或 Unschedulable 状态；
 - 按 Pod UID 采集 Kubernetes Event，作为报告或失败分析证据。
 
 Driver 只返回平台事实和执行结果。消费方仍负责提供 namespace、selector、动作时机和超时，并由所属
