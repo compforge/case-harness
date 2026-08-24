@@ -21,11 +21,12 @@ RecordingSource
        + TrajectoryAnnotation          人工、外部系统或模型提供的监督信息
   -> Trajectory Unit                   以 Case + Trajectory 为数据来源
   -> TrajectoryDataset                 可复用、版本化的 Unit facts
-  -> Evaluator / Measurer / slice / Policy
+  -> Evaluator / Measurer / Policy
   -> TrajectoryEvaluationRun / Worksheet
        + EvaluationResult              向同行追加质量判断
        + MeasurementResult             向同行追加成本与运行事实
-       + slices / aggregate Metrics    对 Worksheet 分组和聚合
+       + target / category dimensions  标识评估对象与观察面
+       + aggregate Metrics             对 Worksheet 分组和聚合
   -> internal JSON / verdict.json / report.html
 ```
 
@@ -49,7 +50,8 @@ loop，也可以包含由多个 agent loop 和确定性操作共同组成的 pip
 3. loop mechanism：上下文压缩、停止条件、轮次或时间预算等运行策略。
 
 Trajectory 是这些 loop 配置及其编排共同作用后的运行证据，不要求 Loader 反推出某个行为究竟由哪一段
-配置单独造成。多个 loop 通过 `Step.parent_step_id` 组成执行层级；`operation / name / attributes`
+配置单独造成。通用模型只有一种 Trajectory，不区分 root / child 类型；本次 Dataset 选择的执行边界
+就是一行的 Trajectory。多个 loop 通过 `Step.parent_step_id` 组成执行层级；`operation / name / attributes`
 标识 agent、workflow、LLM 和 tool 等操作。具体业务可以据此选择某个 Step 子树或整条 Trajectory
 进行评估，无需让通用 Harness 理解 Review 1、Review 2 等领域阶段。
 
@@ -164,7 +166,8 @@ TTFT、ITL/TPOT 和 end-to-end latency 是 Measurement，不是天然的 Failure
 ### 3.1 Evaluator
 
 确定性规则、reference match 和 LLM judge 都实现同一个 Evaluator 协议。`EvaluatorSpec`
-声明稳定 id、说明、owner 和 `common/domain` 类型。
+声明稳定 id、说明、owner、`common/domain` 类型和 category；Runner 根据每个 Trajectory Unit 的
+target 选择适用 Evaluator，并把 target/category 写入 Worksheet 结果。
 
 首批通用 Evaluator：
 
@@ -225,13 +228,13 @@ Evaluator 自身执行异常。报告分别展示 Failure 与 Evaluator 结果�
 原始事实，就不应作为 Finding。
 
 Failure 在评估前已经由 Loader 确定，Evaluator 不修改它。TrajectoryEvaluationRun 通过 Worksheet
-行键连接 Failure、Trajectory 和 Dataset，既可聚合“哪些 slice 的 `llm.request.timeout` 比例更高”，也可在报告中
+行键连接 Failure、Trajectory 和 Dataset，既可按 target 聚合 `llm.request.timeout` 比例，也可在报告中
 回看受影响的具体 trajectory/case。诸如“长上下文更容易 timeout，可能暴露 inference 能力不足”属于
 基于 Failure 与 case 特征的关联和归因假设，不属于 Failure 本身。
 
 ### 3.4 Measurer 与 MeasurementResult
 
-Measurer 只观察事实，不判断质量。`MeasurerSpec` 声明稳定 `measurer_id` 及其可输出的
+Measurer 只观察事实，不判断质量。`MeasurerSpec` 声明稳定 `measurer_id`、category 及其可输出的
 `MeasurementSpec`；`MeasurementResult` 使用 `measured / not_applicable / error` 表达测量执行状态，
 并携带 Measurement、解释及证据 step。它不包含 verdict、score 或 Finding。反过来，EvaluatorSpec
 和 EvaluationResult 也不声明或携带 Measurement。
@@ -287,26 +290,30 @@ Evaluator 的 verdict、score 和 Finding 不回填 Annotation；Measurer 的原
 Evaluation。
 
 `TrajectoryDataset` 固定 `Unit + Annotation` seed。`TrajectoryEvaluationRun` 把本次实际选择的
-Evaluator / Measurer / slice / Policy 施加到确定的 Dataset version，记录组件 spec 与配置，为同一批
-Unit 填充 Evaluation 和 Measurement 列，并按用途组织 slice：
+Evaluator / Measurer / Policy 施加到确定的 Dataset version，记录组件 spec 与配置，为同一批
+Unit 填充 Evaluation 和 Measurement 列：
 
 ```text
 TrajectoryEvaluationRun
-└── slices[]
-    ├── trajectory_ids[]
-    ├── evaluations[]
-    ├── measurements[]
-    └── metrics[]
+├── trajectory_ids[]
+├── trajectory_targets[]
+├── evaluations[]          target + category + evaluator results
+├── measurements[]         target + category + measurement results
+└── metrics[]              dimensions 上的聚合结果
 ```
+
+`target` 回答“当前行评估谁”，例如 CCR 的 Review 1 / Review 2；`category` 回答“从什么观察面看”，
+例如 quality / cost。EvaluatorSpec 与 MeasurerSpec 声明稳定 category，Runner 从 Trajectory Unit
+确定 target。两者只是 Worksheet 与 Metric 的正交维度，不拥有独立生命周期，也不形成额外结果容器。
+报告通过 `group_by(target)`、`group_by(category)` 或两者组合产生比较视图。
 
 Dataset 是可复用事实底座，Worksheet 是某个 EvaluationRun 的填表状态与结果。两者通过
 `trajectory_id` 无损连接，但 Evaluation 和 Measurement 不写回 Dataset。Case、Trajectory 或
 Annotation 变化会形成新的 Dataset version；只更换 evaluator、judge model、成本口径或分析侧重点，
 应复用 Dataset 并产生新的 EvaluationRun。run id 表示一次填表过程，趋势横轴使用 `created_at`；
-Dataset version、实际组件 spec 和 slice 共同构成结果可比较性，例如 CCR 的 Unit 与 Lane 应使用
-不同 slice。
+Dataset version、实际组件 spec、target 和 category 共同构成结果可比较性。
 
-Measurement 是单条 trajectory row 上的原始测量；Metric 是对 Worksheet 按 run、slice 或 dimension
+Measurement 是单条 trajectory row 上的原始测量；Metric 是对 Worksheet 按 run 或 dimension
 聚合后的结果。Metric 可以来自四类事实：
 
 ```text
@@ -321,8 +328,8 @@ Metric 使用 `name + aggregation + dimensions` 寻址，例如：
 ```text
 execution.duration_ms.p95
 failure.rate{impact=execution,kind=llm,phase=request,error_type=timeout}
-evaluation.pass.rate{evaluator_id=repeated_tool_call}
-measurement.value.sum{measurer_id=model_usage,measurement=input_tokens}
+evaluation.pass.rate{target=review1,category=quality,evaluator_id=repeated_tool_call}
+measurement.value.sum{target=review1,category=cost,measurer_id=model_usage,measurement=input_tokens}
 ```
 
 多个 TrajectoryEvaluationRun 上同一地址的 Metric 按 `created_at` 构成趋势序列。报告接口也可直接
@@ -352,7 +359,7 @@ TrajectoryEvaluationRunner: Dataset + Evaluators / Measurers / Policy -> Workshe
 TrajectoryReportBuilder:    Worksheet + external history -> Report IR -> report.html
 ```
 
-领域只负责 Dataset Builder 的 annotation join、Runner 的 slice/插件选择、可选 Verdict Policy，
+领域只负责 Dataset Builder 的 annotation join、Runner 的 target/插件选择、可选 Verdict Policy，
 以及 Reporter 的业务 `Section`。GitHub MR、comment label、Review 1/2 等概念因此留在
 CCR，不进入 trajectory_harness；HTML 模板和数据到视图的控制流则只有 Harness 一份。
 
@@ -361,7 +368,7 @@ CCR，不进入 trajectory_harness；HTML 模板和数据到视图的控制流�
 trajectory_harness 拥有轨迹领域报告语义，对外提供 `build_report`、`render_report_html` 和
 `write_report_html`，并由 `TrajectoryReportBuilder` 提供持久化产物到 HTML 的纯构建入口。固定章节覆盖：
 
-1. TrajectoryEvaluationRun、Dataset 与 slice。
+1. TrajectoryEvaluationRun、Dataset 及 target/category 维度。
 2. 执行结果与 Failure 分类。
 3. common/domain Evaluator 目录。
 4. Measurer 目录。

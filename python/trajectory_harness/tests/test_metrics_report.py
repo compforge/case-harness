@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime, timezone
 
 from trajectory_harness import (
-    EvaluationSlice,
     ExecutionResult,
     ExecutionSuccessEvaluator,
     Failure,
@@ -53,15 +51,18 @@ def _run(run_id: str, day: int, success: bool) -> TrajectoryEvaluationRun:
         created_at=datetime(2026, 8, day, tzinfo=timezone.utc),
         dataset_id="reviews",
         dataset_version="",
-        slices=(
-            EvaluationSlice(
-                slice_id="unit",
-                trajectory_ids=(trajectory.trajectory_id,),
-                evaluations=(evaluate(trajectory, [evaluator]),),
-                evaluator_specs=(evaluator.spec,),
-                annotation_count=1,
+        trajectory_ids=(trajectory.trajectory_id,),
+        trajectory_targets=((trajectory.trajectory_id, "review1"),),
+        evaluations=(
+            evaluate(
+                trajectory,
+                [evaluator],
+                target="review1",
+                category="quality",
             ),
         ),
+        evaluator_specs=(evaluator.spec,),
+        annotation_count=1,
     )
 
 
@@ -69,11 +70,18 @@ def test_aggregate_metrics_combines_execution_failure_and_evaluation():
     metrics = aggregate_metrics(_run("run-2", 2, False))
     by_name = {metric.qualified_name: metric.value for metric in metrics}
 
-    assert by_name["execution.timeout.rate"] == 1
-    assert by_name["evaluation.pass.rate{evaluator_id=execution_success}"] == 0
+    assert by_name["execution.timeout.rate{target=review1}"] == 1
     assert (
         by_name[
-            "failure.count{impact=execution,kind=llm,phase=request,error_type=timeout}"
+            "evaluation.pass.rate{target=review1,category=quality,"
+            "evaluator_id=execution_success}"
+        ]
+        == 0
+    )
+    assert (
+        by_name[
+            "failure.count{target=review1,impact=execution,kind=llm,"
+            "phase=request,error_type=timeout}"
         ]
         == 1
     )
@@ -102,19 +110,9 @@ def test_html_report_contains_catalog_failures_and_categorical_trends():
     assert "2026-08-03T00:00:00+00:00" in html
 
 
-def test_html_counts_top_level_runs_instead_of_slices():
-    run = _run("multi-slice", 2, True)
-    run = replace(
-        run,
-        slices=(
-            run.slices[0],
-            replace(run.slices[0], slice_id="another-unit"),
-        ),
-    )
-
-    html = render_report_html([run])
+def test_html_counts_runs_and_exposes_target_dimension():
+    html = render_report_html([_run("targeted", 2, True)])
 
     assert "Runs:</b> 1" in html
-    assert "reviews/unit" in html
-    assert "reviews/another-unit" in html
+    assert "target=review1" in html
     assert '"type": "time"' not in html

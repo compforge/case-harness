@@ -41,7 +41,6 @@ from trajectory_harness.measure import measure as measure
 from trajectory_harness.measurers.model_usage import (
     ModelUsageMeasurer as ModelUsageMeasurer,
 )
-from trajectory_harness.metrics import EvaluationSlice as EvaluationSlice
 from trajectory_harness.metrics import Metric as Metric
 from trajectory_harness.metrics import (
     TrajectoryEvaluationRun as TrajectoryEvaluationRun,

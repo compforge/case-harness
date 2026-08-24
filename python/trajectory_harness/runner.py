@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
@@ -10,11 +9,7 @@ from typing import Any, Mapping, Sequence
 from trajectory_harness.dataset import TrajectoryDataset
 from trajectory_harness.evaluate import Evaluator, EvaluatorSpec, evaluate
 from trajectory_harness.measure import Measurer, MeasurerSpec, measure
-from trajectory_harness.metrics import (
-    EvaluationSlice,
-    TrajectoryEvaluationRun,
-    aggregate_metrics,
-)
+from trajectory_harness.metrics import TrajectoryEvaluationRun, aggregate_metrics
 from trajectory_harness.model import Trajectory
 
 
@@ -30,27 +25,22 @@ class TrajectoryEvaluationRunner:
         self.evaluators = tuple(evaluators)
         self.measurers = tuple(measurers)
 
-    def slice_for(self, trajectory: Trajectory, dataset: TrajectoryDataset) -> str:
-        """Return the comparison slice for a trajectory."""
+    def target_for(self, trajectory: Trajectory, dataset: TrajectoryDataset) -> str:
+        """Return the domain target represented by one Worksheet row."""
 
         return ""
 
     def evaluators_for(
-        self, slice_id: str, dataset: TrajectoryDataset
+        self, target: str, dataset: TrajectoryDataset
     ) -> Sequence[Evaluator]:
         return self.evaluators
 
     def measurers_for(
-        self, slice_id: str, dataset: TrajectoryDataset
+        self, target: str, dataset: TrajectoryDataset
     ) -> Sequence[Measurer]:
         return self.measurers
 
-    def metadata_for(
-        self,
-        slice_id: str,
-        trajectories: Sequence[Trajectory],
-        dataset: TrajectoryDataset,
-    ) -> Mapping[str, Any]:
+    def metadata_for(self, dataset: TrajectoryDataset) -> Mapping[str, Any]:
         return {}
 
     def run(
@@ -61,50 +51,58 @@ class TrajectoryEvaluationRunner:
         created_at: datetime | None = None,
     ) -> TrajectoryEvaluationRun:
         timestamp = created_at or datetime.now(timezone.utc)
-        grouped: dict[str, list[Trajectory]] = defaultdict(list)
-        for trajectory in dataset.trajectories:
-            grouped[self.slice_for(trajectory, dataset)].append(trajectory)
-
-        slices = []
-        for slice_id in sorted(grouped):
-            trajectories = tuple(grouped[slice_id])
-            evaluators = tuple(self.evaluators_for(slice_id, dataset))
-            measurers = tuple(self.measurers_for(slice_id, dataset))
-            slices.append(
-                EvaluationSlice(
-                    slice_id=slice_id,
-                    trajectory_ids=tuple(
-                        trajectory.trajectory_id for trajectory in trajectories
-                    ),
-                    evaluations=tuple(
-                        evaluate(trajectory, evaluators) for trajectory in trajectories
-                    ),
-                    evaluator_specs=_evaluator_specs(evaluators),
-                    measurements=tuple(
-                        measure(trajectory, measurers) for trajectory in trajectories
-                    ),
-                    measurer_specs=_measurer_specs(measurers),
-                    annotation_count=_annotation_count(dataset, trajectories),
-                    metadata=dict(self.metadata_for(slice_id, trajectories, dataset)),
-                )
+        targets = tuple(
+            (
+                trajectory.trajectory_id,
+                self.target_for(trajectory, dataset),
             )
+            for trajectory in dataset.trajectories
+        )
+        evaluations = []
+        measurements = []
+        selected_evaluators = []
+        selected_measurers = []
+        for trajectory, (_, target) in zip(dataset.trajectories, targets):
+            evaluators = tuple(self.evaluators_for(target, dataset))
+            measurers = tuple(self.measurers_for(target, dataset))
+            selected_evaluators.extend(evaluators)
+            selected_measurers.extend(measurers)
+            for category, items in _evaluators_by_category(evaluators):
+                evaluations.append(
+                    evaluate(
+                        trajectory,
+                        items,
+                        target=target,
+                        category=category,
+                    )
+                )
+            for category, items in _measurers_by_category(measurers):
+                measurements.append(
+                    measure(
+                        trajectory,
+                        items,
+                        target=target,
+                        category=category,
+                    )
+                )
 
         run = TrajectoryEvaluationRun(
             run_id=run_id,
             created_at=timestamp,
             dataset_id=dataset.dataset_id,
             dataset_version=dataset.version,
-            slices=tuple(slices),
+            trajectory_ids=tuple(item.trajectory_id for item in dataset.trajectories),
+            trajectory_targets=targets,
+            evaluations=tuple(evaluations),
+            evaluator_specs=_evaluator_specs(selected_evaluators),
+            measurements=tuple(measurements),
+            measurer_specs=_measurer_specs(selected_measurers),
+            annotation_count=_annotation_count(dataset, dataset.trajectories),
+            metadata=dict(self.metadata_for(dataset)),
         )
         return replace(
             run,
-            slices=tuple(
-                replace(
-                    slice_,
-                    metrics=aggregate_metrics(replace(run, slices=(slice_,))),
-                )
-                for slice_ in run.slices
-            ),
+            metrics=aggregate_metrics(run, trajectories=dataset.trajectories),
         )
 
 
@@ -126,3 +124,25 @@ def _evaluator_specs(evaluators: Sequence[Evaluator]) -> tuple[EvaluatorSpec, ..
 
 def _measurer_specs(measurers: Sequence[Measurer]) -> tuple[MeasurerSpec, ...]:
     return tuple({item.spec.measurer_id: item.spec for item in measurers}.values())
+
+
+def _evaluators_by_category(
+    evaluators: Sequence[Evaluator],
+) -> tuple[tuple[str, tuple[Evaluator, ...]], ...]:
+    categories: dict[str, list[Evaluator]] = {}
+    for evaluator in evaluators:
+        categories.setdefault(evaluator.spec.category, []).append(evaluator)
+    return tuple(
+        (category, tuple(items)) for category, items in sorted(categories.items())
+    )
+
+
+def _measurers_by_category(
+    measurers: Sequence[Measurer],
+) -> tuple[tuple[str, tuple[Measurer, ...]], ...]:
+    categories: dict[str, list[Measurer]] = {}
+    for measurer in measurers:
+        categories.setdefault(measurer.spec.category, []).append(measurer)
+    return tuple(
+        (category, tuple(items)) for category, items in sorted(categories.items())
+    )
