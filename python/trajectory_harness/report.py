@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -16,7 +17,116 @@ from harness_common.report_kit import (
     Table,
     render_html,
 )
+from trajectory_harness.build import DatasetBuildSummary
 from trajectory_harness.metrics import EvaluationRun, Metric, aggregate_metrics
+from trajectory_harness.runio import TrajectoryRunArtifact, load_run_artifact
+
+REPORT_FILE = "report.html"
+
+
+class TrajectoryReportBuilder:
+    """Pure run-artifact-to-report stage; domains may add presentation sections."""
+
+    report_title = "Trajectory evaluation"
+
+    def extra_sections(
+        self,
+        current: TrajectoryRunArtifact,
+        history: Sequence[TrajectoryRunArtifact],
+    ) -> Iterable[Section]:
+        return ()
+
+    def build(
+        self,
+        current: TrajectoryRunArtifact,
+        *,
+        history: Sequence[TrajectoryRunArtifact] = (),
+    ) -> Report:
+        artifacts = (*history, current)
+        evaluations = tuple(
+            evaluation
+            for artifact in artifacts
+            for evaluation in artifact.run.evaluations
+        )
+        metrics = tuple(
+            metric for artifact in artifacts for metric in artifact.run.metrics
+        )
+        sections = [_collection_section(current.build.summary)]
+        sections.extend(self.extra_sections(current, history))
+        return build_report(
+            evaluations,
+            title=self.report_title,
+            metrics=metrics,
+            extra_sections=sections,
+        )
+
+    def write(
+        self,
+        run_dir: str | Path,
+        current: TrajectoryRunArtifact,
+        *,
+        history: Sequence[TrajectoryRunArtifact] = (),
+    ) -> Path:
+        target = Path(run_dir) / REPORT_FILE
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            render_html(self.build(current, history=history)), encoding="utf-8"
+        )
+        return target
+
+    def rerender(
+        self,
+        run_dir: str | Path,
+        *,
+        history_dirs: Sequence[str | Path] = (),
+    ) -> Path:
+        """Re-render solely from persisted artifacts, without collection/evaluation."""
+
+        current = load_run_artifact(run_dir)
+        history = tuple(load_run_artifact(path) for path in history_dirs)
+        return self.write(run_dir, current, history=history)
+
+
+def _collection_section(summary: DatasetBuildSummary) -> Section:
+    query = summary.query
+    blocks = [
+        KV(
+            items=[
+                ("Selected recordings", str(summary.selected_recordings)),
+                ("Fetched recordings", str(summary.fetched_recordings)),
+                ("Loaded trajectories", str(summary.loaded_trajectories)),
+                ("Included trajectories", str(summary.included_trajectories)),
+                ("Dataset samples", str(summary.included_samples)),
+                ("Samples without trajectory", str(summary.unmatched_samples)),
+                ("Dataset issues", str(len(summary.issues))),
+                (
+                    "Started at or after",
+                    str(query.get("started_at_or_after") or "—"),
+                ),
+                ("Started before", str(query.get("started_before") or "—")),
+                ("Limit", str(query.get("limit") or "—")),
+                (
+                    "Query attributes",
+                    json.dumps(
+                        query.get("attributes") or {},
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    ),
+                ),
+            ]
+        )
+    ]
+    if summary.issues:
+        blocks.append(
+            Table(
+                columns=["Recording", "Phase", "URI", "Error"],
+                rows=[
+                    [item.recording_id, item.phase, item.uri, item.error]
+                    for item in summary.issues
+                ],
+            )
+        )
+    return Section(heading="Dataset build health", blocks=blocks)
 
 
 def build_report(
@@ -33,6 +143,7 @@ def build_report(
     latest_by_dataset = {}
     for pair in run_metrics:
         latest_by_dataset[pair[0].dataset.label] = pair
+    latest_runs = tuple(pair[0] for pair in latest_by_dataset.values())
     latest = ordered[-1] if ordered else None
     sections = [
         _runs_section(ordered),
@@ -40,6 +151,8 @@ def build_report(
         _evaluators_section(ordered),
         _measurers_section(ordered),
         _metrics_section(tuple(latest_by_dataset.values())),
+        _evaluation_evidence_section(latest_runs),
+        _measurement_evidence_section(latest_runs),
         _trends_section(run_metrics),
     ]
     sections.extend(extra_sections)
@@ -103,11 +216,27 @@ def _run_metrics(
         return [(run, aggregate_metrics(run)) for run in runs]
     grouped = defaultdict(list)
     for metric in metrics:
-        grouped[(metric.run_id, metric.dataset_id, metric.dataset_slice)].append(metric)
+        grouped[
+            (
+                metric.run_id,
+                metric.dataset_id,
+                metric.dataset_version,
+                metric.dataset_slice,
+            )
+        ].append(metric)
     return [
         (
             run,
-            tuple(grouped[(run.run_id, run.dataset.dataset_id, run.dataset.slice)]),
+            tuple(
+                grouped[
+                    (
+                        run.run_id,
+                        run.dataset.dataset_id,
+                        run.dataset.version,
+                        run.dataset.slice,
+                    )
+                ]
+            ),
         )
         for run in runs
     ]
@@ -324,6 +453,101 @@ def _metrics_section(
     )
 
 
+def _evaluation_evidence_section(runs: Sequence[EvaluationRun]) -> Section:
+    rows = []
+    for run in sorted(runs, key=lambda item: item.dataset.label):
+        for item in run.items:
+            for result in item.results:
+                findings = result.findings or (None,)
+                for finding in findings:
+                    rows.append(
+                        [
+                            run.dataset.label,
+                            item.trajectory.trajectory_id,
+                            result.evaluator_id,
+                            result.status,
+                            result.verdict or "—",
+                            (
+                                _format_number(result.score)
+                                if result.score is not None
+                                else "—"
+                            ),
+                            finding.code if finding else "—",
+                            finding.severity if finding else "—",
+                            finding.summary if finding else "—",
+                            ", ".join(finding.step_ids if finding else result.step_ids)
+                            or "—",
+                            "; ".join(finding.hypotheses) if finding else "—",
+                            result.explanation or "—",
+                        ]
+                    )
+    return Section(
+        heading="Evaluation evidence",
+        blocks=[
+            Table(
+                columns=[
+                    "Dataset",
+                    "Trajectory",
+                    "Evaluator",
+                    "Status",
+                    "Verdict",
+                    "Score",
+                    "Finding",
+                    "Severity",
+                    "Summary",
+                    "Steps",
+                    "Hypotheses",
+                    "Explanation",
+                ],
+                rows=rows,
+            )
+        ]
+        if rows
+        else [],
+    )
+
+
+def _measurement_evidence_section(runs: Sequence[EvaluationRun]) -> Section:
+    rows = []
+    for run in sorted(runs, key=lambda item: item.dataset.label):
+        for item in run.measurement_items:
+            for result in item.results:
+                measurements = result.measurements.items() or (("—", "—"),)
+                for name, value in measurements:
+                    rows.append(
+                        [
+                            run.dataset.label,
+                            item.trajectory.trajectory_id,
+                            result.measurer_id,
+                            result.status,
+                            str(name),
+                            _measurement_value(value),
+                            ", ".join(result.step_ids) or "—",
+                            result.explanation or "—",
+                        ]
+                    )
+    return Section(
+        heading="Measurement evidence",
+        blocks=[
+            Table(
+                columns=[
+                    "Dataset",
+                    "Trajectory",
+                    "Measurer",
+                    "Status",
+                    "Measurement",
+                    "Value",
+                    "Steps",
+                    "Explanation",
+                ],
+                rows=rows,
+            )
+        ]
+        if rows
+        else [],
+    )
+
+
 def _trends_section(
     run_metrics: Sequence[tuple[EvaluationRun, tuple[Metric, ...]]],
 ) -> Section:
@@ -333,9 +557,14 @@ def _trends_section(
     grouped: dict[tuple, list[Metric]] = defaultdict(list)
     created_at = {}
     for run, metrics in run_metrics:
-        created_at[(run.run_id, run.dataset.dataset_id, run.dataset.slice)] = (
-            run.created_at.isoformat()
-        )
+        created_at[
+            (
+                run.run_id,
+                run.dataset.dataset_id,
+                run.dataset.version,
+                run.dataset.slice,
+            )
+        ] = run.created_at.isoformat()
         for metric in metrics:
             identity = (
                 metric.name,
@@ -355,7 +584,12 @@ def _trends_section(
                 else metric.dataset_id
             )
             timestamp = created_at[
-                (metric.run_id, metric.dataset_id, metric.dataset_slice)
+                (
+                    metric.run_id,
+                    metric.dataset_id,
+                    metric.dataset_version,
+                    metric.dataset_slice,
+                )
             ]
             by_dataset[dataset].append((timestamp, metric.value))
         if max((len(points) for points in by_dataset.values()), default=0) < 2:
@@ -389,6 +623,14 @@ def _format_number(value: float) -> str:
     if value.is_integer():
         return str(int(value))
     return f"{value:.4f}".rstrip("0").rstrip(".")
+
+
+def _measurement_value(value: object) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, (int, float)):
+        return _format_number(float(value))
+    return str(value)
 
 
 def _dimension(metric: Metric, name: str) -> str:

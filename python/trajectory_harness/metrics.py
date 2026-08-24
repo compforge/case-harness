@@ -14,6 +14,7 @@ from trajectory_harness.measure import (
     MeasurerSpec,
     TrajectoryMeasurement,
 )
+from trajectory_harness.model import Trajectory
 
 MetricAggregation = Literal["count", "rate", "sum", "mean", "p50", "p95"]
 
@@ -66,6 +67,59 @@ class EvaluationRun:
     measurer_specs: tuple[MeasurerSpec, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "created_at": self.created_at.isoformat(),
+            "dataset": self.dataset.to_dict(),
+            "trajectories": [item.to_dict() for item in _trajectories(self)],
+            "items": [item.to_dict() for item in self.items],
+            "evaluator_specs": [item.to_dict() for item in self.evaluator_specs],
+            "measurement_items": [item.to_dict() for item in self.measurement_items],
+            "measurer_specs": [item.to_dict() for item in self.measurer_specs],
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> EvaluationRun:
+        trajectories = {
+            trajectory.trajectory_id: trajectory
+            for trajectory in (
+                Trajectory.from_dict(item) for item in value.get("trajectories", ())
+            )
+        }
+
+        def trajectory_for(item: dict[str, Any]) -> Trajectory:
+            trajectory_id = str(item["trajectory_id"])
+            try:
+                return trajectories[trajectory_id]
+            except KeyError as error:
+                raise ValueError(
+                    f"run item references unknown trajectory {trajectory_id!r}"
+                ) from error
+
+        return cls(
+            run_id=str(value["run_id"]),
+            created_at=datetime.fromisoformat(str(value["created_at"])),
+            dataset=DatasetRef.from_dict(value["dataset"]),
+            items=tuple(
+                TrajectoryEvaluation.from_dict(item, trajectory=trajectory_for(item))
+                for item in value.get("items", ())
+            ),
+            evaluator_specs=tuple(
+                EvaluatorSpec.from_dict(item)
+                for item in value.get("evaluator_specs", ())
+            ),
+            measurement_items=tuple(
+                TrajectoryMeasurement.from_dict(item, trajectory=trajectory_for(item))
+                for item in value.get("measurement_items", ())
+            ),
+            measurer_specs=tuple(
+                MeasurerSpec.from_dict(item) for item in value.get("measurer_specs", ())
+            ),
+            metadata=dict(value.get("metadata") or {}),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class Metric:
@@ -79,6 +133,7 @@ class Metric:
     aggregation: MetricAggregation
     unit: str = ""
     direction: MetricDirection = "neutral"
+    dataset_version: str = ""
     dimensions: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -93,6 +148,12 @@ class Metric:
         )
 
     @property
+    def identity_key(self) -> tuple:
+        """Identity within one persisted run; unlike a trend series, includes version."""
+
+        return (self.dataset_version, *self.series_key)
+
+    @property
     def qualified_name(self) -> str:
         suffix = f".{self.aggregation}" if self.aggregation else ""
         dimensions = ",".join(f"{key}={value}" for key, value in self.dimensions)
@@ -102,6 +163,7 @@ class Metric:
         return {
             "run_id": self.run_id,
             "dataset_id": self.dataset_id,
+            "dataset_version": self.dataset_version,
             "dataset_slice": self.dataset_slice,
             "name": self.name,
             "value": self.value,
@@ -117,6 +179,7 @@ class Metric:
         return cls(
             run_id=str(value["run_id"]),
             dataset_id=str(value["dataset_id"]),
+            dataset_version=str(value.get("dataset_version") or ""),
             dataset_slice=str(value.get("dataset_slice") or ""),
             name=str(value["name"]),
             value=float(value["value"]),
@@ -441,6 +504,7 @@ def _metric(
     return Metric(
         run_id=run.run_id,
         dataset_id=run.dataset.dataset_id,
+        dataset_version=run.dataset.version,
         dataset_slice=run.dataset.slice,
         name=name,
         value=round(float(value), 6),

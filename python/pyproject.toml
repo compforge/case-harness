@@ -1,7 +1,7 @@
 [project]
 name = "case-harness"
 version = "0.1.0"
-description = "Cross-language test harnesses (e2e/eval/perf/trace): cases in, verdicts out"
+description = "Cross-language quality harnesses: cases and trajectories in, verdicts out"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 dependencies = [

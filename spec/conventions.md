@@ -130,6 +130,8 @@ custom:                    # 服务自定义扩展区，框架透传
 - **e2e（API 测试）**: canonical CaseSet + CaseRun 四阶段 + sync/async runner + 结构化 assertion / OutcomeMetric。
 - **eval（效果测试）**: `EvalEngine` 驱动大表 + reconciler 填表，per-case async runner + builder + metric set。
 - **perf（压力测试）**: `Engine` 把资源档 × 负载档解析为 Arm，逐 Trial 采样并按 Window 聚合，出容量与资源画像。
+- **trajectory（轨迹评估）**: Dataset Builder 将录制轨迹与 annotation 固化为版本化
+  Dataset，Runner 产出 Evaluation/Measurement/Metric，Reporter 从当前与历史 Run 生成 HTML。
 
 三者**互不 import、不抽公共依赖**（耦合成本 > 省下的重复）：e2e/eval 各自复制一小撮 L2 原语
 （Outcome 形状 / runner / SSEParser / build_auth_headers），perf 自带 httpx 发压栈。唯一例外是
@@ -137,7 +139,7 @@ custom:                    # 服务自定义扩展区，框架透传
 
 ## Run 产物与 verdict 出口（跨 harness）
 
-四类 harness 的运行产物布局对齐到同一骨架，让消费方（devloop 等）"读 verdict 自纠偏"时
+五类 harness 的运行产物布局对齐到同一骨架，让消费方（devloop 等）"读 verdict 自纠偏"时
 一个 glob + 一份 schema 全收：
 
 ```
@@ -146,10 +148,10 @@ runs/<scope>/<run-id>/
 └── <富产物>            # 各 harness 自有：results.csv / run.json / junit.xml / report/ …
 ```
 
-- **scope**：harness 中立的运行单元名（run 目录第一段）。`eval`/`perf`/`trace` = experiment 名；
+- **scope**：harness 中立的运行单元名（run 目录第一段）。`eval`/`perf`/`trace`/`trajectory` = experiment 或数据集运行名；
   `e2e` = 套件/服务名（e2e 无 experiment 这一对照轴，不为它发明一个）。
 - **run-id**：scope 内一次 run 的唯一标识，派生各 harness 自治，但语义分两类：
-  perf/e2e 用**时间戳**（每次 run 留一份历史，累积不覆盖）；eval 用 **`experiment_hash`**
+  perf/e2e/trajectory 用**时间戳或周期 id**（每次 run 留一份历史，累积不覆盖）；eval 用 **`experiment_hash`**
   （同配置 rerun 落同一 run 目录、原地 resume——内容寻址的复用 namespace，而非历史快照）。
   两类都落 `runs/<scope>/<run-id>/`，消费方一律 glob `runs/**/verdict.json`。
   （eval 早期是扁平 `runs/<exp>/`，已对齐补上 run-id 层。）
@@ -167,8 +169,9 @@ runs/<scope>/<run-id>/
 | eval | `eval_harness/verdict.py`，`engine.run_experiment` 收尾调用 `write_verdict()` | `row_overall`（weighted）+ per-cell state |
 | perf | `perf_harness/verdict.py`，`report.write_run` 收尾调用 `write_verdict()` | 每条 SLO check → `checks[]`；run status 按 per-check rollup，cooldown skip 失败关闭；**不取 `run.passed`** |
 | trace | `trace_harness/verdict.py`，`corpus.experiment.run_experiment` 收尾调用 `write_verdict()` | experiment 显式声明的 `gates:`（对三表/算子结果的断言）→ `checks[]`；**Finding 是发现不是判定**、永不直接变 verdict；无 gates → `skipped`（同 perf 记录门原则） |
+| trajectory | `trajectory_harness/verdict.py`，`TrajectoryHarness.run` 收尾写出 | Dataset/Runner 执行健康 + 领域显式 `TrajectoryVerdictPolicy` → `checks[]`；Finding 不自动成为 check；无 Policy → `skipped` |
 
-> status 语义：e2e/perf 有 pass/fail/error/skipped；eval **无 fail**（质量不判对错）——status 表"执行是否完成"（pass/error/skipped），质量信号走 `score`（run 级 weighted overall）。trace 与 perf 同型（判定单元是 run 级 check 而非 case），区别在判定对象：perf 断言压测聚合指标，trace 断言遥测分析产物（错误签名/离群/Finding 计数）。各家 error 优先于 fail：判不了 → 结果不可信 → 先暴露。
+> status 语义：e2e/perf 有 pass/fail/error/skipped；eval **无 fail**（质量不判对错）——status 表"执行是否完成"（pass/error/skipped），质量信号走 `score`（run 级 weighted overall）。trace/trajectory 的判定单元是 run 级 check 而非 case，分别断言遥测分析产物与轨迹聚合效果/成本指标；未声明 gate/policy 时只分析不判定。各家 error 优先于 fail：判不了 → 结果不可信 → 先暴露。
 > perf 尤其要分清两个门：`run.passed` 是**运行门**（CLI 退出码 / `abort_on_fail` / `strict_slo` 宽松），默认放过普通 skip；`verdict.status` 是**记录门**，按 per-check 状态 rollup——SLO 声明了却全 skip（或没声明 SLO）→ `skipped` 而非 `pass`。cooldown 用于证明恢复，skip 在两个门都失败关闭。
 
 ## 对齐键（跨平面 join 的前提，各 harness 迭代必守）

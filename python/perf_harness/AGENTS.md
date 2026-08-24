@@ -67,7 +67,7 @@ perf_harness/
 ### 产物与运行
 
 - 一次 run = 一个命名 experiment，产物落 `runs/<experiment>/<run_id>/` 累积不覆盖；落盘三层 raw（outcomes.jsonl/timeseries.csv）→ 模型（run.json，schema 版本化，`load_run` 离线重建）→ 视图（report/CSV，纯下游）。
-- `verdict.json` 是跨 harness 契约（spec/verdict-schema.yaml，devloop 消费），改动需四家对齐。
+- `verdict.json` 是跨 harness 契约（spec/verdict-schema.yaml，devloop 消费），改动需五家对齐。
 - 请求侧指标走客户端 Outcome（没 `/metrics` 的服务也能压）；`/metrics` 只喂资源侧。
 
 ## References

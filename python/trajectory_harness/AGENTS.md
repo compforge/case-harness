@@ -17,12 +17,18 @@ trace_harness 对物理 span、耗时与错误传播的归因。
 trajectory_harness/
 ├── model.py             # Trajectory / Step / Failure / ExecutionResult
 ├── source.py            # RecordingQuery / RecordingRef / RecordingSource
+├── dataset.py           # TrajectoryDataset / Sample annotation
+├── build.py             # Source + Loader → 固定 Dataset；领域 assemble label
 ├── failures.py          # LLM 等通用低基数 Failure taxonomy 与构造函数
 ├── loaders/             # 外部记录 → Trajectory；base 契约 + OTel JSON 默认实现
 ├── evaluate.py          # EvaluatorSpec / EvaluationResult / Finding 与编排函数
 ├── measure.py           # MeasurerSpec / MeasurementResult 与测量编排函数
 ├── metrics.py           # DatasetRef / EvaluationRun / Metric 与通用聚合
-├── report.py            # 轨迹领域 Report 构建与 HTML 入口
+├── runner.py            # 固定 Dataset → TrajectoryRun（evaluation + measurement）
+├── runio.py             # dataset.json + 单次 run.json 持久化
+├── report.py            # 纯 Run artifact → Report / HTML，历史外部加载
+├── verdict.py           # 运行健康 + 可选领域 Policy → verdict.json
+├── pipeline.py          # Builder + Runner + Reporter 一键编排门面
 ├── evaluators/          # 确定性与模型 evaluator；一个文件一种判定
 ├── measurers/           # 单轨迹事实测量；一个文件一种测量关注点
 └── tests/               # 中间格式、loader 与 evaluator 契约测试
@@ -35,7 +41,8 @@ trajectory_harness/
 - **Source 只负责选择和读取**：Source 返回轻量 `RecordingRef` 和原始 `Recording`，不解析为
   `Trajectory`，也不执行判定；领域标签作为 Dataset annotation 组合，不塞进 Source 契约。
 - **只有 Loader 知道来源格式**：session/OTLP/框架私有字段止于 Loader；Evaluator 只读
-  `Trajectory`。Source 与 Loader 通过内存文本组合，避免强制落临时文件。
+  `Trajectory`。Dataset Builder 把 Source 的 `recording_id` 写入轨迹的一等 provenance
+  字段；`source` 保留 URI/path。Source 与 Loader 通过内存文本组合，避免强制落临时文件。
 - **多阶段仍是 Step tree**：`parent_step_id` 保留 agent/workflow 的执行层级；领域 Evaluator
   通过 `operation / name / attributes` 选择子树，通用模型不引入 Stage。
 - **Failure 是执行事实**：具体操作失败放在 `Step.failure`，最终主要失败放在
@@ -54,8 +61,14 @@ trajectory_harness/
   `EvaluationRun + DatasetRef`，才能跨版本和时间比较。
 - **HTML 由 trajectory_harness 对外提供**：本包决定 Dataset、Failure、Evaluator、Metric
   与趋势章节，再投影到中立的 `harness_common.report_kit`；业务消费者不自行拼 HTML。
-- 不新增 Operator / Engine 层：确定性规则、reference match 与 LLM judge 都实现同一个
-  Evaluator；编排先保持为纯函数，出现真实生命周期后再升级。
+- **三段式生命周期**：`TrajectoryDatasetBuilder` 从 Source/Loader 构建带 annotation 的
+  版本化 Dataset；`TrajectoryEvaluationRunner` 只消费固定 Dataset；`TrajectoryReportBuilder`
+  只消费已持久化 Run artifact。`TrajectoryHarness` 只是编排门面，不吸收领域逻辑。
+- **Dataset 先于 Run，Run 先于视图**：`dataset.json` 保存轨迹和标签加入结果，
+  `run.json` 只保存本次评价并引用 Dataset 中的 trajectory id，`report.html` 是纯下游视图。
+  历史 run 由 Reporter 外部加载，不复制进新 `run.json`；重渲染不能重新抓 Source 或运行插件。
+- **Finding 不自动决定 Verdict**：没有领域 `TrajectoryVerdictPolicy` 时 run 为 `skipped`
+  但仍产出分析产物；Dataset 构建或评价/测量插件异常为 `error`。
 - 不默认合成跨 Evaluator 综合分；需要门禁或总分时由业务显式定义 Policy。
 
 ## References

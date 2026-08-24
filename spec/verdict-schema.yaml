@@ -1,6 +1,6 @@
 # verdict.json 文件 schema（语言无关，跨 harness 统一出口）
 #
-# 四类 harness（e2e / eval / perf / trace）每跑一次 run，都在自己的 run 目录里产出一份
+# 五类 harness（e2e / eval / perf / trace / trajectory）每跑一次 run，都在自己的 run 目录里产出一份
 # 形状一致的 verdict.json —— 这是 devloop 等消费方"读 verdict 自纠偏"的唯一契约。
 # 富产物（results.csv / run.json / junit.xml / report）不进 verdict，由 artifact_paths
 # 指过去；verdict 只承载"判定结论 + 对齐用的最小结构"。
@@ -16,7 +16,8 @@
 #      e2e 填 per-case pass/fail/error（pytest 三态）；eval 填 weighted_overall + per-cell；
 #      perf 的判定单元是 SLO check（对聚合 / facet 切片的断言），不是 case → 填 checks[]、cases 空；
 #      trace 同型：判定单元是 experiment 显式声明的 gate（对遥测分析产物的断言）→ 填 checks[]、cases 空，
-#      没声明 gates → status=skipped（Finding 是发现不是判定，永不直接变 verdict）。
+#      trace / trajectory 没声明 gates/policy → status=skipped（Finding 是发现不是判定，
+#      永不直接变 verdict）。
 #   2. 两类判定单元各自成列；wire 只存这两份事实，不存派生计数：
 #      - cases[]：per-case 判定，key=case_id（跨 run / 跨 harness 对齐主键）。
 #      - checks[]：run 级断言门（perf SLO 是首个实例），与 case 正交的另一种单元。
@@ -34,7 +35,7 @@ properties:
 
   harness:
     type: string
-    enum: [e2e, eval, perf, trace]
+    enum: [e2e, eval, perf, trace, trajectory]
     description: 产出这份 verdict 的 harness
 
   scope:
@@ -55,7 +56,8 @@ properties:
       整个 run 的滚合结论。pass=判定面全部达标；fail=有判定未达标；
       error=执行/环境异常导致判不了；skipped=该 run 整体被跳过。
       e2e：全 case pass 才 pass；eval：达阈/对照结论；perf：SLO 全过才 pass；
-      trace：声明的 gates 全过才 pass，没声明 gates → skipped（分析产物照常落盘）。
+      trace：声明的 gates 全过才 pass，没声明 gates → skipped；
+      trajectory：领域 policy checks 全过才 pass，没声明 policy → skipped（分析产物照常落盘）。
 
   score:
     type: number
