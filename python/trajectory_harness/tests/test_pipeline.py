@@ -183,6 +183,12 @@ class _PassingPolicy:
         ]
 
 
+class _InvalidPolicy:
+    def evaluate(self, artifact):
+        del artifact
+        return [CheckVerdict(name="invalid", status="warning")]
+
+
 def test_harness_persists_current_run_and_rerenders_without_source(tmp_path):
     result = _harness(_Source(), "2026-W34").run(
         tmp_path,
@@ -291,3 +297,14 @@ def test_domain_policy_is_the_only_source_of_pass_verdict(tmp_path):
     verdict = json.loads(result.verdict_path.read_text())
     assert verdict["status"] == "pass"
     assert verdict["checks"][0]["name"] == "wrong_rate <= 0.1"
+
+
+def test_invalid_policy_check_becomes_error_verdict(tmp_path):
+    result = _harness(
+        _HealthySource(), "2026-W34", verdict_policy=_InvalidPolicy()
+    ).run(tmp_path, scope="ccr-weekly", run_id="invalid-policy")
+
+    verdict = json.loads(result.verdict_path.read_text())
+    assert verdict["status"] == "error"
+    assert "invalid status 'warning'" in verdict["reason"]
+    assert "checks" not in verdict

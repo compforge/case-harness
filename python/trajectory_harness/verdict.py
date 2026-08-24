@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol, Sequence, runtime_checkable
 
 from harness_common.verdict import (
+    PRECEDENCE,
     CheckVerdict,
     RunVerdict,
     build_run_verdict,
@@ -44,13 +45,19 @@ def build_trajectory_verdict(
     else:
         try:
             checks = list(policy.evaluate(artifact))
+            invalid = next(
+                (item for item in checks if item.status not in PRECEDENCE), None
+            )
+            if invalid is not None:
+                raise ValueError(
+                    f"check {invalid.name!r} has invalid status {invalid.status!r}"
+                )
+            status = rollup_status([item.status for item in checks])
+            reason = _check_reason(checks, status)
         except Exception as error:  # domain policy is a plugin boundary
             status = "error"
             reason = f"verdict policy failed: {type(error).__name__}: {error}"
             checks = []
-        else:
-            status = rollup_status([item.status for item in checks])
-            reason = _check_reason(checks, status)
 
     return build_run_verdict(
         "trajectory",
