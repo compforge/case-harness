@@ -19,7 +19,7 @@ import time
 from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile
-from perf_harness.drive.workload import Workload
+from perf_harness.drive.workload import FireContext, TrialContext, Workload
 from perf_harness.model import Outcome, StopSnapshot, TrialStop
 from perf_harness.observe import ProbeContext
 
@@ -32,9 +32,9 @@ def _pick(cases: list[Case], weights: list[float]) -> Case:
 
 async def _fire(
     workload: Workload,
+    trial: TrialContext,
     ctx: ProbeContext,
     case: Case,
-    run_id: str,
     timed: list[tuple[float, Outcome]],
 ) -> None:
     # Window attribution follows dispatch time. Completion time would move a long
@@ -42,7 +42,7 @@ async def _fire(
     started_at_s = time.monotonic() - ctx.t0
     ctx.stats.start()
     try:
-        outcome = await workload.fire(ctx.target, ctx.client, case, run_id)
+        outcome = await workload.fire(FireContext(trial=trial, case=case))
     except Exception as e:  # noqa: BLE001 — never let one fire kill the generator
         outcome = Outcome(
             status=None,
@@ -113,11 +113,10 @@ async def _winddown(
 
 async def drive_open(
     workload: Workload,
+    trial: TrialContext,
     ctx: ProbeContext,
-    load: LoadProfile,
     cases: list[Case],
     weights: list[float],
-    run_id: str,
     timed: list[tuple[float, Outcome]],
 ) -> TrialStop:
     """Open-loop: issue fires at the Schedule's time-varying arrival rate λ(t).
@@ -129,6 +128,7 @@ async def drive_open(
     needs no special-casing per shape. Over ``max_inflight`` an arrival is
     recorded as a ``client_saturated`` drop instead of fired.
     """
+    load = trial.load
     sched = load.schedule
     deadline = ctx.t0 + sched.total_s
     tick = 0.02
@@ -170,7 +170,7 @@ async def drive_open(
                     )
                 )
             else:
-                tasks.append(asyncio.create_task(_fire(workload, ctx, case, run_id, timed)))
+                tasks.append(asyncio.create_task(_fire(workload, trial, ctx, case, timed)))
         await asyncio.sleep(tick)
     # ENACT: drain in-flight up to graceful_stop_s, then cancel; census → TrialStop
     inflight_at_stop, interrupted, forced = await _winddown(tasks, ctx, load.graceful_stop_s)
@@ -185,11 +185,10 @@ async def drive_open(
 
 async def drive_closed(
     workload: Workload,
+    trial: TrialContext,
     ctx: ProbeContext,
-    load: LoadProfile,
     cases: list[Case],
     weights: list[float],
-    run_id: str,
     timed: list[tuple[float, Outcome]],
 ) -> TrialStop:
     """Closed-loop: track the Schedule's target concurrency over time.
@@ -202,6 +201,7 @@ async def drive_closed(
     appends no outcome). On stop (breaker or deadline) the ``stopping`` event lets
     users finish their current fire, then ``_winddown`` drains/cancels (graceful_stop_s).
     """
+    load = trial.load
     sched = load.schedule
     pacing = load.pacing
     deadline = ctx.t0 + sched.total_s
@@ -212,7 +212,7 @@ async def drive_closed(
     async def user_loop() -> None:
         while not stopping.is_set() and time.monotonic() < deadline:
             fired_at = time.monotonic()
-            await _fire(workload, ctx, _pick(cases, weights), run_id, timed)
+            await _fire(workload, trial, ctx, _pick(cases, weights), timed)
             wait = pacing.wait_s(time.monotonic() - fired_at)
             if wait > 0:
                 # interruptible think-time: wake promptly when stopping is set

@@ -20,7 +20,7 @@ class _SSEChat(Workload):
 
     name = "sse-chat"
 
-    async def fire(self, target, client, case, run_id):  # not exercised in unit tests
+    async def fire(self, ctx):  # not exercised in unit tests
         return Outcome(status=200, duration_ms=1)
 
     def judge(self, o: Outcome) -> Verdict:
@@ -61,7 +61,7 @@ def test_sse_override_catches_200_failures():
 class _Failing(Workload):
     name = "failing"
 
-    async def fire(self, target, client, case, run_id):
+    async def fire(self, ctx):
         return Outcome(status=500, duration_ms=1.0)  # raw — base judge buckets it as "500"
 
 

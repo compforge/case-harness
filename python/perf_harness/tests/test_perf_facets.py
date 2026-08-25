@@ -42,7 +42,7 @@ async def test_facets_pivot_and_weighting():
 class _SlowWorkload(Workload):
     name = "slow"
 
-    async def fire(self, target, client, case, run_id):
+    async def fire(self, ctx):
         import asyncio
 
         await asyncio.sleep(0.05)

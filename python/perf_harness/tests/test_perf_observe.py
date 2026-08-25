@@ -354,7 +354,7 @@ class _FanProbe(Probe):
 class _NoopWL(Workload):
     name = "noop"
 
-    async def fire(self, target, client, case, run_id):
+    async def fire(self, ctx):
         return Outcome(status=200, duration_ms=1.0)
 
 

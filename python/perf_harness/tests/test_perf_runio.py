@@ -43,7 +43,7 @@ class _FakeTop(Probe):
 class _WL(Workload):
     name = "w"
 
-    async def fire(self, target, client, case, run_id):
+    async def fire(self, ctx):
         return Outcome(status=200, duration_ms=10.0, events=1, metrics={"ttft_ms": 5.0})
 
 
@@ -223,3 +223,57 @@ async def test_probe_errors_round_trip(tmp_path):
     loaded = load_run(tmp_path / "pe" / "20260101-000001")
     pe = loaded.trials[0].probe_errors["metrics.chat"]
     assert pe.failures >= 1 and pe.ticks >= pe.failures and "down" in pe.last
+
+
+async def test_setup_error_still_writes_complete_run_artifacts(tmp_path):
+    class _BrokenSetup(Workload):
+        async def setup(self, ctx):
+            raise RuntimeError("target unavailable")
+
+        async def fire(self, ctx):
+            return Outcome(status=200, duration_ms=1.0)
+
+    exp = Experiment(
+        subject=Subject("chat", Target(base_url="http://127.0.0.1:0")),
+        workload=_BrokenSetup(),
+        resources=[ResourceProfile()],
+        loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1))],
+        name="setup-error",
+    )
+    run = await Engine(exp, run_id="20260101-000002").run()
+    paths = write_run(run, str(tmp_path))
+    run_dir = Path(paths["run_dir"])
+
+    assert {"run.json", "outcomes.jsonl", "report.md", "verdict.json"} <= {
+        path.name for path in run_dir.iterdir()
+    }
+    doc = json.loads((run_dir / "run.json").read_text())
+    assert doc["passed"] is False
+    assert doc["trials"][0]["phase_errors"] == [
+        {"phase": "setup", "error_type": "RuntimeError", "message": "target unavailable"}
+    ]
+    loaded = load_run(run_dir)
+    assert loaded.trials[0].phase_errors == run.trials[0].phase_errors
+
+    verdict = json.loads((run_dir / "verdict.json").read_text())
+    assert verdict["status"] == "error"
+    assert "setup: RuntimeError: target unavailable" in verdict["reason"]
+    assert "ERROR" in (run_dir / "report.md").read_text()
+
+
+async def test_model_and_verdict_survive_report_renderer_failure(tmp_path, monkeypatch):
+    from perf_harness.report import render
+
+    run, _ = await _run(tmp_path / "baseline")
+
+    def broken_report(*args, **kwargs):
+        raise RuntimeError("renderer failed")
+
+    monkeypatch.setattr(render, "write_report", broken_report)
+    with pytest.raises(RuntimeError, match="renderer failed"):
+        write_run(run, str(tmp_path / "failed-render"))
+
+    run_dir = tmp_path / "failed-render" / run.experiment / run.run_id
+    assert {"run.json", "outcomes.jsonl", "timeseries.csv", "verdict.json"} <= {
+        path.name for path in run_dir.iterdir()
+    }

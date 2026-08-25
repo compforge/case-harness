@@ -23,7 +23,22 @@ def analyze(run: Run, store=None) -> list[Observation]:  # noqa: ARG001 — unif
     for r in run.trials:
         tid = r.label()
         s = r.stop
-        if s.early:
+        for error in r.phase_errors:
+            out.append(
+                Observation(
+                    "validity",
+                    "flag",
+                    f"[{tid}] Trial 执行异常（{error.phase}）："
+                    f"{error.error_type}: {error.message} — 该档不进入性能曲线",
+                    {
+                        "trial": tid,
+                        "phase": error.phase,
+                        "error_type": error.error_type,
+                        "message": error.message,
+                    },
+                )
+            )
+        if s.early and not r.phase_errors:
             snap = s.snapshot
             detail = (
                 f"err {snap.error_rate * 100:.1f}% ({snap.errors}/{snap.sent}) @{snap.at_s:.0f}s"

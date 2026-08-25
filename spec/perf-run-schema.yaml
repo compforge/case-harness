@@ -123,6 +123,14 @@ $defs:
       interrupted: {type: integer, minimum: 0}
       force_cancelled: {type: boolean}
     additionalProperties: true
+  phase_error:
+    type: object
+    required: [phase, error_type, message]
+    properties:
+      phase: {enum: [setup, measurement, deactivate, cooldown, cleanup]}
+      error_type: {type: string, minLength: 1}
+      message: {type: string}
+    additionalProperties: true
   trial:
     type: object
     required: [id, subject, arm, stop, slo, registry, windows, probe_errors]
@@ -144,4 +152,7 @@ $defs:
       registry: {type: object}
       windows: {type: array, minItems: 1, items: {$ref: '#/$defs/window'}}
       probe_errors: {type: object}
+      phase_errors:
+        type: array
+        items: {$ref: '#/$defs/phase_error'}
     additionalProperties: true

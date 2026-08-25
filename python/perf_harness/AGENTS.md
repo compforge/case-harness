@@ -27,7 +27,7 @@ perf_harness/
 ├── engine.py       # 纯编排：扫网格，每格 apply → drive → observe → reduce
 ├── drive/          # 怎么压（扩展点①）
 │   ├── load.py     #   LoadProfile：model(open/closed) × Schedule(强度随时间) × Pacing
-│   ├── workload.py #   协议适配 fire/judge + register_workload；MockWorkload
+│   ├── workload.py #   TrialContext/FireContext + fire/judge 协议适配与注册
 │   └── scheduler.py#   驱动循环：开/闭环 + 熔断 DECIDE + drain/cancel ENACT → TrialStop
 ├── observe/        # 看什么（扩展点②）；FamilySpec 单表声明 metric 元数据
 │   ├── base.py     #   Probe ABC + client/Prombed 探针 + observe_loop（采样循环）
@@ -54,7 +54,7 @@ perf_harness/
 
 - **Case 资产归 spec-case**：实验用 `caseset: <path>` 引用 canonical CaseSet，`cases:` 只做 case 选择/排序与实验本地 `weight`；`input/facets/judge/binding` 不在 perf 配置里覆盖。无 `caseset` 的内联 cases 仍是轻量实验入口。
 - **Kernel 对齐**：request Outcome、Probe sample 及其 window-aligned 归约事实是 Observation；request、window、run 是不同 Unit grain，必须进入不同 Dataset / Worksheet，不能混成一张表。raw/model Run facts 构成可离线重算 Dataset，本次选择的 Workload judge、SLO 和 analysis 组件直接定义评估侧重点；换 SLO 或分析透镜不得重新发压，详见 [`../../docs/kernel.md`](../../docs/kernel.md#dataset-与反复评估)。
-- **`Workload`**（怎么压 + 怎么判）：`fire(case)` 只记原始观测，`judge(outcome)→Verdict` 才裁决（纯函数，可离线重判）；SSE"200 但流坏了"靠 override `judge`。各服务在自己项目写、`register_workload` 注册；Trial 固定按 `setup → measurement → deactivation → cooldown → cleanup` 运行，其中业务 hook 只有 `setup/deactivate/cleanup`。
+- **`Workload`**（怎么压 + 怎么判）：`TrialContext` 是整个 Trial 共用的不可变输入，单次并发请求通过 `FireContext(trial, case)` 组合请求 Case；`fire` 只记原始观测，`judge(outcome)→Verdict` 才裁决（纯函数，可离线重判）。各服务在自己项目写、`register_workload` 注册；Trial 固定按 `setup → measurement → deactivation → cooldown → cleanup` 运行，其中业务 hook 只有 `setup/deactivate/cleanup`。
 - **`Probe`**（看什么）：`families` 单表声明元数据（FamilySpec：unit/value_kind/description，describe/summarize/Engine 共读），`sample()` 周期采样；Source 不绑 k8s，consumer 可通过 extension module + `register_probe` 扩展。Prometheus 来源由 `PrometheusProbe` 内嵌 Prombed，配置直接声明 PromQL 与输出 label 契约，不在 perf 内重复实现解析、存储和查询语义。
 - **压后观测不污染容量口径**：`cooldown_s` 延长 raw series 以观察回收/缩容；默认 SLO 只读 measurement Window，`window: {kind: cooldown}` 显式读取 cooldown。
 

@@ -40,14 +40,17 @@ def _build(run: Run) -> _v.RunVerdict:
     engine's default skip policy is lenient while persisted evidence must not read
     green when no assertion was verified."""
     raw: list[SloCheck] = [c for t in run.trials for c in t.slo]
-    early = [t for t in run.trials if t.stop.early]
+    error_trials = [t for t in run.trials if t.phase_errors]
+    early = [t for t in run.trials if t.stop.early and not t.phase_errors]
     n_pass = sum(1 for c in raw if c.state == "pass")
     n_fail = sum(1 for c in raw if c.state == "fail" and c.observed is not None)
     cooldown_skips = [
         c for c in raw if c.state == "skipped" and c.assertion.window.kind == "cooldown"
     ]
 
-    if not run.trials:
+    if error_trials:
+        status = "error"
+    elif not run.trials:
         status = "skipped"
     elif early or n_fail or cooldown_skips:
         status = "fail"
@@ -55,7 +58,9 @@ def _build(run: Run) -> _v.RunVerdict:
         status = "pass"
     else:
         status = "skipped"  # SLO declared but every check skipped, or no SLO at all
-    if early:
+    if error_trials:
+        reason = _phase_error_reason(error_trials)
+    elif early:
         reason = _early_stop_reason(early)
     elif n_fail:
         reason = _fail_reason([c for c in raw if c.state == "fail" and c.observed is not None])
@@ -92,6 +97,15 @@ def _early_stop_reason(trials: list[TrialRecord]) -> str:
         snap = stop.snapshot
         detail += f" at {snap.at_s:.1f}s ({snap.errors}/{snap.sent} errors)"
     return f"{len(trials)} trial(s) stopped early; first — {detail}"
+
+
+def _phase_error_reason(trials: list[TrialRecord]) -> str:
+    first = trials[0].phase_errors[0]
+    detail = f"{first.phase}: {first.error_type}"
+    if first.message:
+        detail += f": {first.message}"
+    count = sum(len(trial.phase_errors) for trial in trials)
+    return f"{count} trial phase error(s); first — {detail}"
 
 
 def build_verdict_doc(run: Run) -> dict:

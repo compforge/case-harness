@@ -270,6 +270,21 @@ class ProbeErrors:
 
 
 WindowKind = Literal["measurement", "ramp", "hold", "cooldown"]
+Phase = Literal["setup", "measurement", "deactivate", "cooldown", "cleanup"]
+
+
+@dataclass(frozen=True)
+class PhaseError:
+    """An ordinary exception raised while executing a Trial lifecycle phase.
+
+    This is harness execution evidence, not a request ``Outcome``, Probe health,
+    or an SLO result. Keeping it on the Trial lets a failed setup/cleanup still
+    produce a complete run artifact without inventing request facts.
+    """
+
+    phase: Phase
+    error_type: str
+    message: str
 
 
 @dataclass
@@ -333,6 +348,12 @@ class TrialRecord:
     name, e.g. ``metrics.chat``). Their summaries carry the ``probe_error`` caveat,
     absent reads resolve to ``Missing("probe_error")`` (≠ "slice没数据"), and the
     validity lens flags them — so a broken /metrics never renders as a calm line."""
+    phase_errors: list[PhaseError] = field(default_factory=list)
+    """Exceptions from Trial lifecycle hooks or orchestration, in occurrence order.
+
+    A non-empty list makes the Run an execution error. It remains separate from
+    request outcomes, Probe observation failures, and SLO evaluation.
+    """
 
     def label(self) -> str:
         """Stable Trial id within a Run; equal to the Arm alignment key."""

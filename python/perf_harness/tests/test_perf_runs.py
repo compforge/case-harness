@@ -67,8 +67,8 @@ async def test_run_id_reaches_fire(tmp_path):
     class RecordingWorkload(Workload):
         name = "rec"
 
-        async def fire(self, target, client, case, run_id):
-            seen.append(run_id)
+        async def fire(self, ctx):
+            seen.append(ctx.trial.run_id)
             return Outcome(ok=True, status=200, duration_ms=1.0)
 
     experiment = Experiment(

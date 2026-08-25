@@ -24,6 +24,7 @@ from perf_harness.drive.load import LoadProfile as LoadProfile
 from perf_harness.drive.load import Pacing as Pacing
 from perf_harness.drive.load import Schedule as Schedule
 from perf_harness.drive.load import Stage as Stage
+from perf_harness.drive.workload import FireContext as FireContext
 from perf_harness.drive.workload import MockWorkload as MockWorkload
 from perf_harness.drive.workload import TrialContext as TrialContext
 from perf_harness.drive.workload import Workload as Workload

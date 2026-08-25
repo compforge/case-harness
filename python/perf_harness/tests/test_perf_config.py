@@ -284,7 +284,7 @@ def test_extension_module_registers_workload_and_probe(tmp_path, monkeypatch):
         ")\n"
         "class ExtensionWorkload(Workload):\n"
         "    name = 'extension-workload'\n"
-        "    async def fire(self, target, client, case, run_id):\n"
+        "    async def fire(self, ctx):\n"
         "        return Outcome(status=200, duration_ms=1.0)\n"
         "class ExtensionProbe(Probe):\n"
         "    name = 'extension-probe'\n"

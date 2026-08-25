@@ -33,13 +33,26 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class TrialContext:
-    """Handles and coordinates shared by a workload's trial lifecycle hooks."""
+    """Immutable handles and coordinates shared throughout one Trial."""
 
     target: Target
     client: httpx.AsyncClient
     run_id: str
     resources: ResourceProfile
     load: LoadProfile
+
+
+@dataclass(frozen=True)
+class FireContext:
+    """One request dispatch within a Trial.
+
+    ``trial`` is shared by concurrent fires; the selected ``case`` belongs to this
+    dispatch only. Composition keeps the shared TrialContext immutable instead of
+    mutating it with request-scoped state while the load generator runs concurrently.
+    """
+
+    trial: TrialContext
+    case: Case
 
 
 class Workload(ABC):
@@ -69,17 +82,15 @@ class Workload(ABC):
         return None
 
     @abstractmethod
-    async def fire(
-        self, target: Target, client: httpx.AsyncClient, case: Case, run_id: str
-    ) -> Outcome:
-        """Fire one request built from ``case.input`` against ``target``.
+    async def fire(self, ctx: FireContext) -> Outcome:
+        """Fire one request built from ``ctx.case.input`` against its Trial target.
 
         ``fire`` records the *raw observation* only (status, timing, frame/byte
         counts, protocol signals in ``outcome.meta``) — it does NOT decide
-        success: ``judge`` does, and the Engine runs it. ``run_id`` is this run's
-        id (per-run context) — a biz adapter may weave it into the request to tie
+        success: ``judge`` does, and the Engine runs it. ``ctx.trial.run_id`` is
+        this run's id — a biz adapter may weave it into the request to tie
         traffic to the run (e.g. a chat conversation id ``f"{run_id}-{uuid}"``).
-        The Engine stamps ``case.facets`` onto the returned Outcome, so a Workload
+        The Engine stamps ``ctx.case.facets`` onto the returned Outcome, so a Workload
         need not set them — but it MAY add runtime-derived facets to
         ``outcome.facets`` (e.g. ``{"heavy": "yes"}``).
         """
@@ -231,14 +242,12 @@ class MockWorkload(Workload):
         self.base_ms = base_ms
         self._i = 0
 
-    async def fire(
-        self, target: Target, client: httpx.AsyncClient, case: Case, run_id: str
-    ) -> Outcome:
+    async def fire(self, ctx: FireContext) -> Outcome:
         import asyncio
 
         self._i += 1
         jitter = (self._i % 7) * 2.0
-        dur = float(case.input.get("ms", self.base_ms)) + jitter
+        dur = float(ctx.case.input.get("ms", self.base_ms)) + jitter
         await asyncio.sleep(dur / 1000.0)
         # raw observation only — base judge() turns status 200 into ok=True
         return Outcome(status=200, duration_ms=dur, events=1)

@@ -3,7 +3,16 @@ import { validateCaseSet, type Case, type CaseSet } from "@compforge/spec-case/m
 import { drive } from "./scheduler";
 import { buildWindows } from "./reduce";
 import { loadLabel, resourceLabel, validateLoadProfile, type LoadProfile } from "./load";
-import type { Arm, CaseMixEntry, ResourceProfile, Run, Subject, TrialRecord } from "./model";
+import type {
+  Arm,
+  CaseMixEntry,
+  Phase,
+  PhaseError,
+  ResourceProfile,
+  Run,
+  Subject,
+  TrialRecord,
+} from "./model";
 import type { TrialContext, Workload } from "./workload";
 
 export interface Experiment {
@@ -75,6 +84,33 @@ function arms(experiment: Experiment): Arm[] {
   });
 }
 
+function phaseError(phase: Phase, error: unknown): PhaseError {
+  return {
+    phase,
+    error_type: error instanceof Error ? error.name : "Error",
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+class TrialExecutionContext {
+  phase: Phase = "setup";
+  readonly phaseErrors: PhaseError[] = [];
+  hasFatalError = false;
+  fatalError: unknown;
+  hasCleanupAfterFatal = false;
+  cleanupAfterFatal: unknown;
+
+  constructor(readonly workload: TrialContext) {}
+
+  enter(phase: Phase): void {
+    this.phase = phase;
+  }
+
+  record(error: unknown, phase = this.phase): void {
+    this.phaseErrors.push(phaseError(phase, error));
+  }
+}
+
 export class Engine {
   readonly #experiment: Experiment;
   readonly #runId: string;
@@ -106,51 +142,78 @@ export class Engine {
         run_id: this.#runId,
         signal: controller.signal,
       };
-      let primaryError: unknown;
+      const execution = new TrialExecutionContext(context);
+      let driven: Awaited<ReturnType<typeof drive>> | undefined;
       try {
-        await this.#experiment.workload.setup?.(context);
-        await this.#experiment.onTrialStart?.(context, started);
-        const driven = await drive({
+        await this.#experiment.workload.setup?.(execution.workload);
+        execution.enter("measurement");
+        await this.#experiment.onTrialStart?.(execution.workload, started);
+        driven = await drive({
           workload: this.#experiment.workload,
-          context: { subject: context.subject, run_id: context.run_id },
+          context: { subject: execution.workload.subject, run_id: execution.workload.run_id },
           arm,
           cases: this.#cases,
           weights: this.#weights,
           signal: this.#experiment.signal,
         });
-        await this.#experiment.workload.deactivate?.(context);
-        const finished = new Date();
-        const trial: TrialRecord = {
-          id: arm.id,
-          subject: this.#experiment.subject.name,
-          arm,
-          started_at: started.toISOString(),
-          finished_at: finished.toISOString(),
-          windows: buildWindows(arm.load, driven.outcomes, driven.stop.snapshot?.at_s ?? driven.elapsed_s),
-          stop: driven.stop,
-          slo: [],
-          registry: {},
-          probe_errors: {},
-          outcomes: driven.outcomes,
-        };
-        trials.push(trial);
-        await this.#experiment.onTrialFinish?.(trial);
+        execution.enter("deactivate");
+        await this.#experiment.workload.deactivate?.(execution.workload);
       } catch (error) {
-        primaryError = error;
-        throw error;
+        if (this.#experiment.signal?.aborted) {
+          execution.hasFatalError = true;
+          execution.fatalError = error;
+        }
+        else execution.record(error);
       } finally {
         this.#experiment.signal?.removeEventListener("abort", abort);
         try {
-          await this.#experiment.workload.cleanup?.(context);
+          await this.#experiment.workload.cleanup?.(execution.workload);
         } catch (cleanupError) {
-          if (!primaryError) throw cleanupError;
-          throw new AggregateError(
-            [primaryError, cleanupError],
-            "perf trial failed and cleanup also failed",
-            { cause: primaryError },
-          );
+          if (execution.hasFatalError) {
+            execution.hasCleanupAfterFatal = true;
+            execution.cleanupAfterFatal = cleanupError;
+          }
+          else execution.record(cleanupError, "cleanup");
         }
       }
+      if (execution.hasFatalError) {
+        if (execution.hasCleanupAfterFatal) {
+          throw new AggregateError(
+            [execution.fatalError, execution.cleanupAfterFatal],
+            "perf trial was cancelled and cleanup also failed",
+            { cause: execution.fatalError },
+          );
+        }
+        throw execution.fatalError;
+      }
+
+      const finished = new Date();
+      const outcomes = driven?.outcomes ?? [];
+      const stop = driven?.stop ?? {
+        reason: "aborted" as const,
+        inflight_at_stop: 0,
+        interrupted: 0,
+        force_cancelled: false,
+      };
+      const trial: TrialRecord = {
+        id: arm.id,
+        subject: this.#experiment.subject.name,
+        arm,
+        started_at: started.toISOString(),
+        finished_at: finished.toISOString(),
+        windows: buildWindows(arm.load, outcomes, driven?.stop.snapshot?.at_s ?? driven?.elapsed_s ?? 0),
+        stop,
+        slo: [],
+        registry: {},
+        probe_errors: {},
+        phase_errors: execution.phaseErrors,
+        outcomes,
+      };
+      trials.push(trial);
+      await this.#experiment.onTrialFinish?.(trial);
+      // A phase failure means the execution/testbed state is no longer a safe
+      // baseline for the next Arm, regardless of any future SLO stop policy.
+      if (trial.phase_errors.length) break;
     }
     return {
       schema: 3,
@@ -159,7 +222,8 @@ export class Engine {
       created_at: created.toISOString(),
       subject: this.#experiment.subject.name,
       passed: trials.length === arms(this.#experiment).length
-        && trials.every((trial) => trial.stop.reason === "deadline" || trial.stop.reason === "request_limit"),
+        && trials.every((trial) => !trial.phase_errors.length
+          && (trial.stop.reason === "deadline" || trial.stop.reason === "request_limit")),
       n_trials: trials.length,
       trials,
     };

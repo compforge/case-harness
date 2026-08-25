@@ -13,18 +13,24 @@ workload: { name: my-service }
 
 ## Workload 与生命周期
 
-`Workload.fire()` / `judge()` 负责单次请求。一次 Trial 前后的有状态操作使用三个可选 hook：
+`Workload.fire()` / `judge()` 负责单次请求。`TrialContext` 是整个 Trial 共用的不可变输入，
+`FireContext` 在它之上组合本次 dispatch 的 Case；一次 Trial 前后的有状态操作使用三个可选 hook：
 
 ```python
-from perf_harness import Outcome, TrialContext, Workload, register_workload
+from perf_harness import FireContext, Outcome, TrialContext, Workload, register_workload
 
 
 class MyWorkload(Workload):
     async def setup(self, ctx: TrialContext) -> None:
         ...  # 创建本 trial 所需的外部状态
 
-    async def fire(self, target, client, case, run_id) -> Outcome:
-        ...
+    async def fire(self, ctx: FireContext) -> Outcome:
+        response = await ctx.trial.client.post(
+            ctx.trial.target.base_url + "/chat",
+            json=ctx.case.input,
+            headers={"x-perf-run-id": ctx.trial.run_id},
+        )
+        return Outcome(status=response.status_code, duration_ms=...)
 
     async def deactivate(self, ctx: TrialContext) -> None:
         ...  # 触发停止/缩容；此时 Probe 仍在采样
@@ -35,6 +41,10 @@ class MyWorkload(Workload):
 
 register_workload("my-service", lambda cfg: MyWorkload())
 ```
+
+`setup`、所有并发 `fire`、`deactivate` 和 `cleanup` 看到的是同一个 `TrialContext`；每次
+`fire` 的 `FireContext` 则是独立对象。不要把当前 Case 写回 TrialContext，否则并发 dispatch
+会共享并覆盖请求状态。取消与 deadline 沿用 asyncio task / timeout 语义，不塞进领域 Context。
 
 顺序固定为：
 

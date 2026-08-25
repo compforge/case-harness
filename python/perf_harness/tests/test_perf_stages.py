@@ -6,7 +6,7 @@ from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile, Schedule, Stage
 from perf_harness.drive.scheduler import _fire
-from perf_harness.drive.workload import MockWorkload, Workload
+from perf_harness.drive.workload import MockWorkload, TrialContext, Workload
 from perf_harness.engine import Engine, Experiment, Subject
 from perf_harness.model import Outcome, ResourceProfile, Target
 from perf_harness.observe import ClientStats, ProbeContext
@@ -65,7 +65,7 @@ async def test_repeated_stage_names_remain_distinct_windows():
 
 async def test_long_request_is_attributed_by_dispatch_time():
     class SlowWorkload(Workload):
-        async def fire(self, target, client, case, run_id):
+        async def fire(self, ctx):
             await asyncio.sleep(0.05)
             return Outcome(status=200, duration_ms=50)
 
@@ -76,7 +76,14 @@ async def test_long_request_is_attributed_by_dispatch_time():
             t0=time.monotonic(),
             stats=ClientStats(),
         )
+        trial = TrialContext(
+            target=ctx.target,
+            client=client,
+            run_id="run",
+            resources=ResourceProfile(),
+            load=LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1)),
+        )
         timed = []
-        await _fire(SlowWorkload(), ctx, Case(id="slow", input={}), "run", timed)
+        await _fire(SlowWorkload(), trial, ctx, Case(id="slow", input={}), timed)
 
     assert timed[0][0] < 0.02

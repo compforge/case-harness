@@ -51,7 +51,7 @@ from perf_harness.metric import (
 )
 from perf_harness.model import RequestStats, Run, Series, SloCheck, TrialRecord
 from perf_harness.report.palette import family_color as _family_color
-from perf_harness.runio import write_run_data
+from perf_harness.runio import write_run_data, write_timeseries_data
 from perf_harness.slo import slo_aware_capacity
 
 # subject is constant across a report's rows (one Experiment = one Subject) and is
@@ -109,6 +109,16 @@ def _stop_brief(r: TrialRecord) -> str:
         detail = "—"
     cut = f"，中断 {s.interrupted} 在途" if s.interrupted else ""
     return f"{_trial_id(r)} [{s.reason}]: {detail}{cut}"
+
+
+def _phase_error_brief(r: TrialRecord) -> str:
+    error = r.phase_errors[0]
+    detail = f"{error.phase}: {error.error_type}"
+    if error.message:
+        detail += f": {error.message}"
+    extra = len(r.phase_errors) - 1
+    suffix = f"（另有 {extra} 个异常）" if extra else ""
+    return f"{_trial_id(r)} [{detail}]{suffix}"
 
 
 def _key_cells(r: TrialRecord) -> list[str]:
@@ -366,13 +376,9 @@ def write_run(
     """
     run_dir = run_dir_for(runs_dir, run.experiment, run.run_id)
     exp_dir = run_dir.parent  # runs/<experiment>/ — holds the per-experiment run.jsonl log
-    # views (report.md/html + summary/by_facet csvs) + the time_sampled raw (timeseries.csv)
-    paths = write_report(
-        run.trials, str(run_dir), knee_err_rate=knee_err_rate, facet_order=facet_order
-    )
-    # model + request-side raw layers (run.json full serialization + outcomes.jsonl) —
-    # the analysis-facing artifacts; the views above are derived, never the source
-    paths.update(write_run_data(run, run_dir))
+    # Facts and the machine verdict must survive an optional renderer failure. The
+    # report is a downstream view and therefore runs only after raw/model persistence.
+    paths = write_run_data(run, run_dir)
     paths["run_dir"] = str(run_dir)
 
     # cross-harness verdict.json (run-level SLO gate) — what devloop reads to self-correct
@@ -412,6 +418,16 @@ def write_run(
         paths["run_log"] = str(exp_dir / "run.jsonl")
     except OSError:
         pass
+
+    # Views (report.md/html + summary/by_facet/windows csvs) are derived last.
+    paths.update(
+        write_report(
+            run.trials,
+            str(run_dir),
+            knee_err_rate=knee_err_rate,
+            facet_order=facet_order,
+        )
+    )
 
     return paths
 
@@ -501,18 +517,10 @@ def write_report(
                     ]
                 )
 
-    ts_path = out / "timeseries.csv"
-    with ts_path.open("w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["trial", "series", "t", "value"])
-        for r in results:
-            tid = _trial_id(r)
-            for key, series in r.series.items():
-                for s in series.samples:
-                    # This is the raw layer used for offline SLO recomputation.
-                    # Keep Python's round-trippable float spelling; presentation
-                    # formatting belongs only in report views.
-                    w.writerow([tid, key, repr(s.t), repr(s.value)])
+    # ``write_report`` remains useful standalone, so it materializes the same raw
+    # series file as ``write_run_data``. In the full run path this is an idempotent
+    # rewrite after the facts were already made durable.
+    ts_path = write_timeseries_data(results, out)
 
     md_path = out / "report.md"
     md_path.write_text(_render_md(results, metric_keys, knee_err_rate, facet_order))
@@ -536,16 +544,26 @@ def write_report(
 
 def _render_slo(lines: list[str], results: list[TrialRecord]) -> None:
     """Run gate: trial completeness, SLO checks, and confirmed capacity."""
-    early = [r for r in results if r.stop.early]
-    if not any(r.slo for r in results) and not early:
+    errors = [r for r in results if r.phase_errors]
+    early = [r for r in results if r.stop.early and not r.phase_errors]
+    if not any(r.slo for r in results) and not early and not errors:
         return
     has_fail = bool(early) or any(c.failed or _blocking_slo_skip(c) for r in results for c in r.slo)
     has_skip = any(c.skipped for r in results for c in r.slo)
     lines.append("## Run 判定（trial 完整性 + SLO）")
     lines.append("")
-    verdict = "FAIL ❌" if has_fail else ("PASS ✅（含 skipped，见下）" if has_skip else "PASS ✅")
+    verdict = (
+        "ERROR ❌"
+        if errors
+        else ("FAIL ❌" if has_fail else ("PASS ✅（含 skipped，见下）" if has_skip else "PASS ✅"))
+    )
     lines.append(f"**{verdict}**")
     lines.append("")
+    if errors:
+        lines.append("**执行异常**（不是请求失败或 SLO fail；本次 trial 未完整执行）：")
+        for r in errors:
+            lines.append(f"- `{_phase_error_brief(r)}`")
+        lines.append("")
     if early:
         lines.append("**提前停止**（部分窗口不能确认该负载档容量）：")
         for r in early:
@@ -591,14 +609,26 @@ def _build_doc(
     report = Report(title=f"perf report — {subject}", meta=[("subject", subject)])
 
     # Run gate: a partial trial fails before the three-state SLO rollup.
-    early = [r for r in results if r.stop.early]
-    if any(r.slo for r in results) or early:
+    errors = [r for r in results if r.phase_errors]
+    early = [r for r in results if r.stop.early and not r.phase_errors]
+    if any(r.slo for r in results) or early or errors:
         has_fail = bool(early) or any(
             c.failed or _blocking_slo_skip(c) for r in results for c in r.slo
         )
         has_skip = any(c.skipped for r in results for c in r.slo)
-        verdict = "FAIL ❌" if has_fail else ("PASS ✅（含 skipped）" if has_skip else "PASS ✅")
+        verdict = (
+            "ERROR ❌"
+            if errors
+            else ("FAIL ❌" if has_fail else ("PASS ✅（含 skipped）" if has_skip else "PASS ✅"))
+        )
         sec = Section("Run 判定（trial 完整性 + SLO）", [Prose(verdict)])
+        if errors:
+            sec.blocks.append(
+                Table(
+                    ["execution error"],
+                    [[_phase_error_brief(r)] for r in errors],
+                )
+            )
         if early:
             sec.blocks.append(
                 Table(
@@ -691,7 +721,11 @@ def _build_doc(
                 f"压力机蹭到 max_inflight）：{sat_txt}"
             )
         )
-    broke = [r for r in results if r.stop.early]
+    errors = [r for r in results if r.phase_errors]
+    if errors:
+        error_txt = "；".join(_phase_error_brief(r) for r in errors)
+        sec1.blocks.append(Prose(f"⚠ 执行异常（非请求失败或 SLO fail）：{error_txt}"))
+    broke = [r for r in results if r.stop.early and not r.phase_errors]
     if broke:
         broke_txt = "；".join(_stop_brief(r) for r in broke)
         sec1.blocks.append(
@@ -1078,7 +1112,14 @@ def _render_md(
             )
         lines.append("")
 
-    broke = [r for r in results if r.stop.early]
+    errors = [r for r in results if r.phase_errors]
+    if errors:
+        lines.append("**⚠ 执行异常**（不是请求失败或 SLO fail；本次 trial 未完整执行）：")
+        for r in errors:
+            lines.append(f"- `{_phase_error_brief(r)}`")
+        lines.append("")
+
+    broke = [r for r in results if r.stop.early and not r.phase_errors]
     if broke:
         lines.append(
             "**⚠ 提前停止**（trial 在计划窗口前停了——见 reason 与触发快照；数字为**部分窗口**，"
