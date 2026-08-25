@@ -1,7 +1,7 @@
 .PHONY: test lint fix build clean bump
 
 test:
-	uv run pytest -v
+	uv run pytest -v $(TEST_FILES)
 
 lint:
 	uv run ruff check harness_common/ harness_toolbox/ e2e_harness/ eval_harness/ perf_harness/ trace_harness/ trajectory_harness/
