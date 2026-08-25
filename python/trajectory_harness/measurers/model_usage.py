@@ -2,43 +2,18 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from typing import Any
 
 from trajectory_harness.measure import MeasurementResult, MeasurementSpec, MeasurerSpec
-from trajectory_harness.model import Step, Trajectory
+from trajectory_harness.measurers._tokens import (
+    CACHED_INPUT_TOKEN_ATTRIBUTES,
+    INPUT_TOKEN_ATTRIBUTES,
+    MODEL_OPERATIONS,
+    OUTPUT_TOKEN_ATTRIBUTES,
+    token_count,
+)
+from trajectory_harness.model import Trajectory
 
-_MODEL_OPERATIONS = {
-    "inference",
-    "chat",
-    "completion",
-    "generate_content",
-    "text_completion",
-    "embeddings",
-}
-_INPUT_TOKEN_ATTRIBUTES = (
-    "gen_ai.usage.input_tokens",
-    "gen_ai.usage.prompt_tokens",
-    "llm.token_count.prompt",
-    "input_tokens",
-    "prompt_tokens",
-)
-_OUTPUT_TOKEN_ATTRIBUTES = (
-    "gen_ai.usage.output_tokens",
-    "gen_ai.usage.completion_tokens",
-    "llm.token_count.completion",
-    "output_tokens",
-    "completion_tokens",
-)
-_CACHED_INPUT_TOKEN_ATTRIBUTES = (
-    "gen_ai.usage.cached_input_tokens",
-    "gen_ai.usage.cache_read.input_tokens",
-    "gen_ai.usage.cache_read_tokens",
-    "cached_input_tokens",
-    "cache_read_tokens",
-    "cached_tokens",
-)
 _DISTRIBUTION_AGGREGATIONS = ("sum", "mean", "p50", "p95")
 
 
@@ -134,7 +109,7 @@ class ModelUsageMeasurer:
 
     def measure(self, trajectory: Trajectory) -> MeasurementResult:
         calls = [
-            step for step in trajectory.steps if step.operation in _MODEL_OPERATIONS
+            step for step in trajectory.steps if step.operation in MODEL_OPERATIONS
         ]
         if not calls:
             return MeasurementResult(
@@ -155,9 +130,9 @@ class ModelUsageMeasurer:
         reported_call_inputs: list[int] = []
 
         for call in calls:
-            call_input = _token_count(call, _INPUT_TOKEN_ATTRIBUTES)
-            call_output = _token_count(call, _OUTPUT_TOKEN_ATTRIBUTES)
-            call_cached = _token_count(call, _CACHED_INPUT_TOKEN_ATTRIBUTES)
+            call_input = token_count(call, INPUT_TOKEN_ATTRIBUTES)
+            call_output = token_count(call, OUTPUT_TOKEN_ATTRIBUTES)
+            call_cached = token_count(call, CACHED_INPUT_TOKEN_ATTRIBUTES)
             if any(
                 value is not None for value in (call_input, call_output, call_cached)
             ):
@@ -214,23 +189,3 @@ class ModelUsageMeasurer:
                 f"{usage_reported_calls} reported token usage."
             ),
         )
-
-
-def _token_count(step: Step, names: tuple[str, ...]) -> int | None:
-    for name in names:
-        value = _non_negative_int(step.attributes.get(name))
-        if value is not None:
-            return value
-    return None
-
-
-def _non_negative_int(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(number) or number < 0 or not number.is_integer():
-        return None
-    return int(number)

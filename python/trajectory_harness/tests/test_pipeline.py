@@ -9,11 +9,12 @@ from harness_common.report_kit import Prose, Section
 from harness_common.verdict import CheckVerdict
 from trajectory_harness import (
     ExecutionResult,
+    ExecutionSuccessEvaluator,
     ModelUsageMeasurer,
     Recording,
     RecordingQuery,
     RecordingRef,
-    RepeatedToolCallEvaluator,
+    RepeatedToolCallDetector,
     Step,
     Trajectory,
     TrajectoryDataset,
@@ -160,7 +161,8 @@ def _harness(source, version, *, verdict_policy=None):
     return TrajectoryHarness(
         builder=_CCRDatasetBuilder(source=source, version=version),
         runner=_CCRRunner(
-            evaluators=(RepeatedToolCallEvaluator(),),
+            detectors=(RepeatedToolCallDetector(),),
+            evaluators=(ExecutionSuccessEvaluator(),),
             measurers=(ModelUsageMeasurer(),),
         ),
         reporter=_CCRReport(),
@@ -219,12 +221,19 @@ def test_harness_persists_current_run_and_rerenders_without_source(tmp_path):
     ]
     assert result.artifact.run.annotation_count == 1
     assert result.artifact.run.trajectory_targets == (("ok", "review1"),)
+    assert result.artifact.run.detections[0].target == "review1"
+    assert result.artifact.run.detections[0].category == "behavior"
     assert result.artifact.run.evaluations[0].target == "review1"
     assert result.artifact.run.evaluations[0].category == "quality"
     assert result.artifact.run.measurements[0].category == "cost"
     assert all(
         metric.dataset_version == "2026-W34" for metric in result.artifact.run.metrics
     )
+    finding_metrics = [
+        metric for metric in result.artifact.run.metrics if metric.name == "finding"
+    ]
+    assert {metric.aggregation for metric in finding_metrics} == {"count", "rate"}
+    assert {metric.direction for metric in finding_metrics} == {"neutral"}
     assert json.loads(result.verdict_path.read_text())["status"] == "error"
 
     loaded = load_run_artifact(result.run_dir)
@@ -236,6 +245,7 @@ def test_harness_persists_current_run_and_rerenders_without_source(tmp_path):
     assert "Dataset build health" in html
     assert "unsupported recording" in html
     assert "Evaluation evidence" in html
+    assert "Detection evidence" in html
     assert "repeated_tool_call" in html
     assert "Measurement evidence" in html
     assert "input_tokens" in html
@@ -288,7 +298,8 @@ def test_runner_preserves_target_and_category_as_worksheet_dimensions():
     )
 
     run = _CCRRunner(
-        evaluators=(RepeatedToolCallEvaluator(),),
+        detectors=(RepeatedToolCallDetector(),),
+        evaluators=(ExecutionSuccessEvaluator(),),
         measurers=(ModelUsageMeasurer(),),
     ).run(dataset, run_id="compare-reviews")
 
@@ -296,6 +307,10 @@ def test_runner_preserves_target_and_category_as_worksheet_dimensions():
         ("review-1", "review1"),
         ("review-2", "review2"),
     )
+    assert {(item.target, item.category) for item in run.detections} == {
+        ("review1", "behavior"),
+        ("review2", "behavior"),
+    }
     assert {(item.target, item.category) for item in run.evaluations} == {
         ("review1", "quality"),
         ("review2", "quality"),

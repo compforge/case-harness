@@ -10,7 +10,6 @@ from trajectory_harness.model import Trajectory
 EvaluatorKind = Literal["common", "domain"]
 EvaluationStatus = Literal["evaluated", "not_applicable", "error"]
 Verdict = Literal["pass", "fail", "warning"]
-FindingSeverity = Literal["info", "warning", "error"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,38 +46,8 @@ class EvaluatorSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class Finding:
-    """One evaluator finding, its evidence, and possible explanations."""
-
-    code: str
-    severity: FindingSeverity
-    summary: str
-    step_ids: tuple[str, ...] = ()
-    hypotheses: tuple[str, ...] = ()
-
-    def to_dict(self) -> dict:
-        return {
-            "code": self.code,
-            "severity": self.severity,
-            "summary": self.summary,
-            "step_ids": list(self.step_ids),
-            "hypotheses": list(self.hypotheses),
-        }
-
-    @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> Finding:
-        return cls(
-            code=str(value["code"]),
-            severity=value["severity"],
-            summary=str(value.get("summary") or ""),
-            step_ids=tuple(str(item) for item in value.get("step_ids", ())),
-            hypotheses=tuple(str(item) for item in value.get("hypotheses", ())),
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class EvaluationResult:
-    """One evaluator's quality conclusion and diagnostic findings."""
+    """One evaluator's quality conclusion and supporting evidence."""
 
     evaluator_id: str
     status: EvaluationStatus
@@ -86,7 +55,12 @@ class EvaluationResult:
     score: float | None = None
     explanation: str = ""
     step_ids: tuple[str, ...] = ()
-    findings: tuple[Finding, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.status == "evaluated" and self.verdict is None and self.score is None:
+            raise ValueError(
+                "an evaluated result must provide a verdict, a score, or both"
+            )
 
     def to_dict(self) -> dict:
         return {
@@ -96,7 +70,6 @@ class EvaluationResult:
             "score": self.score,
             "explanation": self.explanation,
             "step_ids": list(self.step_ids),
-            "findings": [finding.to_dict() for finding in self.findings],
         }
 
     @classmethod
@@ -108,9 +81,6 @@ class EvaluationResult:
             score=(float(value["score"]) if value.get("score") is not None else None),
             explanation=str(value.get("explanation") or ""),
             step_ids=tuple(str(item) for item in value.get("step_ids", ())),
-            findings=tuple(
-                Finding.from_dict(item) for item in value.get("findings", ())
-            ),
         )
 
 

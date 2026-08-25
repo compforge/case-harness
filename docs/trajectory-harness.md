@@ -31,14 +31,17 @@ RecordingSource
 ```
 
 `Trajectory` 是 trajectory_harness 的 Observation，也是贯穿全链路的主记录；`trajectory_id` 是
-Unit key 和 Worksheet 行键。它必须保留从 Recording、
-Case 和 Run 回溯所需的来源 identity；Dataset Builder 负责把 Case seed、人工 label、reference 和
-LLM 生成的监督信息对齐到 Unit，形成可反复评估的 TrajectoryDataset。每组实际选择的 Evaluator、
-Measurer 与可选 Policy 分别产生自己的 EvaluationRun / Worksheet；报告只对 Worksheet 做筛选、分组、聚合和展示，不重新
+Unit key 和 Worksheet 行键。它必须保留从 Recording、Case 和 Run 回溯所需的来源 identity，
+并在 `generation` provenance map 中记录实际产生行为的 agent revision、instruction/skill、
+tool contract、model、loop 与 orchestration 版本。这个 map 是 Trajectory 的来源字段，不是独立
+领域对象；真实值由 Loader 或项目 wrapper 填写，Harness 不从 Dataset 或 Evaluator version 推断。
+Dataset Builder 负责把 Case seed、人工 label、reference 和
+LLM 生成的监督信息对齐到 Unit，形成可反复评估的 TrajectoryDataset。每组实际选择的 Detector、
+Evaluator、Measurer 与可选 Policy 分别产生自己的 EvaluationRun / Worksheet；报告只对 Worksheet 做筛选、分组、聚合和展示，不重新
 读取 Source，也不重新解释原始 trace。
 
 这里的“大表”是逻辑模型，不要求 JSON 把整条 Trajectory 在每个结果中重复一遍。Dataset 保存
-Trajectory 与 Annotation seed，Run 保存本次 Evaluation 与 Measurement，再通过 `trajectory_id`
+Trajectory 与 Annotation seed，Run 保存本次 Detection、Evaluation 与 Measurement，再通过 `trajectory_id`
 无损恢复 Worksheet；同一 Dataset 可以对应多张不同侧重点或不同 evaluator 版本的 Worksheet。
 
 这里评估的对象是一次面向目标的 agent/workflow 执行。一个 Trajectory 可以只包含一个 agent
@@ -55,7 +58,8 @@ Trajectory 是这些 loop 配置及其编排共同作用后的运行证据，不
 标识 agent、workflow、LLM 和 tool 等操作。具体业务可以据此选择某个 Step 子树或整条 Trajectory
 进行评估，无需让通用 Harness 理解 Review 1、Review 2 等领域阶段。
 
-Evaluator 逐步沉淀可复用的判定和 Finding，Measurer 独立记录 token、调用量与耗时等事实，再由实验
+Detector 逐步沉淀可复用的 Finding，Evaluator 负责效果与契约判定，Measurer 独立记录 token、
+调用量与耗时等事实，再由实验
 或业务 Policy 判断应修改 prompt、tool、loop mechanism 还是 pipeline 编排。单个行为模式通常只是
 Finding；除非存在明确契约，不能直接把它定性成 Failure。
 
@@ -143,7 +147,7 @@ HTTP 传输层的 pool/connect/write/read 划分与
 TTFT、ITL/TPOT 和 end-to-end latency 是 Measurement，不是天然的 Failure 类型。TTFT 包含网络、
 排队、prefill 和首 token 生成；ITL/TPOT 是输出 token 间延迟的聚合值。只有调用方对这些
 边界实际执行 deadline 时，才产生 `first_chunk` 或 `inter_chunk` timeout Failure；“TPOT 偏高”
-本身应由 Measurer 输出 Measurement；只有对高延迟作出规则判断后才形成 Evaluator Finding。vLLM
+本身应由 Measurer 输出 Measurement；只有识别出稳定行为模式后才形成 Detector Finding。vLLM
 服务端进一步暴露 queue、prefill 和 decode 时间，
 这些数据可作为 Step attributes 帮助归因，但客户端 Loader 不应凭 TTFT 猜测其中哪一段超时。
 
@@ -173,17 +177,23 @@ target 选择适用 Evaluator，并把 target/category 写入 Worksheet 结果�
 
 - `execution_success`
 - `tool_success`
-- `repeated_tool_call`
 
-其中 `repeated_tool_call` 输出 warning 与诊断 Finding，提示检查缓存、复用或批量参数的机会；重复调用
-本身不等于错误。
+首批通用 Detector：
+
+- `repeated_tool_call`
+- `retry_loop`
+- `post_compact_refetch`
+
+其中 `repeated_tool_call` 输出诊断 Finding，提示检查缓存、复用或批量参数的机会；重复调用
+本身不等于错误。`retry_loop` 保留最终成功可能掩盖的失败重试，`post_compact_refetch` 只判断
+compact 前后完全相同的工具调用；外部资源是否必须刷新仍是待验证假设。
 
 文件覆盖率、搜索范围、业务提交是否完成等规则仍由业务包提供；通用 Harness 只负责执行和
 聚合，不理解业务工具语义。
 
 ### 3.2 围绕 Agent Loop 积累 Finding
 
-trajectory_harness 持续沉淀可跨业务复用的 Evaluator，其 Finding 可以帮助检查 agent loop 的
+trajectory_harness 持续沉淀可跨业务复用的 Detector，其 Finding 可以帮助检查 agent loop 的
 三个组成面：
 
 | 观察面 | 可沉淀的通用 Finding | 业务 Evaluator 负责的判断 |
@@ -194,13 +204,20 @@ trajectory_harness 持续沉淀可跨业务复用的 Evaluator，其 Finding 可
 
 这个对应是多对多的诊断索引，不是根因归属。例如连续重复调用同一 tool 是 Finding；它可能暗示
 工具缺少批量参数、prompt 未要求复用结果，或 loop 没有合适的停止机制，这些候选解释记录为
-`hypotheses`。Evaluator 只输出可复现的现象、证据和假设，根因由对照实验或业务 Policy 确认。
+`hypotheses`。Detector 只输出可复现的现象、证据和假设，根因由对照实验或业务 Policy 确认。
 
-新的通用 Evaluator 应在 `evaluators/` 中按一种稳定 Finding 一个实现沉淀；依赖行业工具清单、
+新的通用 Detector 应在 `detectors/` 中按一种稳定 Finding 一个实现沉淀；依赖行业工具清单、
 业务阶段或特定结果契约的判断留在 domain Evaluator。pipeline 可以包含多个 loop，跨 loop 的
-编排与协作 Finding 同样由 domain Evaluator 先行沉淀，出现稳定跨业务模式后再上收为通用实现。
+编排与协作 Finding 同样由 domain Detector 先行沉淀，出现稳定跨业务模式后再上收为通用实现。
 
-### 3.3 EvaluationResult
+### 3.3 DetectionResult 与 EvaluationResult
+
+一个 Detector 对一条轨迹返回一个 `DetectionResult`：
+
+- `status`：`analyzed / not_applicable / error`。
+- `findings`：零到多个诊断发现；每个 Finding 包含稳定 `code`、`severity`、摘要、
+  `step_ids` 证据及可能原因 `hypotheses`。
+- `explanation`：Detector 的适用性或执行说明。
 
 一个 Evaluator 对一条轨迹返回一个 `EvaluationResult`：
 
@@ -208,21 +225,19 @@ trajectory_harness 持续沉淀可跨业务复用的 Evaluator，其 Finding 可
 - `verdict`：`pass / fail / warning`。
 - `score`：可选的归一化分数。
 - `explanation / step_ids`：可读解释与证据锚点。
-- `findings`：Evaluator 观察到的零到多个诊断发现；每个 Finding 包含稳定 `code`、`severity`、摘要、
-  `step_ids` 证据及可能原因 `hypotheses`。
 
 `not_applicable` 不按 0 分处理；Evaluator 异常使用 `status=error`，属于评估执行健康，不是
 轨迹质量。Harness 不默认加权不同 Evaluator 的 score；如业务需要准入门槛或综合分，应显式
 提供 Policy。
 
-Failure 与 Evaluator 判定是两条独立轴：`Step.failure / ExecutionResult.failure` 只记录运行时
-已经发生的失败事实；Evaluator 发现的行为模式写入 `EvaluationResult.findings`，可能原因只是
+Failure、Detector 发现与 Evaluator 判定是三条独立轴：`Step.failure / ExecutionResult.failure`
+只记录运行时已经发生的失败事实；Detector 发现的行为模式写入 `DetectionResult.findings`，可能原因只是
 Hypothesis，不是已确认 Issue。存在改进可能但尚不能判错时使用 `verdict=warning`；业务契约明确
 认为该行为不合格时使用 `verdict=fail`。这里不使用 `verdict=error`，因为 `status=error` 专门表示
 Evaluator 自身执行异常。报告分别展示 Failure 与 Evaluator 结果，不能把 warning/fail 反写成
 轨迹 Failure。
 
-`Finding` 是 Evaluator 对证据作出解释后识别的具体问题模式，不是可任意聚合的原始数值。
+`Finding` 是 Detector 对证据作出解释后识别的具体问题模式，不是可任意聚合的原始数值。
 它使用稳定 `code` 表示模式、`step_ids` 指向证据，并用 `hypotheses` 保存尚未确认的可能原因。token、
 调用次数、时长等能直接计数或求和的观测必须进入 Measurement；如果一个 Finding 只是在换名字包装
 原始事实，就不应作为 Finding。
@@ -239,14 +254,20 @@ Measurer 只观察事实，不判断质量。`MeasurerSpec` 声明稳定 `measur
 并携带 Measurement、解释及证据 step。它不包含 verdict、score 或 Finding。反过来，EvaluatorSpec
 和 EvaluationResult 也不声明或携带 Measurement。
 
-首个通用 Measurer 是 `ModelUsageMeasurer`。命名和类型共同表达边界，不提供所谓
+通用 Measurer 分别观察模型、工具与上下文使用：
+
+- `ModelUsageMeasurer`：模型调用、input/output/cache token 与使用量覆盖率；
+- `ToolUsageMeasurer`：执行次数、Failure、耗时、result bytes、result 覆盖率与已观测并发；
+- `ContextUsageMeasurer`：input token 首尾/峰值变化、compact 次数及 compact 边界前后的 input delta。
+
+这些值不判断一次读取、压缩或调用是否必要；命名和类型共同表达边界，不提供所谓
 “measurement-only evaluator”。
 
 ### 3.5 成本与效果联合解释
 
 模型调用次数、input/output/cache token、耗时和工具调用次数都是 Measurement，不天然代表好坏。
 相同成本可能用于完成更难的任务，也可能来自重复读取、失败重试或上下文膨胀；因此这些原始量默认使用
-`direction=neutral`。通用 Evaluator 可以另外输出重复调用、失败重试、上下文增长等可复现 Finding，
+`direction=neutral`。通用 Detector 可以另外输出重复调用、失败重试、上下文增长等可复现 Finding，
 但不能只因为 token 更多就判定轨迹更差。
 
 成本优化必须和效果放在同一 Dataset/Cohort 中比较。以 CCR 为例，通用 Harness 负责记录每条 Review
@@ -259,6 +280,10 @@ rate、completion/timeout 与单位有效 finding 成本。有限时间或 token
 `ModelUsageMeasurer` 只输出事实与覆盖率，不内建价格表。货币成本依赖 provider、模型、时间、缓存
 计费和长上下文阶梯价，应由带 pricing provenance 的消费侧 Measurement 逐调用计算后再聚合，未知
 价格保持 unknown，不能静默当作零成本。
+
+报告可以由业务通过 `ParetoSpec` 显式选择一条 effect Metric 与一条 cost Metric，展示 completion、
+duration p95 和支配关系。Harness 不从 category 或 direction 自动猜测业务 effect；存在多个 target
+或 evaluator 时，选择器必须把维度限定到唯一 Metric。
 
 ## 4. Trajectory Dataset 与 Worksheet
 
@@ -274,7 +299,8 @@ Trajectory Unit
 
 EvaluationRun Worksheet row
 ├── unit                         dataset seed by trajectory_id
-├── evaluations[]               evaluator verdict / score / findings
+├── detections[]                detector findings
+├── evaluations[]               evaluator verdict and/or score
 └── measurements[]              token / latency / calls / resource facts
 ```
 
@@ -285,18 +311,19 @@ URI/path；同一 Recording 解析出的多条轨迹共享 recording id。`Traje
 它不能因此被静默丢弃。
 
 数据的生产者和数据的语义是两条独立轴。人工和外部系统通常产生 Annotation；LLM 既可以产生待评估
-的监督信息，也可以作为 Evaluator 的实现。前者仍是 Annotation，后者输出 EvaluationResult。
-Evaluator 的 verdict、score 和 Finding 不回填 Annotation；Measurer 的原始事实也不伪装成
+的监督信息，也可以作为 Detector 或 Evaluator 的实现。前者仍是 Annotation，后两者分别输出
+DetectionResult 与 EvaluationResult。Finding、verdict 和 score 不回填 Annotation；Measurer 的原始事实也不伪装成
 Evaluation。
 
 `TrajectoryDataset` 固定 `Unit + Annotation` seed。`TrajectoryEvaluationRun` 把本次实际选择的
-Evaluator / Measurer / Policy 施加到确定的 Dataset version，记录组件 spec 与配置，为同一批
-Unit 填充 Evaluation 和 Measurement 列：
+Detector / Evaluator / Measurer / Policy 施加到确定的 Dataset version，记录组件 spec 与配置，
+为同一批 Unit 填充 Detection、Evaluation 和 Measurement 列：
 
 ```text
 TrajectoryEvaluationRun
 ├── trajectory_ids[]
 ├── trajectory_targets[]
+├── detections[]           target + category + detector results
 ├── evaluations[]          target + category + evaluator results
 ├── measurements[]         target + category + measurement results
 └── metrics[]              dimensions 上的聚合结果
@@ -342,7 +369,7 @@ measurement.value.sum{target=review1,category=cost,measurer_id=model_usage,measu
 
 - `dataset.json`：Worksheet 的固定 seed，包含 Trajectory、TrajectoryAnnotation、RecordingQuery
   与构建健康。
-- `run.json`：本次 TrajectoryEvaluationRun，Evaluation/Measurement 通过 trajectory id 引用 Dataset，
+- `run.json`：本次 TrajectoryEvaluationRun，Detection/Evaluation/Measurement 通过 trajectory id 引用 Dataset，
   不重复存轨迹。
 - `report.html`：从 Worksheet 纯投影出的 UI-friendly 视图。
 - `verdict.json`：跨 Harness 统一出口；Finding 不自动成为 check，无领域 Policy 时为 `skipped`。
@@ -355,7 +382,7 @@ measurement.value.sum{target=review1,category=cost,measurer_id=model_usage,measu
 
 ```text
 TrajectoryDatasetBuilder:   select -> fetch -> load -> annotation join -> versioned Dataset
-TrajectoryEvaluationRunner: Dataset + Evaluators / Measurers / Policy -> Worksheet -> Run + Metric
+TrajectoryEvaluationRunner: Dataset + Detectors / Evaluators / Measurers / Policy -> Worksheet -> Run + Metric
 TrajectoryReportBuilder:    Worksheet + external history -> Report IR -> report.html
 ```
 
@@ -370,13 +397,12 @@ trajectory_harness 拥有轨迹领域报告语义，对外提供 `build_report`�
 
 1. TrajectoryEvaluationRun、Dataset 及 target/category 维度。
 2. 执行结果与 Failure 分类。
-3. common/domain Evaluator 目录。
-4. Measurer 目录。
-5. 最新 Metric。
-6. 最新 Worksheet 各行的 Annotation、Evaluation Finding 与 step evidence。
-7. 最新 Worksheet 各行的 Measurement 明细与 step evidence。
-8. 多个 Run 的 Metric 趋势。
-9. Source/Loader 的 Dataset build health（通过一键 Harness 生成时）。
+3. common/domain Detector 目录与 Detection/Finding evidence。
+4. common/domain Evaluator 目录与 Evaluation evidence。
+5. Measurer 目录与 Measurement evidence。
+6. 最新 Metric。
+7. 多个 Run 的 Metric 趋势。
+8. Source/Loader 的 Dataset build health（通过一键 Harness 生成时）。
 
 实现上先投影为 `harness_common.report_kit.Report`，再使用公共 HTML renderer。report_kit 只
 理解 Section、Table、Chart 等中立文档块；业务子类可以从持久化模型追加 Section，但不自行维护

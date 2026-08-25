@@ -149,6 +149,7 @@ class Trajectory:
     execution: ExecutionResult | None = None
     recording_id: str = ""
     source: str = ""
+    generation: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -156,6 +157,7 @@ class Trajectory:
             "trajectory_id": self.trajectory_id,
             "recording_id": self.recording_id,
             "source": self.source,
+            "generation": dict(self.generation),
             "execution": self.execution.to_dict() if self.execution else None,
             "metadata": dict(self.metadata),
             "steps": [step.to_dict() for step in self.steps],
@@ -172,6 +174,10 @@ class Trajectory:
                 else None
             ),
             source=value.get("source", ""),
+            generation={
+                str(key): str(item)
+                for key, item in (value.get("generation") or {}).items()
+            },
             metadata=dict(value.get("metadata", {})),
             steps=tuple(Step.from_dict(step) for step in value.get("steps", ())),
         )

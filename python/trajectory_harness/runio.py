@@ -10,13 +10,14 @@ from typing import Any
 
 from trajectory_harness.build import DatasetBuildResult, DatasetBuildSummary
 from trajectory_harness.dataset import TrajectoryDataset
+from trajectory_harness.detect import DetectorSpec, TrajectoryDetection
 from trajectory_harness.evaluate import EvaluatorSpec, TrajectoryEvaluation
 from trajectory_harness.measure import MeasurerSpec, TrajectoryMeasurement
 from trajectory_harness.metrics import Metric, TrajectoryEvaluationRun
 from trajectory_harness.model import Trajectory
 
-DATASET_SCHEMA = 2
-RUN_SCHEMA = 3
+DATASET_SCHEMA = 3
+RUN_SCHEMA = 4
 DATASET_FILE = "dataset.json"
 RUN_FILE = "run.json"
 
@@ -43,7 +44,11 @@ class TrajectoryRunArtifact:
             raise ValueError("every trajectory must have exactly one evaluation target")
         result_trajectory_ids = {
             item.trajectory.trajectory_id
-            for item in (*self.run.evaluations, *self.run.measurements)
+            for item in (
+                *self.run.detections,
+                *self.run.evaluations,
+                *self.run.measurements,
+            )
         }
         if not result_trajectory_ids <= set(self.run.trajectory_ids):
             raise ValueError("run result references a trajectory outside its Worksheet")
@@ -123,6 +128,8 @@ def _run_to_dict(run: TrajectoryEvaluationRun) -> dict[str, Any]:
         "dataset_version": run.dataset_version,
         "trajectory_ids": list(run.trajectory_ids),
         "trajectory_targets": dict(run.trajectory_targets),
+        "detections": [item.to_dict() for item in run.detections],
+        "detector_specs": [item.to_dict() for item in run.detector_specs],
         "evaluations": [item.to_dict() for item in run.evaluations],
         "evaluator_specs": [item.to_dict() for item in run.evaluator_specs],
         "measurements": [item.to_dict() for item in run.measurements],
@@ -162,6 +169,13 @@ def _run_from_dict(
         trajectory_ids=tuple(str(item) for item in value.get("trajectory_ids", ())),
         trajectory_targets=tuple(
             (str(key), str(item)) for key, item in targets.items()
+        ),
+        detections=tuple(
+            TrajectoryDetection.from_dict(item, trajectory=trajectory_for(item))
+            for item in value.get("detections", ())
+        ),
+        detector_specs=tuple(
+            DetectorSpec.from_dict(item) for item in value.get("detector_specs", ())
         ),
         evaluations=tuple(
             TrajectoryEvaluation.from_dict(item, trajectory=trajectory_for(item))

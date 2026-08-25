@@ -24,6 +24,12 @@ from trajectory_harness.metrics import (
     TrajectoryEvaluationRun,
     aggregate_metrics,
 )
+from trajectory_harness.report_comparison import ParetoSpec, pareto_section
+from trajectory_harness.report_detection import (
+    detection_evidence_section,
+    detector_catalog_section,
+)
+from trajectory_harness.report_provenance import generation_provenance_section
 from trajectory_harness.runio import TrajectoryRunArtifact, load_run_artifact
 
 REPORT_FILE = "report.html"
@@ -56,6 +62,10 @@ class _RunView:
         return self.run.dataset_id
 
     @property
+    def detections(self):
+        return self.run.detections
+
+    @property
     def evaluations(self):
         return self.run.evaluations
 
@@ -76,6 +86,7 @@ class TrajectoryReportBuilder:
     """Pure run-artifact-to-report stage; domains may add presentation sections."""
 
     report_title = "Trajectory evaluation"
+    pareto: ParetoSpec | None = None
 
     def extra_sections(
         self,
@@ -97,6 +108,7 @@ class TrajectoryReportBuilder:
         return build_report(
             runs,
             title=self.report_title,
+            pareto=self.pareto,
             extra_sections=sections,
         )
 
@@ -177,6 +189,7 @@ def build_report(
     *,
     title: str = "Trajectory evaluation",
     metrics: Sequence[Metric] | None = None,
+    pareto: ParetoSpec | None = None,
     extra_sections: Iterable[Section] = (),
 ) -> Report:
     """Build the canonical trajectory report from one or more evaluation runs."""
@@ -191,14 +204,25 @@ def build_report(
     latest = ordered[-1] if ordered else None
     sections = [
         _runs_section(views),
+        generation_provenance_section(ordered),
         _execution_section(tuple(latest_by_dataset.values())),
+        detector_catalog_section(ordered),
         _evaluators_section(views),
         _measurers_section(views),
         _metrics_section(tuple(latest_by_dataset.values())),
+        detection_evidence_section(tuple(run.run for run in latest_runs)),
         _evaluation_evidence_section(latest_runs),
         _measurement_evidence_section(latest_runs),
         _trends_section(run_metrics),
     ]
+    if pareto:
+        sections.insert(
+            2,
+            pareto_section(
+                tuple((run.run, metrics) for run, metrics in run_metrics),
+                pareto,
+            ),
+        )
     sections.extend(extra_sections)
     meta = [("Runs", str(len(ordered)))]
     if latest:
@@ -216,6 +240,7 @@ def render_report_html(
     *,
     title: str = "Trajectory evaluation",
     metrics: Sequence[Metric] | None = None,
+    pareto: ParetoSpec | None = None,
     extra_sections: Iterable[Section] = (),
 ) -> str:
     """Render trajectory evaluation runs as a standalone HTML document."""
@@ -225,6 +250,7 @@ def render_report_html(
             runs,
             title=title,
             metrics=metrics,
+            pareto=pareto,
             extra_sections=extra_sections,
         )
     )
@@ -236,6 +262,7 @@ def write_report_html(
     *,
     title: str = "Trajectory evaluation",
     metrics: Sequence[Metric] | None = None,
+    pareto: ParetoSpec | None = None,
     extra_sections: Iterable[Section] = (),
 ) -> Path:
     """Write the canonical HTML report and return its path."""
@@ -246,6 +273,7 @@ def write_report_html(
             runs,
             title=title,
             metrics=metrics,
+            pareto=pareto,
             extra_sections=extra_sections,
         ),
         encoding="utf-8",
@@ -300,6 +328,7 @@ def _runs_section(runs: Sequence[_RunView]) -> Section:
                     "Created at",
                     "Dataset",
                     "Version",
+                    "Detection cells",
                     "Evaluation cells",
                     "Measurement cells",
                     "Annotations",
@@ -310,6 +339,7 @@ def _runs_section(runs: Sequence[_RunView]) -> Section:
                         run.created_at.isoformat(),
                         run.label,
                         run.dataset_version or "—",
+                        str(len(run.detections)),
                         str(len(run.evaluations)),
                         str(len(run.measurements)),
                         (
@@ -396,7 +426,7 @@ def _failure_rows(run: _RunView) -> list[list[str]]:
     rows = []
     trajectories = {
         item.trajectory.trajectory_id: item.trajectory
-        for item in (*run.evaluations, *run.measurements)
+        for item in (*run.detections, *run.evaluations, *run.measurements)
     }
     for trajectory in trajectories.values():
         for step in trajectory.steps:
@@ -517,31 +547,26 @@ def _evaluation_evidence_section(runs: Sequence[_RunView]) -> Section:
     for run in sorted(runs, key=lambda item: item.label):
         for item in run.evaluations:
             for result in item.results:
-                findings = result.findings or (None,)
-                for finding in findings:
-                    rows.append(
-                        [
-                            run.label,
-                            item.trajectory.trajectory_id,
-                            item.target or "—",
-                            item.category,
-                            result.evaluator_id,
-                            result.status,
-                            result.verdict or "—",
-                            (
-                                _format_number(result.score)
-                                if result.score is not None
-                                else "—"
-                            ),
-                            finding.code if finding else "—",
-                            finding.severity if finding else "—",
-                            finding.summary if finding else "—",
-                            ", ".join(finding.step_ids if finding else result.step_ids)
-                            or "—",
-                            "; ".join(finding.hypotheses) if finding else "—",
-                            result.explanation or "—",
-                        ]
-                    )
+                rows.append(
+                    [
+                        run.label,
+                        item.trajectory.trajectory_id,
+                        item.trajectory.recording_id or "—",
+                        item.trajectory.source or "—",
+                        item.target or "—",
+                        item.category,
+                        result.evaluator_id,
+                        result.status,
+                        result.verdict or "—",
+                        (
+                            _format_number(result.score)
+                            if result.score is not None
+                            else "—"
+                        ),
+                        ", ".join(result.step_ids) or "—",
+                        result.explanation or "—",
+                    ]
+                )
     return Section(
         heading="Evaluation evidence",
         blocks=[
@@ -549,17 +574,15 @@ def _evaluation_evidence_section(runs: Sequence[_RunView]) -> Section:
                 columns=[
                     "Dataset",
                     "Trajectory",
+                    "Recording",
+                    "Source",
                     "Target",
                     "Category",
                     "Evaluator",
                     "Status",
                     "Verdict",
                     "Score",
-                    "Finding",
-                    "Severity",
-                    "Summary",
                     "Steps",
-                    "Hypotheses",
                     "Explanation",
                 ],
                 rows=rows,
@@ -581,6 +604,8 @@ def _measurement_evidence_section(runs: Sequence[_RunView]) -> Section:
                         [
                             run.label,
                             item.trajectory.trajectory_id,
+                            item.trajectory.recording_id or "—",
+                            item.trajectory.source or "—",
                             item.target or "—",
                             item.category,
                             result.measurer_id,
@@ -598,6 +623,8 @@ def _measurement_evidence_section(runs: Sequence[_RunView]) -> Section:
                 columns=[
                     "Dataset",
                     "Trajectory",
+                    "Recording",
+                    "Source",
                     "Target",
                     "Category",
                     "Measurer",

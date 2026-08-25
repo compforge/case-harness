@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Iterable, Literal
 
+from trajectory_harness.detect import DetectorSpec, TrajectoryDetection
 from trajectory_harness.evaluate import EvaluatorSpec, TrajectoryEvaluation
 from trajectory_harness.measure import (
     MetricDirection,
@@ -29,6 +30,8 @@ class TrajectoryEvaluationRun:
     dataset_version: str
     trajectory_ids: tuple[str, ...]
     trajectory_targets: tuple[tuple[str, str], ...] = ()
+    detections: tuple[TrajectoryDetection, ...] = ()
+    detector_specs: tuple[DetectorSpec, ...] = ()
     evaluations: tuple[TrajectoryEvaluation, ...] = ()
     evaluator_specs: tuple[EvaluatorSpec, ...] = ()
     measurements: tuple[TrajectoryMeasurement, ...] = ()
@@ -49,6 +52,8 @@ class TrajectoryEvaluationRun:
             "trajectories": [item.to_dict() for item in _run_trajectories(self)],
             "trajectory_ids": list(self.trajectory_ids),
             "trajectory_targets": dict(self.trajectory_targets),
+            "detections": [item.to_dict() for item in self.detections],
+            "detector_specs": [item.to_dict() for item in self.detector_specs],
             "evaluations": [item.to_dict() for item in self.evaluations],
             "evaluator_specs": [item.to_dict() for item in self.evaluator_specs],
             "measurements": [item.to_dict() for item in self.measurements],
@@ -87,6 +92,13 @@ class TrajectoryEvaluationRun:
             ),
             trajectory_targets=tuple(
                 (str(key), str(item)) for key, item in targets.items()
+            ),
+            detections=tuple(
+                TrajectoryDetection.from_dict(item, trajectory=trajectory_for(item))
+                for item in value.get("detections", ())
+            ),
+            detector_specs=tuple(
+                DetectorSpec.from_dict(item) for item in value.get("detector_specs", ())
             ),
             evaluations=tuple(
                 TrajectoryEvaluation.from_dict(item, trajectory=trajectory_for(item))
@@ -194,6 +206,7 @@ def aggregate_metrics(
     for target, trajectories in sorted(targets.items()):
         metrics.extend(_execution_metrics(run, target, trajectories))
         metrics.extend(_failure_metrics(run, target, trajectories))
+    metrics.extend(_detection_metrics(run))
     metrics.extend(_evaluation_metrics(run))
     metrics.extend(_measurement_metrics(run))
     return tuple(metrics)
@@ -333,9 +346,102 @@ def _failure_metrics(
 def _run_trajectories(run: TrajectoryEvaluationRun) -> tuple[Trajectory, ...]:
     by_id = {
         item.trajectory.trajectory_id: item.trajectory
-        for item in (*run.evaluations, *run.measurements)
+        for item in (*run.detections, *run.evaluations, *run.measurements)
     }
     return tuple(by_id.values())
+
+
+def _detection_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
+    result = []
+    grouped = defaultdict(list)
+    for item in run.detections:
+        for detection in item.results:
+            grouped[(item.target, item.category, detection.detector_id)].append(
+                detection
+            )
+    for (target, category, detector_id), detections in sorted(grouped.items()):
+        total = _target_total(run, target)
+        analyzed = [item for item in detections if item.status == "analyzed"]
+        errors = [item for item in detections if item.status == "error"]
+        dimensions = _context_dimensions(target, category) + (
+            ("detector_id", detector_id),
+        )
+        if total:
+            result.extend(
+                (
+                    _metric(
+                        run,
+                        "detection.applicability",
+                        len(analyzed) / total,
+                        "rate",
+                        "ratio",
+                        "neutral",
+                        dimensions,
+                    ),
+                    _metric(
+                        run,
+                        "detection.error",
+                        len(errors) / total,
+                        "rate",
+                        "ratio",
+                        "lower_is_better",
+                        dimensions,
+                    ),
+                )
+            )
+
+        findings = [
+            (detection, finding)
+            for detection in analyzed
+            for finding in detection.findings
+        ]
+        for code, severity in sorted(
+            {(finding.code, finding.severity) for _, finding in findings}
+        ):
+            matching = [
+                (detection, finding)
+                for detection, finding in findings
+                if (finding.code, finding.severity) == (code, severity)
+            ]
+            finding_dimensions = dimensions + (
+                ("code", code),
+                ("severity", severity),
+            )
+            result.append(
+                _metric(
+                    run,
+                    "finding",
+                    len(matching),
+                    "count",
+                    "count",
+                    "neutral",
+                    finding_dimensions,
+                )
+            )
+            if total:
+                affected = {
+                    item.trajectory.trajectory_id
+                    for item in run.detections
+                    if item.target == target and item.category == category
+                    for detection in item.results
+                    if detection.detector_id == detector_id
+                    and any(
+                        finding.code == code and finding.severity == severity
+                        for finding in detection.findings
+                    )
+                }
+                result.append(
+                    _metric(
+                        run,
+                        "finding",
+                        len(affected) / total,
+                        "rate",
+                        "ratio",
+                        "neutral",
+                        finding_dimensions,
+                    )
+                )
+    return result
 
 
 def _evaluation_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
