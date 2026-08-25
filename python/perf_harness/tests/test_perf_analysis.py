@@ -205,6 +205,7 @@ def test_phase_error_is_diagnostic_not_a_curve_point():
     run = _sweep()
     broken = run.trials[1]
     broken.stop = TrialStop(reason="aborted")
+    broken.measurement.complete = False
     broken.phase_errors = [PhaseError("setup", "RuntimeError", "testbed unavailable")]
 
     grouped = by_resources(run.trials)
@@ -213,3 +214,18 @@ def test_phase_error_is_diagnostic_not_a_curve_point():
     flags = _titles(analyze(run), "validity", "flag")
     assert any("执行异常" in title and "setup" in title for title in flags)
     assert not any("提前停止" in title and broken.label() in title for title in flags)
+
+
+def test_phase_error_after_complete_measurement_preserves_curve_point():
+    for phase in ("deactivate", "cooldown", "cleanup"):
+        run = _sweep()
+        completed = run.trials[1]
+        completed.phase_errors = [PhaseError(phase, "RuntimeError", f"{phase} failed")]
+
+        grouped = by_resources(run.trials)
+        assert completed in grouped[0][1]
+
+        flags = _titles(analyze(run), "validity", "flag")
+        assert any(
+            "执行异常" in title and phase in title and "保留性能曲线点" in title for title in flags
+        )

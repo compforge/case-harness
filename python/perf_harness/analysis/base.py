@@ -32,13 +32,13 @@ def by_resources(trials: list[TrialRecord]) -> list[tuple[str, list[TrialRecord]
     """Group trials by resource-profile label, each group sorted by peak level — the
     'sweep curves' every lens walks (x = load level within one profile).
 
-    Phase-error trials are execution diagnostics rather than comparable load
-    observations. Validity reports them separately; capacity/resource/latency must
-    not turn their partial or contaminated samples into a response curve.
+    A phase error invalidates a curve point only when measurement is incomplete.
+    Errors from later lifecycle work still fail the run and stop the sweep, but
+    they do not erase a complete measurement that was already observed.
     """
     groups: dict[str, list[TrialRecord]] = {}
     for r in trials:
-        if r.phase_errors:
+        if r.phase_errors and not r.measurement.complete:
             continue
         groups.setdefault(r.arm.resources.label(), []).append(r)
     return [

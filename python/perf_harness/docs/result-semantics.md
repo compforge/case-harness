@@ -78,3 +78,6 @@ arrival time。
 setup 阶段尚未发出任何请求，Harness 仍能持久化空的 partial measurement Window、run/report 和
 状态为 `error` 的 `verdict.json`；调用方可以从 phase、异常类型和消息判断是环境准备失败还是发压阶段
 失败。cleanup 会照常尝试，其异常作为同一 Trial 的后续 phase error 保留，不覆盖主异常。
+Phase error 始终让 run 失败并停止后续 sweep，但不抹掉已完成的当前 measurement：只有
+`measurement.complete=false` 的异常 Trial 才不进入容量、资源和延迟曲线；deactivate、cooldown 或
+cleanup 阶段失败时，已完成的 measurement 仍是有效事实。
