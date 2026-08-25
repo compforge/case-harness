@@ -24,17 +24,23 @@ def analyze(run: Run, store=None) -> list[Observation]:  # noqa: ARG001 — unif
         tid = r.label()
         s = r.stop
         for error in r.phase_errors:
+            curve_note = (
+                "measurement 已完成，保留性能曲线点"
+                if r.measurement.complete
+                else "measurement 未完成，不进入性能曲线"
+            )
             out.append(
                 Observation(
                     "validity",
                     "flag",
                     f"[{tid}] Trial 执行异常（{error.phase}）："
-                    f"{error.error_type}: {error.message} — 该档不进入性能曲线",
+                    f"{error.error_type}: {error.message} — {curve_note}",
                     {
                         "trial": tid,
                         "phase": error.phase,
                         "error_type": error.error_type,
                         "message": error.message,
+                        "measurement_complete": r.measurement.complete,
                     },
                 )
             )

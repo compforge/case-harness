@@ -73,7 +73,8 @@ Trial 的可选 `phase_errors`，每项至少包含 `phase`、`error_type` 和 `
 measurement 时使用 `stop.reason=aborted`。这类 Trial 的 run gate 必须失败，`verdict.json` 状态为
 `error`，但 Harness 仍应写出 run、raw、report 与 verdict 产物。进程取消、键盘中断等控制流异常可以
 继续向调用方传播。出现 phase error 后必须结束当前 sweep，不能把可能受残留状态污染的后续 Arm
-当作可比较的性能 Observation。
+当作可比较的性能 Observation。Phase error 仍让 run gate 失败，但不抹掉已完成的当前 measurement；
+当前 Trial 是否能进入性能曲线由 `measurement.complete` 决定，而不是由 phase 名称决定。
 
 资源观测与请求判定正交。Prombed、Prometheus、Kubernetes 等 Probe 可以由具体实现、消费方或
 [Harness 工具箱](../docs/toolbox.md)提供；其缺失不能改变 Outcome 的原始事实。
