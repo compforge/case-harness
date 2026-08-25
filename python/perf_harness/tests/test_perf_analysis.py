@@ -2,17 +2,19 @@
 numbers), plus the analyze_run end-to-end over a written run dir."""
 
 from perf_harness.analysis import analyze, analyze_run, render_text
-from perf_harness.analysis.base import linfit
+from perf_harness.analysis.base import by_resources, linfit
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.metric import GaugeSummary, MetricFamily, series_id
 from perf_harness.model import (
     Arm,
+    PhaseError,
     RequestStats,
     ResourceProfile,
     Run,
     Sample,
     Series,
     TrialRecord,
+    TrialStop,
     Window,
 )
 
@@ -197,3 +199,17 @@ def test_validity_flags_probe_errors():
     }
     flags = _titles(analyze(run), "validity", "flag")
     assert any("观测断档" in t and "metrics.chat" in t and "3/10" in t for t in flags)
+
+
+def test_phase_error_is_diagnostic_not_a_curve_point():
+    run = _sweep()
+    broken = run.trials[1]
+    broken.stop = TrialStop(reason="aborted")
+    broken.phase_errors = [PhaseError("setup", "RuntimeError", "testbed unavailable")]
+
+    grouped = by_resources(run.trials)
+    assert broken not in grouped[0][1]
+
+    flags = _titles(analyze(run), "validity", "flag")
+    assert any("执行异常" in title and "setup" in title for title in flags)
+    assert not any("提前停止" in title and broken.label() in title for title in flags)

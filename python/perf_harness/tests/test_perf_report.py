@@ -4,6 +4,7 @@ from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.metric import CounterSummary, GaugeSummary
 from perf_harness.model import (
     Arm,
+    PhaseError,
     RequestStats,
     ResourceProfile,
     Sample,
@@ -132,6 +133,18 @@ def test_report_rejects_early_stop_as_capacity(tmp_path):
     assert "Run 判定（trial 完整性 + SLO）" in md
     assert "FAIL" in md and "部分窗口不能确认" in md
     assert "SLO-aware 容量" in md and "—（无档达标）" in md
+
+
+def test_report_distinguishes_phase_error_from_load_failure(tmp_path):
+    trial = _trial(level=10)
+    trial.stop = TrialStop(reason="aborted")
+    trial.phase_errors = [PhaseError("setup", "RuntimeError", "target unavailable")]
+
+    paths = write_report([trial], str(tmp_path))
+    md = Path(paths["report"]).read_text()
+    assert "ERROR" in md
+    assert "setup: RuntimeError: target unavailable" in md
+    assert "不是请求失败或 SLO fail" in md
 
 
 def test_report_names_actual_window_and_fails_closed_on_cooldown_skip(tmp_path):

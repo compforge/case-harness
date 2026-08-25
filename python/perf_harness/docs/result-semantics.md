@@ -70,3 +70,11 @@ arrival time。
 
 `TrialStop` 记录 deadline、breaker 快照和在途请求 census。drop（未发）与 cancel（未完成）
 都不是延迟事实；提前停止会使 run 失败，但不会抹掉已完成 Window 的历史证据。
+
+### 阶段异常也是执行事实
+
+`setup / measurement / deactivate / cooldown / cleanup` 抛出的普通异常写入
+`TrialRecord.phase_errors`，而不是伪造成一次失败请求、Probe failure 或 SLO fail。这样即使
+setup 阶段尚未发出任何请求，Harness 仍能持久化空的 partial measurement Window、run/report 和
+状态为 `error` 的 `verdict.json`；调用方可以从 phase、异常类型和消息判断是环境准备失败还是发压阶段
+失败。cleanup 会照常尝试，其异常作为同一 Trial 的后续 phase error 保留，不覆盖主异常。

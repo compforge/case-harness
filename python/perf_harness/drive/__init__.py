@@ -30,6 +30,9 @@ from perf_harness.drive.load import (
     Stage as Stage,
 )
 from perf_harness.drive.workload import (
+    FireContext as FireContext,
+)
+from perf_harness.drive.workload import (
     MockWorkload as MockWorkload,
 )
 from perf_harness.drive.workload import (

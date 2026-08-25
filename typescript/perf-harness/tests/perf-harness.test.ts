@@ -180,7 +180,7 @@ describe("TypeScript perf harness", () => {
     expect(windows[1]).toMatchObject({ start_s: 0.75, end_s: 1, request: { n: 1 } });
   });
 
-  test("preserves both primary and cleanup errors", async () => {
+  test("preserves phase errors as diagnostic artifacts and stops the sweep", async () => {
     const engine = new Engine({
       subject: { name: "chat", target: {} },
       workload: {
@@ -188,18 +188,59 @@ describe("TypeScript perf harness", () => {
         fire: async () => ({ status: 200, duration_ms: 1 }),
         cleanup: async () => { throw new Error("cleanup failed"); },
       },
+      loads: [rampHold("closed", 1, 0, 1), rampHold("closed", 2, 0, 1)],
+    });
+    const run = await engine.run();
+    expect(run.passed).toBe(false);
+    expect(run.trials).toHaveLength(1);
+    expect(run.trials[0]!.stop.reason).toBe("aborted");
+    expect(run.trials[0]!.phase_errors).toEqual([
+      { phase: "setup", error_type: "Error", message: "setup failed" },
+      { phase: "cleanup", error_type: "Error", message: "cleanup failed" },
+    ]);
+
+    const directory = mkdtempSync(join(tmpdir(), "ts-perf-error-"));
+    try {
+      writeRunData(run, directory);
+      expect(JSON.parse(readFileSync(join(directory, "run.json"), "utf8"))).toMatchObject({
+        passed: false,
+        trials: [{ phase_errors: [{ phase: "setup" }, { phase: "cleanup" }] }],
+      });
+      expect(JSON.parse(readFileSync(join(directory, "verdict.json"), "utf8"))).toMatchObject({
+        status: "error",
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("external cancellation propagates after cleanup", async () => {
+    const controller = new AbortController();
+    const reason = new Error("stop run");
+    const events: string[] = [];
+    const engine = new Engine({
+      subject: { name: "chat", target: {} },
+      signal: controller.signal,
+      workload: {
+        setup: async (context) => {
+          events.push("setup");
+          controller.abort(reason);
+          throw context.signal.reason;
+        },
+        fire: async () => ({ status: 200, duration_ms: 1 }),
+        cleanup: async () => { events.push("cleanup"); },
+      },
       loads: [rampHold("closed", 1, 0, 1)],
     });
+
+    let caught: unknown;
     try {
       await engine.run();
-      throw new Error("expected perf trial to fail");
     } catch (error) {
-      expect(error).toBeInstanceOf(AggregateError);
-      expect((error as AggregateError).errors.map((item) => String(item))).toEqual([
-        "Error: setup failed",
-        "Error: cleanup failed",
-      ]);
+      caught = error;
     }
+    expect(caught).toBe(reason);
+    expect(events).toEqual(["setup", "cleanup"]);
   });
 
   test("empty raw outcome stream contains no invalid blank record", () => {

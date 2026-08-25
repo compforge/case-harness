@@ -107,6 +107,14 @@ export interface TrialStop {
   force_cancelled: boolean;
 }
 
+export type Phase = "setup" | "measurement" | "deactivate" | "cooldown" | "cleanup";
+
+export interface PhaseError {
+  phase: Phase;
+  error_type: string;
+  message: string;
+}
+
 export interface TimedOutcome {
   t: number;
   outcome: Outcome;
@@ -123,6 +131,7 @@ export interface TrialRecord {
   slo: unknown[];
   registry: Record<string, unknown>;
   probe_errors: Record<string, unknown>;
+  phase_errors: PhaseError[];
   outcomes: TimedOutcome[];
 }
 

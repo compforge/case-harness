@@ -4,10 +4,11 @@ import pytest
 from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile, Pacing, Schedule
-from perf_harness.drive.workload import MockWorkload, Workload
+from perf_harness.drive.workload import FireContext, MockWorkload, TrialContext, Workload
 from perf_harness.engine import Engine, Experiment, Subject
 from perf_harness.model import (
     Outcome,
+    PhaseError,
     ResourceProfile,
     Sample,
     SloAssertion,
@@ -22,7 +23,7 @@ class _AlwaysFailWL(Workload):
 
     name = "failwl"
 
-    async def fire(self, target, client, case, run_id):
+    async def fire(self, ctx):
         await asyncio.sleep(0.001)
         return Outcome(status=500, duration_ms=1.0)
 
@@ -30,7 +31,7 @@ class _AlwaysFailWL(Workload):
 class _RaisesWL(Workload):
     name = "raises"
 
-    async def fire(self, target, client, case, run_id):
+    async def fire(self, ctx):
         raise RuntimeError("transport detail")
 
 
@@ -208,7 +209,7 @@ class _SlowWL(Workload):
 
     name = "slowwl"
 
-    async def fire(self, target, client, case, run_id):
+    async def fire(self, ctx):
         await asyncio.sleep(2.0)
         return Outcome(status=200, duration_ms=2000.0)
 
@@ -265,20 +266,26 @@ async def test_engine_open_model_smoke():
 async def test_trial_hooks_wrap_load_and_cooldown_only_extends_raw_series():
     state = {"post_load": False}
     events: list[str] = []
+    lifecycle_contexts: list[TrialContext] = []
+    fire_contexts: list[FireContext] = []
 
     class LifecycleWorkload(Workload):
-        async def setup(self, ctx):
+        async def setup(self, ctx: TrialContext):
             events.append("setup")
+            lifecycle_contexts.append(ctx)
 
-        async def fire(self, target, client, case, run_id):
+        async def fire(self, ctx: FireContext):
+            fire_contexts.append(ctx)
             return Outcome(status=200, duration_ms=1.0)
 
-        async def deactivate(self, ctx):
+        async def deactivate(self, ctx: TrialContext):
             events.append("deactivation")
+            lifecycle_contexts.append(ctx)
             state["post_load"] = True
 
-        async def cleanup(self, ctx):
+        async def cleanup(self, ctx: TrialContext):
             events.append("cleanup")
+            lifecycle_contexts.append(ctx)
 
     class PhaseProbe(Probe):
         name = "phase"
@@ -308,6 +315,8 @@ async def test_trial_hooks_wrap_load_and_cooldown_only_extends_raw_series():
     run = await Engine(exp).run()
     trial = run.trials[0]
     assert events == ["setup", "deactivation", "cleanup"]
+    assert len({id(ctx) for ctx in lifecycle_contexts}) == 1
+    assert fire_contexts and all(ctx.trial is lifecycle_contexts[0] for ctx in fire_contexts)
     assert trial.measurement.probe_metrics["phase.post_load"].peak == 0.0
     assert any(s.value == 1.0 for s in trial.series["phase.post_load"].samples)
     assert any(window.kind == "cooldown" for window in trial.windows)
@@ -322,7 +331,7 @@ async def test_cleanup_runs_when_setup_fails():
             events.append("setup")
             raise RuntimeError("setup failed")
 
-        async def fire(self, target, client, case, run_id):
+        async def fire(self, ctx):
             return Outcome(status=200, duration_ms=1.0)
 
         async def cleanup(self, ctx):
@@ -332,11 +341,22 @@ async def test_cleanup_runs_when_setup_fails():
         subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
         workload=BrokenSetup(),
         resources=[ResourceProfile()],
-        loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1))],
+        loads=[
+            LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1)),
+            LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.1)),
+        ],
     )
-    with pytest.raises(RuntimeError, match="setup failed"):
-        await Engine(exp).run()
+    run = await Engine(exp).run()
+    # Execution/testbed failure stops the sweep even without abort_on_fail; the
+    # cleanup result cannot prove the next Arm starts from a clean baseline.
+    assert len(run.trials) == 1
+    trial = run.trials[0]
     assert events == ["setup", "cleanup"]
+    assert not run.passed
+    assert trial.stop.reason == "aborted"
+    assert trial.measurement.complete is False
+    assert trial.measurement.request.n == 0
+    assert trial.phase_errors == [PhaseError("setup", "RuntimeError", "setup failed")]
 
 
 async def test_cleanup_error_does_not_hide_setup_error():
@@ -344,7 +364,7 @@ async def test_cleanup_error_does_not_hide_setup_error():
         async def setup(self, ctx):
             raise RuntimeError("setup failed")
 
-        async def fire(self, target, client, case, run_id):
+        async def fire(self, ctx):
             return Outcome(status=200, duration_ms=1.0)
 
         async def cleanup(self, ctx):
@@ -356,9 +376,58 @@ async def test_cleanup_error_does_not_hide_setup_error():
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1))],
     )
-    with pytest.raises(RuntimeError, match="setup failed") as caught:
+    run = await Engine(exp).run()
+    assert run.trials[0].phase_errors == [
+        PhaseError("setup", "RuntimeError", "setup failed"),
+        PhaseError("cleanup", "RuntimeError", "cleanup failed"),
+    ]
+
+
+async def test_cancellation_propagates_after_cleanup():
+    events: list[str] = []
+
+    class CancelledSetup(Workload):
+        async def setup(self, ctx):
+            events.append("setup")
+            raise asyncio.CancelledError("stop run")
+
+        async def fire(self, ctx):
+            return Outcome(status=200, duration_ms=1.0)
+
+        async def cleanup(self, ctx):
+            events.append("cleanup")
+
+    exp = Experiment(
+        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        workload=CancelledSetup(),
+        resources=[ResourceProfile()],
+        loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1))],
+    )
+    with pytest.raises(asyncio.CancelledError, match="stop run"):
         await Engine(exp).run()
-    assert any("cleanup failed" in note for note in caught.value.__notes__)
+    assert events == ["setup", "cleanup"]
+
+
+async def test_cleanup_error_marks_completed_trial_as_phase_error():
+    class BrokenCleanup(Workload):
+        async def fire(self, ctx):
+            return Outcome(status=200, duration_ms=1.0)
+
+        async def cleanup(self, ctx):
+            raise RuntimeError("cleanup failed")
+
+    exp = Experiment(
+        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        workload=BrokenCleanup(),
+        resources=[ResourceProfile()],
+        loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.05))],
+    )
+    run = await Engine(exp).run()
+    trial = run.trials[0]
+    assert trial.stop.reason == "deadline"
+    assert trial.measurement.complete is True
+    assert trial.phase_errors == [PhaseError("cleanup", "RuntimeError", "cleanup failed")]
+    assert not run.passed
 
 
 async def test_cooldown_slo_missing_data_fails_closed():

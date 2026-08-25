@@ -30,9 +30,16 @@ class Observation:
 
 def by_resources(trials: list[TrialRecord]) -> list[tuple[str, list[TrialRecord]]]:
     """Group trials by resource-profile label, each group sorted by peak level — the
-    'sweep curves' every lens walks (x = load level within one profile)."""
+    'sweep curves' every lens walks (x = load level within one profile).
+
+    Phase-error trials are execution diagnostics rather than comparable load
+    observations. Validity reports them separately; capacity/resource/latency must
+    not turn their partial or contaminated samples into a response curve.
+    """
     groups: dict[str, list[TrialRecord]] = {}
     for r in trials:
+        if r.phase_errors:
+            continue
         groups.setdefault(r.arm.resources.label(), []).append(r)
     return [
         (label, sorted(rs, key=lambda r: r.arm.load.schedule.peak_level))

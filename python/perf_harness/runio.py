@@ -36,6 +36,7 @@ from perf_harness.metric import (
 from perf_harness.model import (
     Arm,
     Outcome,
+    PhaseError,
     ProbeErrors,
     RequestStats,
     ResourceProfile,
@@ -373,6 +374,10 @@ def _trial_json(r: TrialRecord) -> dict:
             name: {"failures": e.failures, "ticks": e.ticks, "last": e.last}
             for name, e in r.probe_errors.items()
         },
+        "phase_errors": [
+            {"phase": e.phase, "error_type": e.error_type, "message": e.message}
+            for e in r.phase_errors
+        ],
     }
 
 
@@ -420,6 +425,14 @@ def _trial_from(d: dict, subject: str) -> TrialRecord:
             )
             for name, e in (d.get("probe_errors") or {}).items()
         },
+        phase_errors=[
+            PhaseError(
+                phase=e["phase"],
+                error_type=e.get("error_type", "Exception"),
+                message=e.get("message", ""),
+            )
+            for e in d.get("phase_errors") or []
+        ],
     )
 
 
@@ -428,11 +441,27 @@ def _trial_from(d: dict, subject: str) -> TrialRecord:
 # ---------------------------------------------------------------------------
 
 
+def write_timeseries_data(trials: list[TrialRecord], run_dir: str | Path) -> Path:
+    """Persist the raw probe samples independently of report rendering."""
+    path = Path(run_dir) / "timeseries.csv"
+    with path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["trial", "series", "t", "value"])
+        for trial in trials:
+            for key, series in trial.series.items():
+                for sample in series.samples:
+                    # Preserve round-trippable floats in the raw layer. Display
+                    # formatting belongs to report views, never persisted facts.
+                    writer.writerow([trial.label(), key, repr(sample.t), repr(sample.value)])
+    return path
+
+
 def write_run_data(run: Run, run_dir: str | Path) -> dict[str, str]:
-    """Write the raw + model layers under ``run_dir``: ``run.json`` (the full Run)
-    and ``outcomes.jsonl`` (per-request facts). ``timeseries.csv`` — the other raw
-    artifact — is written by ``write_report`` alongside the views (same content
-    either way; one writer). Returns artifact paths."""
+    """Write the raw + model layers under ``run_dir``.
+
+    These diagnostic facts are committed before any optional report renderer runs,
+    so an execution or rendering error still leaves a useful run artifact.
+    """
     out = Path(run_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -459,7 +488,12 @@ def write_run_data(run: Run, run_dir: str | Path) -> dict[str, str]:
                 f.write(json.dumps(_outcome_json(tid, t, o), ensure_ascii=False, default=str))
                 f.write("\n")
 
-    return {"run.json": str(run_json), "outcomes": str(outcomes)}
+    timeseries = write_timeseries_data(run.trials, out)
+    return {
+        "run.json": str(run_json),
+        "outcomes": str(outcomes),
+        "timeseries": str(timeseries),
+    }
 
 
 def load_run(run_dir: str | Path, *, with_series: bool = True) -> Run:

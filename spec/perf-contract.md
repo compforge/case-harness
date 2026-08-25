@@ -38,10 +38,12 @@ Case schema。
 里声明权重。权重属于本次加压计划，而不是 Case 资产。Harness 负责按 mix 选择 Case、调度 dispatch、
 控制并发/到达率、停止和归约，并在 `Window.by_case` 产出逐 Case 统计。
 
-具体服务协议由 Workload/driver 实现。Harness 每次 dispatch 只调用一次 `fire(case)`；driver 负责把
-Case input 变成一次 HTTP/SSE 等请求并返回一次 Outcome，必须支持 Harness 发起的并发调用，不能在
-内部再启动隐藏的加压循环。这样，同一个 Case runner 可被 Perf、单 Case 调试或其它 Case Harness
-入口复用，而调度策略仍只有一个权威实现。
+具体服务协议由 Workload/driver 实现。一次 Trial 的 Target、资源、负载与 run id 形成共享且不可变的
+TrialContext；Harness 每次 dispatch 只调用一次 `fire(FireContext)`，其中 FireContext 在 TrialContext
+之上组合本次 Case。driver 负责把 Case input 变成一次 HTTP/SSE 等请求并返回一次 Outcome，必须支持
+Harness 发起的并发调用，不能修改共享 TrialContext 或在内部再启动隐藏的加压循环。这样，同一个 Case
+runner 可被 Perf、单 Case 调试或其它 Case Harness 入口复用，而调度策略仍只有一个权威实现。各语言
+可以用嵌套或扁平类型表达 FireContext，但字段语义和生命周期必须一致。
 
 完整 Perf 是高影响验证，只能在合适环境和明确授权下运行。运行窗口、凭据、目标 revision 与发布
 门禁由部署领域持有；Harness 提供 CLI、API 或 Job 入口，不表示可以绕过这些约束。
@@ -62,9 +64,16 @@ Case input 变成一次 HTTP/SSE 等请求并返回一次 Outcome，必须支持
 
 服务协议通过 Workload 扩展：
 
-1. `fire` 只记录 HTTP/SSE、耗时、业务 ID 和异常等原始 `Outcome`，即 request Observation；
+1. `fire(FireContext)` 只记录 HTTP/SSE、耗时、业务 ID 和异常等原始 `Outcome`，即 request Observation；
 2. `judge(outcome)` 是单请求成功/失败的唯一权威，必须是纯函数；
 3. Trial 生命周期固定为 `setup → measurement → deactivate → cleanup`，cleanup 总会尝试执行。
+
+生命周期普通异常不是请求 Outcome、Probe failure 或 SLO fail。Harness 应把异常按发生顺序记录到
+Trial 的可选 `phase_errors`，每项至少包含 `phase`、`error_type` 和 `message`；未进入或未完整执行
+measurement 时使用 `stop.reason=aborted`。这类 Trial 的 run gate 必须失败，`verdict.json` 状态为
+`error`，但 Harness 仍应写出 run、raw、report 与 verdict 产物。进程取消、键盘中断等控制流异常可以
+继续向调用方传播。出现 phase error 后必须结束当前 sweep，不能把可能受残留状态污染的后续 Arm
+当作可比较的性能 Observation。
 
 资源观测与请求判定正交。Prombed、Prometheus、Kubernetes 等 Probe 可以由具体实现、消费方或
 [Harness 工具箱](../docs/toolbox.md)提供；其缺失不能改变 Outcome 的原始事实。
@@ -93,6 +102,8 @@ verdict.json      # 跨 harness 判定出口，沿用 verdict-schema.yaml
 - `outcomes.jsonl` 每一行遵守 [`perf-outcome-schema.yaml`](perf-outcome-schema.yaml)。
 - 字段使用 snake_case，方便跨语言直接交换。
 - reader 必须忽略未知字段；删除字段或改变既有字段语义时提升 `schema` 主版本。
+- `phase_errors` 是可选的加法字段，因此 schema 仍为 3；旧 reader 可忽略，支持它的实现必须保留
+  phase 与异常摘要，不能把执行异常降格为请求错误或 SLO fail。
 - 实现私有数据只能放新增可选字段，不能改变共享字段含义。
 
 ## 一致性与 feature 覆盖

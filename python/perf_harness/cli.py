@@ -86,6 +86,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"  → {paths['run_dir']}")
     for r in run_result.trials:
+        if r.phase_errors:
+            error = r.phase_errors[0]
+            print(
+                f"  {r.arm.resources.label():<14} {r.arm.load.label():<8} "
+                f"ERROR {error.phase}: {error.error_type}: {error.message}"
+            )
+            continue
         o = r.measurement.request
         print(
             f"  {r.arm.resources.label():<14} {r.arm.load.label():<8} "
@@ -95,8 +102,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"report: {paths['report']}")
     if paths.get("report_html"):
         print(f"  html: {paths['report_html']}")
-    early = [r for r in run_result.trials if r.stop.early]
-    if early:
+    errors = [r for r in run_result.trials if r.phase_errors]
+    early = [r for r in run_result.trials if r.stop.early and not r.phase_errors]
+    if errors:
+        print(f"run: ERROR ({len(errors)} trial(s) had phase errors)")
+    elif early:
         reasons = ", ".join(sorted({r.stop.reason for r in early}))
         print(f"run: FAIL ({len(early)} trial(s) stopped early: {reasons})")
     elif run_result.trials and any(r.slo for r in run_result.trials):

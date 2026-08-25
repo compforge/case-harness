@@ -24,7 +24,7 @@ class _MetricWL(Workload):
 
     name = "metricwl"
 
-    async def fire(self, target, client, case, run_id):
+    async def fire(self, ctx):
         return Outcome(
             status=200,
             duration_ms=10.0,
@@ -59,7 +59,7 @@ class _DeclaringWL(Workload):
 
     name = "declwl"
 
-    async def fire(self, target, client, case, run_id):
+    async def fire(self, ctx):
         return Outcome(
             status=200,
             duration_ms=10.0,
@@ -196,7 +196,7 @@ class _BadKindWL(Workload):
 
     name = "badkind"
 
-    async def fire(self, target, client, case, run_id):  # pragma: no cover - never fired
+    async def fire(self, ctx):  # pragma: no cover - never fired
         return Outcome(status=200, duration_ms=1.0)
 
     def describe(self):
@@ -208,7 +208,7 @@ class _ShadowWL(Workload):
 
     name = "shadow"
 
-    async def fire(self, target, client, case, run_id):  # pragma: no cover - never fired
+    async def fire(self, ctx):  # pragma: no cover - never fired
         return Outcome(status=200, duration_ms=1.0)
 
     def describe(self):

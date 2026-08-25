@@ -56,6 +56,7 @@ function trialJson(trial: TrialRecord): Record<string, unknown> {
       request: statsJson(window.request),
     })),
     probe_errors: trial.probe_errors,
+    phase_errors: trial.phase_errors,
   };
 }
 
@@ -99,16 +100,20 @@ export function serializeOutcomes(run: Run): string {
 
 /** Cross-harness verdict: this implementation has no SLO API yet, so a complete run is observed, not judged. */
 export function serializeVerdict(run: Run): Record<string, unknown> {
+  const errorTrial = run.trials.find((trial) => trial.phase_errors.length);
   const failed = run.trials.find((trial) => (
     trial.stop.reason === "error_rate" || trial.stop.reason === "aborted"
   ));
+  const firstError = errorTrial?.phase_errors[0];
   return {
     schema_version: 1,
     harness: "perf",
     scope: run.experiment,
     run_id: run.run_id,
-    status: failed ? "fail" : "skipped",
-    ...(failed ? { reason: `trial ${failed.id} stopped: ${failed.stop.reason}` } : {}),
+    status: errorTrial ? "error" : failed ? "fail" : "skipped",
+    ...(firstError
+      ? { reason: `trial ${errorTrial.id} ${firstError.phase}: ${firstError.error_type}: ${firstError.message}` }
+      : failed ? { reason: `trial ${failed.id} stopped: ${failed.stop.reason}` } : {}),
     artifact_paths: { run: "run.json", raw: "outcomes.jsonl" },
     created_at: run.created_at,
   };

@@ -34,6 +34,8 @@ from perf_harness.metric.store import PER_REQUEST_DESCRIPTORS, REQUEST_DESCRIPTO
 from perf_harness.model import (
     Arm,
     Outcome,
+    Phase,
+    PhaseError,
     ProbeErrors,
     ResourceProfile,
     Run,
@@ -42,6 +44,7 @@ from perf_harness.model import (
     SloAssertion,
     Target,
     TrialRecord,
+    TrialStop,
     Window,
     make_run_id,
 )
@@ -54,6 +57,31 @@ from perf_harness.observe import (
 )
 from perf_harness.slo import evaluate_slo
 from perf_harness.subject import Subject
+
+
+def _phase_error(phase: Phase, exc: Exception) -> PhaseError:
+    return PhaseError(phase=phase, error_type=type(exc).__name__, message=str(exc))
+
+
+@dataclass
+class _TrialExecution:
+    """One Trial's lifecycle state, carried through every phase to finalization.
+
+    ``TrialContext`` is the immutable workload-facing input. This private state
+    machine preserves ordered diagnostics while the lifecycle continues to its
+    mandatory cleanup and one final TrialRecord exit.
+    """
+
+    context: TrialContext
+    phase: Phase = "setup"
+    phase_errors: list[PhaseError] = field(default_factory=list)
+    fatal_error: BaseException | None = None
+
+    def enter(self, phase: Phase) -> None:
+        self.phase = phase
+
+    def record(self, exc: Exception, *, phase: Phase | None = None) -> None:
+        self.phase_errors.append(_phase_error(phase or self.phase, exc))
 
 
 @dataclass
@@ -137,8 +165,8 @@ class Engine:
                 # A breaker-ended trial only observed a partial load window. Even
                 # if every evaluated SLO happens to pass, it cannot prove this
                 # load level was sustained.
-                failed = trial.stop.early
-                if exp.slo:
+                failed = trial.stop.early or bool(trial.phase_errors)
+                if exp.slo and not trial.phase_errors:
                     trial.slo = evaluate_slo(trial, exp.slo)
                     # the run gate is lenient on skip by default: a skipped check
                     # (slice absent) is surfaced but doesn't flip the exit code;
@@ -153,7 +181,10 @@ class Engine:
                     )
                 passed = passed and not failed
                 trials.append(trial)
-                if exp.abort_on_fail and failed:
+                # A phase error says the testbed/execution chain itself is no
+                # longer trustworthy. Continuing the sweep can compound leaked
+                # state, so it stops independently of the SLO-oriented policy.
+                if trial.phase_errors or (exp.abort_on_fail and failed):
                     break
         finally:
             if exp.teardown and exp.subject.provisioner is not None:
@@ -182,7 +213,6 @@ class Engine:
         measurement_end_s = 0.0
         cooldown_start_s: float | None = None
         cooldown_end_s: float | None = None
-
         # trust_env=False: the load generator connects DIRECTLY to the Subject's
         # base_url — never via an ambient HTTP(S)_PROXY/ALL_PROXY from the shell (a
         # stray proxy env would silently reroute or, if malformed, crash client
@@ -191,18 +221,22 @@ class Engine:
             httpx.AsyncClient(limits=limits, http2=False, trust_env=False) as client,
             httpx.AsyncClient(limits=obs_limits, http2=False, trust_env=False) as obs_client,
         ):
-            trial_ctx = TrialContext(
-                target=target,
-                client=client,
-                run_id=self.run_id,
-                resources=profile,
-                load=load,
+            execution = _TrialExecution(
+                context=TrialContext(
+                    target=target,
+                    client=client,
+                    run_id=self.run_id,
+                    resources=profile,
+                    load=load,
+                )
             )
+            ctx: ProbeContext | None = None
             observer: asyncio.Task | None = None
             stop = asyncio.Event()
-            primary_error: BaseException | None = None
+            trial_stop = TrialStop(reason="aborted")
             try:
-                await exp.workload.setup(trial_ctx)
+                await exp.workload.setup(execution.context)
+                execution.enter("measurement")
                 ctx = ProbeContext(
                     target=target,
                     client=client,
@@ -215,34 +249,57 @@ class Engine:
                 )
                 drive = drive_open if load.model == "open" else drive_closed
                 trial_stop = await drive(
-                    exp.workload, ctx, load, self._cases, self._weights, self.run_id, timed
+                    exp.workload, execution.context, ctx, self._cases, self._weights, timed
                 )
                 # Post-load samples remain in the raw series for cooldown/scale-down
                 # charts, but summaries must describe only the load measurement window.
                 measurement_end_s = (
                     trial_stop.snapshot.at_s if trial_stop.snapshot is not None else load.duration_s
                 )
-                await exp.workload.deactivate(trial_ctx)
+                execution.enter("deactivate")
+                await exp.workload.deactivate(execution.context)
                 if exp.cooldown_s:
+                    execution.enter("cooldown")
                     cooldown_start_s = time.monotonic() - ctx.t0
                     await asyncio.sleep(exp.cooldown_s)
+            except Exception as exc:
+                execution.record(exc)
+                if ctx is not None and measurement_end_s == 0.0:
+                    measurement_end_s = time.monotonic() - ctx.t0
             except BaseException as exc:
-                primary_error = exc
-                raise
+                # Cancellation / process-level interrupts remain control flow rather
+                # than persisted test results, but cleanup must still not hide them.
+                execution.fatal_error = exc
             finally:
                 if observer is not None:
                     stop.set()
-                    probe_errors = await observer
-                    if cooldown_start_s is not None:
-                        # The observer takes one final tick after ``stop`` wakes it.
-                        # Close the Window only after that tick has been recorded.
-                        cooldown_end_s = time.monotonic() - ctx.t0
+                    try:
+                        probe_errors = await observer
+                    except Exception as exc:
+                        execution.record(exc)
+                    except BaseException as exc:
+                        if execution.fatal_error is None:
+                            execution.fatal_error = exc
+                        else:
+                            execution.fatal_error.add_note(
+                                f"observer finalization also failed: {exc!r}"
+                            )
+                    else:
+                        if cooldown_start_s is not None and ctx is not None:
+                            # The observer takes one final tick after ``stop`` wakes it.
+                            # Close the Window only after that tick has been recorded.
+                            cooldown_end_s = time.monotonic() - ctx.t0
                 try:
-                    await exp.workload.cleanup(trial_ctx)
+                    await exp.workload.cleanup(execution.context)
                 except BaseException as cleanup_error:
-                    if primary_error is None:
-                        raise
-                    primary_error.add_note(f"cleanup also failed: {cleanup_error!r}")
+                    if execution.fatal_error is not None:
+                        execution.fatal_error.add_note(f"cleanup also failed: {cleanup_error!r}")
+                    elif isinstance(cleanup_error, Exception):
+                        execution.record(cleanup_error, phase="cleanup")
+                    else:
+                        execution.fatal_error = cleanup_error
+                if execution.fatal_error is not None:
+                    raise execution.fatal_error
 
         trial = self._aggregate(
             arm,
@@ -255,6 +312,7 @@ class Engine:
         )
         trial.stop = trial_stop  # how the trial ended (deadline / breaker) + enact census
         trial.outcomes = timed  # raw layer (incl. warmup/drops) — runio persists these
+        trial.phase_errors = execution.phase_errors
         return trial
 
     def _aggregate(
