@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 from trajectory_harness.dataset import TrajectoryDataset
+from trajectory_harness.detect import Detector, DetectorSpec, detect
 from trajectory_harness.evaluate import Evaluator, EvaluatorSpec, evaluate
 from trajectory_harness.measure import Measurer, MeasurerSpec, measure
 from trajectory_harness.metrics import TrajectoryEvaluationRun, aggregate_metrics
@@ -19,9 +20,11 @@ class TrajectoryEvaluationRunner:
     def __init__(
         self,
         *,
+        detectors: Sequence[Detector] = (),
         evaluators: Sequence[Evaluator] = (),
         measurers: Sequence[Measurer] = (),
     ) -> None:
+        self.detectors = tuple(detectors)
         self.evaluators = tuple(evaluators)
         self.measurers = tuple(measurers)
 
@@ -29,6 +32,11 @@ class TrajectoryEvaluationRunner:
         """Return the domain target represented by one Worksheet row."""
 
         return ""
+
+    def detectors_for(
+        self, target: str, dataset: TrajectoryDataset
+    ) -> Sequence[Detector]:
+        return self.detectors
 
     def evaluators_for(
         self, target: str, dataset: TrajectoryDataset
@@ -58,15 +66,28 @@ class TrajectoryEvaluationRunner:
             )
             for trajectory in dataset.trajectories
         )
+        detections = []
         evaluations = []
         measurements = []
+        selected_detectors = []
         selected_evaluators = []
         selected_measurers = []
         for trajectory, (_, target) in zip(dataset.trajectories, targets):
+            detectors = tuple(self.detectors_for(target, dataset))
             evaluators = tuple(self.evaluators_for(target, dataset))
             measurers = tuple(self.measurers_for(target, dataset))
+            selected_detectors.extend(detectors)
             selected_evaluators.extend(evaluators)
             selected_measurers.extend(measurers)
+            for category, items in _detectors_by_category(detectors):
+                detections.append(
+                    detect(
+                        trajectory,
+                        items,
+                        target=target,
+                        category=category,
+                    )
+                )
             for category, items in _evaluators_by_category(evaluators):
                 evaluations.append(
                     evaluate(
@@ -93,6 +114,8 @@ class TrajectoryEvaluationRunner:
             dataset_version=dataset.version,
             trajectory_ids=tuple(item.trajectory_id for item in dataset.trajectories),
             trajectory_targets=targets,
+            detections=tuple(detections),
+            detector_specs=_detector_specs(selected_detectors),
             evaluations=tuple(evaluations),
             evaluator_specs=_evaluator_specs(selected_evaluators),
             measurements=tuple(measurements),
@@ -122,8 +145,23 @@ def _evaluator_specs(evaluators: Sequence[Evaluator]) -> tuple[EvaluatorSpec, ..
     return tuple({item.spec.evaluator_id: item.spec for item in evaluators}.values())
 
 
+def _detector_specs(detectors: Sequence[Detector]) -> tuple[DetectorSpec, ...]:
+    return tuple({item.spec.detector_id: item.spec for item in detectors}.values())
+
+
 def _measurer_specs(measurers: Sequence[Measurer]) -> tuple[MeasurerSpec, ...]:
     return tuple({item.spec.measurer_id: item.spec for item in measurers}.values())
+
+
+def _detectors_by_category(
+    detectors: Sequence[Detector],
+) -> tuple[tuple[str, tuple[Detector, ...]], ...]:
+    categories: dict[str, list[Detector]] = {}
+    for detector in detectors:
+        categories.setdefault(detector.spec.category, []).append(detector)
+    return tuple(
+        (category, tuple(items)) for category, items in sorted(categories.items())
+    )
 
 
 def _evaluators_by_category(

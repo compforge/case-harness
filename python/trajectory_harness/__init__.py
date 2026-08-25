@@ -10,17 +10,28 @@ from trajectory_harness.dataset import TrajectoryDataset as TrajectoryDataset
 from trajectory_harness.dataset import (
     TrajectoryAnnotation as TrajectoryAnnotation,
 )
+from trajectory_harness.detect import DetectionResult as DetectionResult
+from trajectory_harness.detect import Detector as Detector
+from trajectory_harness.detect import DetectorSpec as DetectorSpec
+from trajectory_harness.detect import Finding as Finding
+from trajectory_harness.detect import TrajectoryDetection as TrajectoryDetection
+from trajectory_harness.detect import detect as detect
+from trajectory_harness.detectors.post_compact_refetch import (
+    PostCompactRefetchDetector as PostCompactRefetchDetector,
+)
+from trajectory_harness.detectors.repeated_tool_call import (
+    RepeatedToolCallDetector as RepeatedToolCallDetector,
+)
+from trajectory_harness.detectors.retry_loop import (
+    RetryLoopDetector as RetryLoopDetector,
+)
 from trajectory_harness.evaluate import EvaluationResult as EvaluationResult
 from trajectory_harness.evaluate import Evaluator as Evaluator
 from trajectory_harness.evaluate import EvaluatorSpec as EvaluatorSpec
-from trajectory_harness.evaluate import Finding as Finding
 from trajectory_harness.evaluate import TrajectoryEvaluation as TrajectoryEvaluation
 from trajectory_harness.evaluate import evaluate as evaluate
 from trajectory_harness.evaluators.execution_success import (
     ExecutionSuccessEvaluator as ExecutionSuccessEvaluator,
-)
-from trajectory_harness.evaluators.repeated_tool_call import (
-    RepeatedToolCallEvaluator as RepeatedToolCallEvaluator,
 )
 from trajectory_harness.evaluators.tool_success import (
     ToolSuccessEvaluator as ToolSuccessEvaluator,
@@ -40,6 +51,12 @@ from trajectory_harness.measure import TrajectoryMeasurement as TrajectoryMeasur
 from trajectory_harness.measure import measure as measure
 from trajectory_harness.measurers.model_usage import (
     ModelUsageMeasurer as ModelUsageMeasurer,
+)
+from trajectory_harness.measurers.context_usage import (
+    ContextUsageMeasurer as ContextUsageMeasurer,
+)
+from trajectory_harness.measurers.tool_usage import (
+    ToolUsageMeasurer as ToolUsageMeasurer,
 )
 from trajectory_harness.metrics import Metric as Metric
 from trajectory_harness.metrics import (
@@ -62,6 +79,8 @@ from trajectory_harness.report import (
 from trajectory_harness.report import build_report as build_report
 from trajectory_harness.report import render_report_html as render_report_html
 from trajectory_harness.report import write_report_html as write_report_html
+from trajectory_harness.report_comparison import MetricSelector as MetricSelector
+from trajectory_harness.report_comparison import ParetoSpec as ParetoSpec
 from trajectory_harness.runio import (
     TrajectoryRunArtifact as TrajectoryRunArtifact,
 )

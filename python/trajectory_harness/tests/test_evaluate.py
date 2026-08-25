@@ -2,17 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from trajectory_harness import (
+    DetectionResult,
+    DetectorSpec,
     EvaluationResult,
     EvaluatorSpec,
     ExecutionResult,
     ExecutionSuccessEvaluator,
     Failure,
     Finding,
-    RepeatedToolCallEvaluator,
+    RepeatedToolCallDetector,
     Step,
     ToolSuccessEvaluator,
     Trajectory,
+    detect,
     evaluate,
 )
 
@@ -42,7 +47,7 @@ def _tool_step(step_id: str, path: str, *, failure: Failure | None = None) -> St
     )
 
 
-def test_repeated_tool_call_evaluator_returns_judgment_and_evidence():
+def test_repeated_tool_call_detector_returns_finding_and_evidence():
     trajectory = Trajectory(
         trajectory_id="t1",
         steps=(
@@ -52,12 +57,10 @@ def test_repeated_tool_call_evaluator_returns_judgment_and_evidence():
         ),
     )
 
-    evaluation = evaluate(trajectory, [RepeatedToolCallEvaluator()])
+    detection = detect(trajectory, [RepeatedToolCallDetector()])
 
-    result = evaluation.results[0]
-    assert result.score is None
-    assert result.verdict == "warning"
-    assert result.step_ids == ("s3",)
+    result = detection.results[0]
+    assert result.status == "analyzed"
     assert result.findings == (
         Finding(
             code="repeated_tool_call",
@@ -74,7 +77,7 @@ def test_repeated_tool_call_evaluator_returns_judgment_and_evidence():
     assert result.to_dict()["findings"][0]["step_ids"] == ["s3"]
 
 
-def test_evaluator_is_not_applicable_when_trajectory_has_no_tool_calls():
+def test_detector_is_not_applicable_when_trajectory_has_no_tool_calls():
     trajectory = Trajectory(
         trajectory_id="t1",
         steps=(
@@ -89,10 +92,10 @@ def test_evaluator_is_not_applicable_when_trajectory_has_no_tool_calls():
         ),
     )
 
-    evaluation = evaluate(trajectory, [RepeatedToolCallEvaluator()])
+    detection = detect(trajectory, [RepeatedToolCallDetector()])
 
-    assert evaluation.results[0].status == "not_applicable"
-    assert evaluation.results[0].score is None
+    assert detection.results[0].status == "not_applicable"
+    assert detection.results[0].findings == ()
 
 
 def test_model_round_tool_calls_are_fallback_when_tool_spans_are_absent():
@@ -123,11 +126,9 @@ def test_model_round_tool_calls_are_fallback_when_tool_spans_are_absent():
         ),
     )
 
-    result = RepeatedToolCallEvaluator().evaluate(trajectory)
+    result = RepeatedToolCallDetector().detect(trajectory)
 
-    assert result.score is None
-    assert result.verdict == "warning"
-    assert result.step_ids == ("s2",)
+    assert result.findings[0].step_ids == ("s2",)
 
 
 def test_common_execution_and_tool_evaluators_keep_failures_as_facts():
@@ -208,3 +209,32 @@ def test_evaluator_exception_is_health_data_not_zero_score():
             explanation="RuntimeError: judge unavailable",
         ),
     )
+
+
+def test_detector_exception_is_health_data():
+    @dataclass(frozen=True)
+    class BrokenDetector:
+        spec: DetectorSpec = DetectorSpec(
+            detector_id="broken",
+            title="Broken",
+            description="Test detector failure.",
+        )
+
+        def detect(self, trajectory):
+            del trajectory
+            raise RuntimeError("detector unavailable")
+
+    detection = detect(Trajectory(trajectory_id="t1", steps=()), [BrokenDetector()])
+
+    assert detection.results == (
+        DetectionResult(
+            detector_id="broken",
+            status="error",
+            explanation="RuntimeError: detector unavailable",
+        ),
+    )
+
+
+def test_evaluated_result_requires_a_judgment():
+    with pytest.raises(ValueError, match="verdict, a score, or both"):
+        EvaluationResult(evaluator_id="empty", status="evaluated")
