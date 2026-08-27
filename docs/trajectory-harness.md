@@ -2,8 +2,18 @@
 
 ## 1. 定位
 
-trajectory_harness 回答的是：**agent 为得到结果而采取的决策与行动序列是否合理，以及一批
-轨迹的执行质量如何变化**。
+trajectory_harness 把 agent 的决策与行动序列变成可反复分析的质量资产，核心是对轨迹问题
+持续做三件事：
+
+1. **量化**：记录效果、成本、调用、耗时和失败等可比较信号；
+2. **细化**：把模糊的“轨迹不好”下钻到具体 trajectory、step、行为模式和证据；
+3. **积累**：持久化 Dataset、Run 和趋势，并把反复出现的问题、证据模式和分析方法沉淀为
+   可复用的质量资产。
+
+`measure / detect / evaluate` 是支撑这三个目标的处理手段，不是 trajectory_harness 的项目定位。
+Harness 主要回答“哪里有问题、证据是什么、程度和趋势如何”；从问题走到“下一步改哪里”，
+需要上层 quality plugin 的 trajectory skill 结合被测项目的 prompt、tool、loop、compact 和编排上下文，再设计
+可对照的改进实验。
 
 | 视角 | 主要问题 | 分析本体 |
 |------|----------|----------|
@@ -21,8 +31,9 @@ RecordingSource
        + TrajectoryAnnotation          人工、外部系统或模型提供的监督信息
   -> Trajectory Unit                   以 Case + Trajectory 为数据来源
   -> TrajectoryDataset                 可复用、版本化的 Unit facts
-  -> Evaluator / Measurer / Policy
+  -> Detector / Evaluator / Measurer / Policy
   -> TrajectoryEvaluationRun / Worksheet
+       + DetectionResult -> Finding    保留 detect 执行状态并追加发现
        + EvaluationResult              向同行追加质量判断
        + MeasurementResult             向同行追加成本与运行事实
        + target / category dimensions  标识评估对象与观察面
@@ -41,7 +52,7 @@ Evaluator、Measurer 与可选 Policy 分别产生自己的 EvaluationRun / Work
 读取 Source，也不重新解释原始 trace。
 
 这里的“大表”是逻辑模型，不要求 JSON 把整条 Trajectory 在每个结果中重复一遍。Dataset 保存
-Trajectory 与 Annotation seed，Run 保存本次 Detection、Evaluation 与 Measurement，再通过 `trajectory_id`
+Trajectory 与 Annotation seed，Run 保存本次 Finding、Evaluation 与 Measurement，再通过 `trajectory_id`
 无损恢复 Worksheet；同一 Dataset 可以对应多张不同侧重点或不同 evaluator 版本的 Worksheet。
 
 这里评估的对象是一次面向目标的 agent/workflow 执行。一个 Trajectory 可以只包含一个 agent
@@ -59,9 +70,8 @@ Trajectory 是这些 loop 配置及其编排共同作用后的运行证据，不
 进行评估，无需让通用 Harness 理解 Review 1、Review 2 等领域阶段。
 
 Detector 逐步沉淀可复用的 Finding，Evaluator 负责效果与契约判定，Measurer 独立记录 token、
-调用量与耗时等事实，再由实验
-或业务 Policy 判断应修改 prompt、tool、loop mechanism 还是 pipeline 编排。单个行为模式通常只是
-Finding；除非存在明确契约，不能直接把它定性成 Failure。
+调用量与耗时等事实。单个行为模式通常只是 Finding；除非存在明确契约，不能直接把它定性成
+Failure，也不能由 Harness 单独推导出应修改 prompt、tool、loop mechanism 还是 pipeline 编排。
 
 ### 1.1 Source 与 Loader 边界
 
@@ -204,7 +214,13 @@ trajectory_harness 持续沉淀可跨业务复用的 Detector，其 Finding 可�
 
 这个对应是多对多的诊断索引，不是根因归属。例如连续重复调用同一 tool 是 Finding；它可能暗示
 工具缺少批量参数、prompt 未要求复用结果，或 loop 没有合适的停止机制，这些候选解释记录为
-`hypotheses`。Detector 只输出可复现的现象、证据和假设，根因由对照实验或业务 Policy 确认。
+`hypotheses`。Detector 只输出可复现的现象、证据和假设，根因与改动方向由上层 quality plugin 的 trajectory skill 结合
+项目上下文、反例和对照实验确认。
+
+Detector 表达的是发现职责，不限定实现为固定规则。它可以是确定性模式匹配，也可以由 LLM 或
+agent 对轨迹做开放式检查，用于发现尚未被固定 Evaluator 覆盖的问题。这类结果仍然只是带证据的
+Finding，不因为使用了模型就变成 Evaluation 或 Verdict；反复出现且可稳定复现的模式，再沉淀为可复用
+Detector。
 
 新的通用 Detector 应在 `detectors/` 中按一种稳定 Finding 一个实现沉淀；依赖行业工具清单、
 业务阶段或特定结果契约的判断留在 domain Evaluator。pipeline 可以包含多个 loop，跨 loop 的
@@ -311,13 +327,14 @@ URI/path；同一 Recording 解析出的多条轨迹共享 recording id。`Traje
 它不能因此被静默丢弃。
 
 数据的生产者和数据的语义是两条独立轴。人工和外部系统通常产生 Annotation；LLM 既可以产生待评估
-的监督信息，也可以作为 Detector 或 Evaluator 的实现。前者仍是 Annotation，后两者分别输出
-DetectionResult 与 EvaluationResult。Finding、verdict 和 score 不回填 Annotation；Measurer 的原始事实也不伪装成
+的监督信息，也可以作为 Detector 或 Evaluator 的实现。前者仍是 Annotation，Detector 通过 DetectionResult
+返回 Finding，Evaluator 返回 EvaluationResult。Finding、verdict 和 score 不回填 Annotation；Measurer 的原始事实也不伪装成
 Evaluation。
 
 `TrajectoryDataset` 固定 `Unit + Annotation` seed。`TrajectoryEvaluationRun` 把本次实际选择的
 Detector / Evaluator / Measurer / Policy 施加到确定的 Dataset version，记录组件 spec 与配置，
-为同一批 Unit 填充 Detection、Evaluation 和 Measurement 列：
+为同一批 Unit 填充 Finding、Evaluation 和 Measurement 列；DetectionResult 只作为 Detector 的执行信封，
+保留状态、错误和零到多个 Finding：
 
 ```text
 TrajectoryEvaluationRun
@@ -369,7 +386,7 @@ measurement.value.sum{target=review1,category=cost,measurer_id=model_usage,measu
 
 - `dataset.json`：Worksheet 的固定 seed，包含 Trajectory、TrajectoryAnnotation、RecordingQuery
   与构建健康。
-- `run.json`：本次 TrajectoryEvaluationRun，Detection/Evaluation/Measurement 通过 trajectory id 引用 Dataset，
+- `run.json`：本次 TrajectoryEvaluationRun，DetectionResult/Finding、Evaluation 与 Measurement 通过 trajectory id 引用 Dataset，
   不重复存轨迹。
 - `report.html`：从 Worksheet 纯投影出的 UI-friendly 视图。
 - `verdict.json`：跨 Harness 统一出口；Finding 不自动成为 check，无领域 Policy 时为 `skipped`。
@@ -397,7 +414,7 @@ trajectory_harness 拥有轨迹领域报告语义，对外提供 `build_report`�
 
 1. TrajectoryEvaluationRun、Dataset 及 target/category 维度。
 2. 执行结果与 Failure 分类。
-3. common/domain Detector 目录与 Detection/Finding evidence。
+3. common/domain Detector 目录与 Finding evidence。
 4. common/domain Evaluator 目录与 Evaluation evidence。
 5. Measurer 目录与 Measurement evidence。
 6. 最新 Metric。

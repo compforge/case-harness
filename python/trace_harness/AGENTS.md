@@ -83,7 +83,7 @@ corpus parquet 走可选 extra `case-harness[trace-corpus]`（pyarrow），缺�
 
 ## 关键约定
 
-- **Kernel 对齐**：raw span 经 normalize / assemble 得到的 `Node` 是 Observation，`trace_id + node_id` 定义 node-grain Unit；nodes / corpus 构成可复评 Dataset，本次选择的 detector 与 gate 直接定义评估侧重点，Finding 是 Evaluation。若使用 trace 或 cohort grain，应建立对应 Worksheet，不把多种 grain 混在同一行模型；详见 [`../../docs/kernel.md`](../../docs/kernel.md#dataset-与反复评估)。
+- **Kernel 对齐**：raw span 经 normalize / assemble 得到的 `Node` 是 Observation，`trace_id + node_id` 定义 node-grain Unit；nodes / corpus 构成可复评 Dataset，本次选择的 detector 与 gate 直接定义评估侧重点，detect 输出 Finding。若使用 trace 或 cohort grain，应建立对应 Worksheet，不把多种 grain 混在同一行模型；详见 [`../../docs/kernel.md`](../../docs/kernel.md#dataset-与反复评估)。
 - **node 是分析本体，tree 退为视图期索引**：所有分析吃平 node 集，只在渲染等视图时刻才
   `ctx.view()` 现搭树；改分析逻辑不要去持树。
 - **assemble 之后全是 structure-preserving**：只有 matches/claims 造结构（父子边）；其后 **feature(写
