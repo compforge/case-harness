@@ -31,9 +31,12 @@ case-harness 是一组跨语言测试 SDK，用于回答已经无法由一条测
     → Unit（Case + Observation + Annotation）
     → 版本化 Dataset
 
-Dataset + Evaluators / Measurers / optional Policy
+Dataset + Detectors / Evaluators / Measurers / optional Policy
     → EvaluationRun
-    → Worksheet（Unit + Evaluation + Measurement）
+        detect   → Finding
+        evaluate → Evaluation
+        measure  → Measurement
+    → Worksheet（Unit + Finding + Evaluation + Measurement）
     → Metric / Verdict / Report（JSON / HTML）
 ```
 
@@ -44,15 +47,16 @@ Dataset + Evaluators / Measurers / optional Policy
 | **Unit** | Harness 声明的评估单元，数据来源是 Case 与一个或多个 Observation；Worksheet 一行一个 Unit。 |
 | **Annotation** | 当前评估前已经存在的人工、外部系统或模型监督信息，例如 label、reference 和复核结论。 |
 | **Dataset** | 可复用、版本化的 Unit facts 与已有 Annotation 集合，不包含某次具体 EvaluationRun 的结果。 |
-| **EvaluationRun** | 对一个固定 Dataset version 执行一组 Evaluator、Measurer 与可选 Policy 的运行实例。 |
-| **Evaluation** | Judge 或 Evaluator 对 Unit 作出的质量判断，例如 verdict、score、explanation 和 Finding。 |
+| **EvaluationRun** | 对一个固定 Dataset version 执行一组 Detector、Evaluator、Measurer 与可选 Policy 的运行实例。 |
+| **Finding** | `detect` 返回的模式或异常，带有证据和原因假设，但不携带质量 verdict。 |
+| **Evaluation** | Judge 或 Evaluator 根据契约对 Unit 作出的质量判断，例如 verdict、score 和 explanation。 |
 | **Measurement** | 从 Unit 提取的 token、耗时、调用量和资源用量等事实，不携带质量 verdict。 |
-| **Worksheet** | 一次 EvaluationRun 基于 Dataset 的行式结果，为每个 Unit 追加 Evaluation 与 Measurement cell。 |
+| **Worksheet** | 一次 EvaluationRun 基于 Dataset 的行式结果，为每个 Unit 追加 Finding、Evaluation 与 Measurement cell。 |
 | **Run** | 一次真实执行的生命周期和产物边界，携带环境与对齐身份。 |
 | **Report** | Worksheet 面向机器的 JSON 或面向人的 HTML 投影。 |
 | **Verdict** | 人、CI 和 Agent 开发闭环共同消费的机器可读结论。 |
 
-同一 Case 可以从多个角度观察。一次执行已经产生 response、性能采样、trace 或 trajectory 时，应将这些 Observation 固定为可复用 Dataset；选择不同 Evaluator、Measurer 或 Policy 即可生成新的 EvaluationRun、Worksheet 和报告，不重复执行系统。
+同一 Case 可以从多个角度观察。一次执行已经产生 response、性能采样、trace 或 trajectory 时，应将这些 Observation 固定为可复用 Dataset；选择不同 Detector、Evaluator、Measurer 或 Policy 即可生成新的 EvaluationRun、Worksheet 和报告，不重复执行系统。
 
 ## 共享平台工具箱
 

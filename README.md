@@ -31,9 +31,12 @@ canonical CaseSet owned by the project
     → Unit (Case + Observation + Annotation)
     → versioned Dataset
 
-Dataset + Evaluators / Measurers / optional Policy
+Dataset + Detectors / Evaluators / Measurers / optional Policy
     → EvaluationRun
-    → Worksheet (Unit + Evaluation + Measurement)
+        detect   → Finding
+        evaluate → Evaluation
+        measure  → Measurement
+    → Worksheet (Unit + Finding + Evaluation + Measurement)
     → Metric / Verdict / Report (JSON / HTML)
 ```
 
@@ -44,15 +47,16 @@ Dataset + Evaluators / Measurers / optional Policy
 | **Unit** | A harness-defined evaluation unit sourced from a Case and one or more Observations; one Worksheet row represents one Unit. |
 | **Annotation** | Human, external-system, or model supervision that exists before the current evaluation, such as a label, reference, or review conclusion. |
 | **Dataset** | A versioned, reusable collection of Unit facts and existing Annotations. It does not contain results from one particular EvaluationRun. |
-| **EvaluationRun** | One configured application of Evaluators, Measurers, and an optional Policy to a fixed Dataset version. |
-| **Evaluation** | A Judge or Evaluator's quality conclusion about a Unit, such as a verdict, score, explanation, or Finding. |
+| **EvaluationRun** | One configured application of Detectors, Evaluators, Measurers, and an optional Policy to a fixed Dataset version. |
+| **Finding** | A pattern or anomaly returned by `detect`, with evidence and hypotheses but no quality verdict. |
+| **Evaluation** | A Judge or Evaluator's contract-based quality conclusion about a Unit, such as a verdict, score, or explanation. |
 | **Measurement** | A factual value extracted from a Unit, such as tokens, latency, calls, or resource usage, without a quality verdict. |
-| **Worksheet** | One EvaluationRun's row-wise result over a Dataset, with Evaluation and Measurement cells added to each Unit. |
+| **Worksheet** | One EvaluationRun's row-wise result over a Dataset, with Finding, Evaluation, and Measurement cells added to each Unit. |
 | **Run** | The artifact and lifecycle boundary for one real execution, carrying environment and alignment identity. |
 | **Report** | A machine-facing JSON or human-facing HTML projection of a Worksheet. |
 | **Verdict** | The common machine-readable result consumed by humans, CI, and agent development loops. |
 
-A Case can be viewed from more than one angle. When one execution already produced responses, performance samples, traces, or a trajectory, those observations form a reusable Dataset. Selecting different Evaluators, Measurers, or Policies then produces new EvaluationRuns, Worksheets, and reports without triggering duplicate execution.
+A Case can be viewed from more than one angle. When one execution already produced responses, performance samples, traces, or a trajectory, those observations form a reusable Dataset. Selecting different Detectors, Evaluators, Measurers, or Policies then produces new EvaluationRuns, Worksheets, and reports without triggering duplicate execution.
 
 ## Shared platform toolbox
 

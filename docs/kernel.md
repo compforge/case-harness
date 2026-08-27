@@ -21,11 +21,12 @@ e2e、eval、perf、trace 和 trajectory 可以拥有不同执行模型，但共
 | **Observation** | 执行或采集后实际观察到的领域事实；必须保留来源 identity 与 provenance，不包含质量判断。 |
 | **Unit** | Harness 声明的评估单元，也是 Worksheet 一行所代表的基本粒度；其数据来源是对齐后的 Case 与一个或多个 Observation。Unit 拥有自己的稳定 key，唯一确定一行；Observation 尚未产生或失败时，该行可以保留 pending / failed 状态。 |
 | **Annotation** | 运行当前评估前已经存在的人工、外部系统或模型监督信息，例如 label、reference 和复核结论；按 Unit 对齐并保留 producer 与 provenance。 |
-| **Dataset** | 一组可复用、版本化的 Unit facts，固定 Case、Observation、Annotation 及其来源关系，不包含某次 EvaluationRun 的 Evaluation 或 Measurement。相同 Dataset 可以按不同侧重点反复评估。 |
-| **EvaluationRun** | 对一个确定 Dataset version 执行一组 Evaluator、Measurer 与可选 Policy 的运行实例；它记录实际组件的 spec、模型、规则、版本和配置，并拥有 run identity、执行健康与对应 Worksheet。 |
-| **Evaluation** | Judge / Evaluator 对 Unit 作出的质量判断，包括状态、verdict、score、explanation 和 Finding；使用确定性规则还是 LLM 是实现方式，不改变其语义。 |
+| **Dataset** | 一组可复用、版本化的 Unit facts，固定 Case、Observation、Annotation 及其来源关系，不包含某次 EvaluationRun 的 Finding、Evaluation 或 Measurement。相同 Dataset 可以按不同侧重点反复评估。 |
+| **EvaluationRun** | 对一个确定 Dataset version 执行一组 Detector、Evaluator、Measurer 与可选 Policy 的运行实例；它记录实际组件的 spec、模型、规则、版本和配置，并拥有 run identity、执行健康与对应 Worksheet。 |
+| **Finding** | `detect` 从 Unit 中识别出的模式或异常，带有证据、严重度和原因假设，但不直接给出质量 verdict。 |
+| **Evaluation** | Judge / Evaluator 根据契约对 Unit 作出的质量判断，包括状态、verdict、score 和 explanation；使用确定性规则还是 LLM 是实现方式，不改变其语义。 |
 | **Measurement** | 从 Unit 直接提取的 token、耗时、调用量和资源用量等中性事实，不携带质量 verdict。 |
-| **Worksheet** | 一个 EvaluationRun 的行式工作模型：以 Dataset Unit 为行，保存 seed 事实以及本次追加的 Evaluation、Measurement 和 cell state。它是生成报告和聚合指标的事实输入，不等于某一种物理文件格式。 |
+| **Worksheet** | 一个 EvaluationRun 的行式工作模型：以 Dataset Unit 为行，保存 seed 事实以及本次追加的 Finding、Evaluation、Measurement 和 cell state。它是生成报告和聚合指标的事实输入，不等于某一种物理文件格式。 |
 | **Run** | 一次真实执行的生命周期和产物边界，记录输入版本、环境、输出、证据和对齐 identity。 |
 | **Report** | Worksheet 的下游投影；JSON 面向机器，HTML 面向人，不重新执行或评估源数据。 |
 | **Verdict** | 对一次 Run 的可机器消费判定。人、CI 和 agent 开发循环都通过它判断是否通过、为何失败，以及下一步应读哪些证据。 |
@@ -41,19 +42,22 @@ Case
   → Unit（Case + Observation + Annotation）
   → versioned Dataset
 
-Dataset + Evaluators / Measurers / optional Policy
+Dataset + Detectors / Evaluators / Measurers / optional Policy
   → EvaluationRun
-  → Worksheet（Unit + Evaluation + Measurement）
+      detect   → Finding
+      evaluate → Evaluation
+      measure  → Measurement
+  → Worksheet（Unit + Finding + Evaluation + Measurement）
   → Metric / Verdict / Report
 ```
 
 ### Dataset 与反复评估
 
 所有 Harness 都按同一组顶层概念组织数据：先基于 Case 得到真实 Observation，以两者为数据来源建立
-评估 Unit，再将一组 Unit 固定为可复用 Dataset。每次运行选择的确定性规则、LLM Judge、Measurer
+评估 Unit，再将一组 Unit 固定为可复用 Dataset。每次运行选择的 Detector、确定性规则、LLM Judge、Measurer
 与可选 Policy 直接定义评估侧重点；每次 EvaluationRun 形成自己的 Worksheet 和 Report。
 
-Worksheet 的一行始终等于 Unit seed 加上本次 Evaluation 与 Measurement；聚合、透视和报告都是这张
+Worksheet 的一行始终等于 Unit seed 加上本次 Finding、Evaluation 与 Measurement；聚合、透视和报告都是这张
 表的下游操作。
 
 Dataset 和 Worksheet 使用相同 Unit grain。一个 Harness 存在多种基本粒度时，应形成多个明确 grain
@@ -70,11 +74,17 @@ Dataset 固定 Unit facts 和已有 Annotation；EvaluationRun 只向 Worksheet 
 
 - **Annotation**：人工、外部系统或模型预先提供的 label、reference 与复核信息；保留 producer 和
   provenance。数据由 LLM 生成并不会自动使它成为 Evaluation，语义取决于它是否在表达监督信息。
-- **Evaluation**：Judge / Evaluator 对 Unit 作出的质量判断、分数和 Finding；即使内部调用
+- **Finding**：Detector 在本次运行中发现的模式或异常；保存证据、严重度和可能原因，
+  但本身不表示通过或失败。
+- **Evaluation**：Judge / Evaluator 根据契约对 Unit 作出的质量判断和分数；即使内部调用
   LLM，它仍属于 Evaluation。
 - **Measurement**：从 Unit 直接提取的 token、耗时、调用量和资源用量等中性事实。
 
-Case、Observation 或 Annotation 改变会形成新的 Dataset version；只更换 Evaluator、Measurer、模型、
+`detect / evaluate / measure` 是并列的处理职责，对应产物 Finding、Evaluation 与 Measurement 是同一
+Worksheet 上并列的结果列族；Policy 消费这些结果并生成
+Verdict。Finding 不能绕过显式 Policy 自动变成门禁结论。
+
+Case、Observation 或 Annotation 改变会形成新的 Dataset version；只更换 Detector、Evaluator、Measurer、模型、
 规则、成本口径、Policy 或分析侧重点，应创建新的 EvaluationRun 并复用原 Dataset。EvaluationRun
 必须记录实际运行的组件 spec 与配置，以支持复现和比较。Metric
 是对已填充 Worksheet 按 run 或领域维度聚合后的结果，不是另一份与行数据脱节

@@ -46,8 +46,8 @@ trajectory_harness/
   但核心模型不依赖某个 OTel SDK 或仍在演进的生成类型。
 - **Source 只负责选择和读取**：Source 返回轻量 `RecordingRef` 和原始 `Recording`，不解析为
   `Trajectory`，也不执行判定；领域标签作为 `TrajectoryAnnotation` 与 Dataset 组合，不塞进 Source 契约。
-- **Kernel 对齐**：Trajectory 是 Observation，`trajectory_id` 定义 Unit grain；`TrajectoryDataset` 固定 Case + Trajectory Unit 与 `TrajectoryAnnotation`。每次 `TrajectoryEvaluationRun` 记录实际选择的 Evaluator / Measurer / Policy，并只填充自己的 Worksheet；同一 Dataset 可按成本、效果或行为反复评估，详见 [`../../docs/kernel.md`](../../docs/kernel.md#dataset-与反复评估)。
-- **Target 与 Category 正交**：`target` 表达一行当前评估谁，如 CCR 的 Review 1 / Review 2；Evaluator / Measurer spec 的 `category` 表达观察面，如 quality / cost。它们都是 Worksheet 与 Metric 的维度，不形成额外结果容器；报告通过 `group_by` 投影视图。
+- **Kernel 对齐**：Trajectory 是 Observation，`trajectory_id` 定义 Unit grain；`TrajectoryDataset` 固定 Case + Trajectory Unit 与 `TrajectoryAnnotation`。每次 `TrajectoryEvaluationRun` 记录实际选择的 Detector / Evaluator / Measurer / Policy，并只填充自己的 Worksheet；同一 Dataset 可按成本、效果或行为反复评估，详见 [`../../docs/kernel.md`](../../docs/kernel.md#dataset-与反复评估)。
+- **Target 与 Category 正交**：`target` 表达一行当前评估谁，如 CCR 的 Review 1 / Review 2；Detector / Evaluator / Measurer spec 的 `category` 表达观察面，如 behavior / quality / cost。它们都是 Worksheet 与 Metric 的维度，不形成额外结果容器；报告通过 `group_by` 投影视图。
 - **只有 Loader 知道来源格式**：session/OTLP/框架私有字段止于 Loader；Evaluator 只读
   `Trajectory`。Dataset Builder 把 Source 的 `recording_id` 写入轨迹的一等 provenance
   字段；`source` 保留 URI/path；`generation` map 记录实际产生行为的 agent、instruction/skill、
@@ -75,7 +75,7 @@ trajectory_harness/
   与趋势章节，再投影到中立的 `harness_common.report_kit`；effect-cost Pareto 必须由业务显式选择
   两条 Metric 轴，Harness 不猜 effect。业务消费者不自行拼 HTML。
 - **三段式生命周期**：`TrajectoryDatasetBuilder` 从 Source/Loader 构建带 annotation 的
-  版本化 Dataset；`TrajectoryEvaluationRunner` 以实际选择的 Evaluator / Measurer / Policy 消费固定 Dataset；`TrajectoryReportBuilder`
+  版本化 Dataset；`TrajectoryEvaluationRunner` 以实际选择的 Detector / Evaluator / Measurer / Policy 消费固定 Dataset；`TrajectoryReportBuilder`
   只消费已持久化 Run artifact。`TrajectoryHarness` 只是编排门面，不吸收领域逻辑。
 - **Dataset 先于 Run，Run 先于视图**：`dataset.json` 保存可反复评估的 Unit facts 与 annotation，
   `run.json` 只保存本次评价并引用 Dataset 中的 trajectory id，`report.html` 是纯下游视图。

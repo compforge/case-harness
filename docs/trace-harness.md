@@ -29,7 +29,7 @@ span），回答"链路内部发生了什么、哪一层先反常"。它是另�
 
 按 case-harness Kernel 语义，assemble 后的 Node 是 Observation，`trace_id + node_id` 定义 node-grain
 Unit，nodes / corpus 构成可复评 Dataset；每次 EvaluationRun 记录所选 detector 与 gate，并生成带
-Finding Evaluation 的 Worksheet。若分析粒度提升到 trace 或 cohort，应建立对应 grain 的 Worksheet，不能把
+detect 输出 Finding 的 Worksheet。若分析粒度提升到 trace 或 cohort，应建立对应 grain 的 Worksheet，不能把
 不同含义的行混在一张表。更换 detector、gate 或报告侧重点时复用 Dataset，不重新抓取 trace。
 
 | 问题 | 类型 | 视角 |

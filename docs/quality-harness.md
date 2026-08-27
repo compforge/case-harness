@@ -72,6 +72,11 @@ Quality Harness 不拥有一套包办所有测试的工具箱。它连接各领�
 和执行入口，决定当前能回答哪些问题。每个视角使用独立 skill 沉淀发现、执行和解释方式；业务特有的
 规则与经验继续留在业务仓，通用 Harness 只负责装载 skill、提供工具和执行 agent loop。
 
+以 trajectory 为例，trajectory_harness 负责将轨迹问题量化、细化到证据位置，并把 Dataset、Run、趋势与
+可复用分析能力持续积累下来；quality plugin 的 trajectory skill 再结合项目上下文解释这些证据，判断下一步
+应优先修改 prompt、tool、loop、compact 还是编排，并组织可对照的验证。前者沉淀“问题证据”，后者推进
+“改进动作”，边界不应混在某个 Detector 或 Evaluator 里。
+
 Quality Harness 可以使用阅读、搜索、shell、浏览器或 HTTP 等通用观察工具理解项目和解释结果，但这些
 工具不能代替缺失的质量能力。仅凭阅读代码形成的印象可以成为风险提示，不能伪装成经过 e2e、perf 或
 eval 验证的质量结论。
@@ -124,7 +129,7 @@ Quality Harness 驱动已有能力执行，消费各 harness 的原生 Run、Ver
 上的完整而重复请求或发压。
 
 底层 Harness 按 Kernel 的 `Case → Observation → Unit → Dataset → EvaluationRun / Worksheet`
-语义保存结果。Quality Harness 可以为已有 Dataset 选择另一组 Evaluator、Measurer 与 Policy，复用
+语义保存结果。Quality Harness 可以为已有 Dataset 选择另一组 Detector、Evaluator、Measurer 与 Policy，复用
 Observation 生成新的 EvaluationRun、Worksheet 与 Report；它不复制各 Harness 的 Unit 模型，也不另建一张抹平 e2e、eval、perf、
 trace 和 trajectory 语义的总 Worksheet。
 
