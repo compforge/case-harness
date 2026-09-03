@@ -203,16 +203,29 @@ catalog 和持久化 spec。
 
 - `execution_success`
 - `tool_success`
+- `MeasurementThresholdVerifier`：由业务显式提供 measurement、阈值、方向和稳定 verifier id，
+  可复用同一个硬规则实现验证成本预算或效果下限。
 
 首批通用 Detector：
 
 - `repeated_tool_call`
 - `retry_loop`
 - `post_compact_refetch`
+- `unchanged_tool_retry`
+- `oversized_tool_observation`
+- `short_decision_churn`
+- `context_bloat_without_compact`
+- `cache_retention_bloat`
 
 其中 `repeated_tool_call` 输出诊断 Finding，提示检查缓存、复用或批量参数的机会；重复调用
 本身不等于错误。`retry_loop` 保留最终成功可能掩盖的失败重试，`post_compact_refetch` 只判断
 compact 前后完全相同的工具调用；外部资源是否必须刷新仍是待验证假设。
+`unchanged_tool_retry` 进一步定位失败后工具参数没有变化的重试；`oversized_tool_observation`
+标记超过 64 KiB 的单次工具结果；`short_decision_churn` 标记至少三次有 token 证据且其中 80%
+低于 500 output token 的短决策密集现象。后二者只表示成本调查入口，不证明调用或输出没有价值。
+`context_bloat_without_compact` 结合 input 绝对值与增长倍数寻找未压缩的长上下文；
+`cache_retention_bloat` 只有在高 cache hit、绝对 context 较大且仍持续增长同时出现时才产出 Finding，
+避免把高 cache hit 本身误判为浪费。目标不是极高 cache，而是与单位成本和效果相匹配的合理 cache。
 
 文件覆盖率、搜索范围、业务提交是否完成等规则仍由业务包提供；通用 Harness 只负责执行和
 聚合，不理解业务工具语义。
@@ -231,7 +244,9 @@ trajectory_harness 持续沉淀可跨业务复用的 Detector，其 Finding 可�
 这个对应是多对多的诊断索引，不是根因归属。例如连续重复调用同一 tool 是 Finding；它可能暗示
 工具缺少批量参数、prompt 未要求复用结果，或 loop 没有合适的停止机制，这些候选解释记录为
 `hypotheses`。Detector 只输出可复现的现象、证据和假设，根因与改动方向由上层 quality plugin 的 trajectory skill 结合
-项目上下文、反例和对照实验确认。
+项目上下文、反例和对照实验确认。trajectory skill 负责驱动 Harness 取得数据、结合业务判断影响范围与
+owner，并推动优化落到使用方式、Agent、接入、平台基础设施、知识库或组织机制；这些归因不进入通用
+Detector。
 
 Detector 表达的是发现职责，不限定实现为固定规则。它可以是确定性模式匹配，也可以由 LLM 或
 agent 对轨迹做开放式检查，用于发现尚未被明确判据覆盖的问题。这类结果仍然只是带证据的
@@ -291,11 +306,18 @@ Measurement 是与 Trajectory 密切关联的派生数据：它可以是轨迹�
 
 通用 Measurer 分别观察模型、工具与上下文使用：
 
-- `ModelUsageMeasurer`：模型调用、input/output/cache token 与使用量覆盖率；
-- `ToolUsageMeasurer`：执行次数、Failure、耗时、result bytes、result 覆盖率与已观测并发；
-- `ContextUsageMeasurer`：input token 首尾/峰值变化、compact 次数及 compact 边界前后的 input delta。
+- `ModelUsageMeasurer`：模型调用、input/output/cache token、单次 input/output 分布、低于 500
+  output token 的调用数与使用量覆盖率；
+- `ToolUsageMeasurer`：执行次数、Failure、耗时、result bytes 总量/均值/峰值、result 覆盖率与已观测并发；
+- `ContextUsageMeasurer`：input token 首尾/峰值/增长倍数、compact 次数及 compact 边界前后的 input delta；
+- `RetryUsageMeasurer`：失败工具调用、同工具重试覆盖、参数是否变化及是否恢复。
 
 这些值不判断一次读取、压缩或调用是否必要；命名和类型共同表达边界。
+
+通用 Harness 只沉淀跨业务稳定的 Measurement、Detector、Verifier 和流程。若“产出”是有效 finding、
+修改文件、生成报表或业务对象，或者任务复杂度、工具结果利用率需要领域语义，trajectory skill 应推动
+消费项目基于公共协议实现自己的 Measurer / Detector / Verifier 子类，并由项目 runner 选择；业务字段、
+阈值、Rubric 与 owner 不反向进入通用 Harness。
 
 ### 3.5 成本与效果联合解释
 

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
+from trajectory_harness._tool_calls import tool_output_bytes
 from trajectory_harness.measure import MeasurementResult, MeasurementSpec, MeasurerSpec
 from trajectory_harness.model import Step, Trajectory
 
@@ -75,6 +75,20 @@ class ToolUsageMeasurer:
                 _DISTRIBUTION_AGGREGATIONS,
             ),
             MeasurementSpec(
+                "average_result_bytes_per_call",
+                "byte",
+                "Mean reported tool-output size across calls carrying output.",
+                "neutral",
+                ("mean", "p50", "p95"),
+            ),
+            MeasurementSpec(
+                "peak_result_bytes_per_call",
+                "byte",
+                "Largest reported tool-output size for one call.",
+                "neutral",
+                ("mean", "p50", "p95"),
+            ),
+            MeasurementSpec(
                 "max_concurrent_tool_calls",
                 "count",
                 "Largest number of overlapping executed tool-call steps.",
@@ -97,6 +111,7 @@ class ToolUsageMeasurer:
 
         failed = sum(call.failure is not None for call in calls)
         reported = tuple(call for call in calls if call.output_messages)
+        result_sizes = tuple(tool_output_bytes(call) for call in reported)
         measurements: dict[str, float | int | bool] = {
             "tool_call_count": len(calls),
             "failed_tool_call_count": failed,
@@ -104,9 +119,14 @@ class ToolUsageMeasurer:
             "tool_duration_ms": round(sum(call.duration_ms for call in calls), 6),
             "result_reported_call_count": len(reported),
             "result_coverage_ratio": round(len(reported) / len(calls), 6),
-            "result_bytes": sum(_output_bytes(call) for call in reported),
+            "result_bytes": sum(result_sizes),
             "max_concurrent_tool_calls": _max_concurrency(calls),
         }
+        if result_sizes:
+            measurements["average_result_bytes_per_call"] = round(
+                sum(result_sizes) / len(result_sizes), 6
+            )
+            measurements["peak_result_bytes_per_call"] = max(result_sizes)
         return MeasurementResult(
             measurer_id=self.spec.measurer_id,
             status="measured",
@@ -117,16 +137,6 @@ class ToolUsageMeasurer:
             ),
             step_ids=tuple(call.step_id for call in calls),
         )
-
-
-def _output_bytes(step: Step) -> int:
-    payload = json.dumps(
-        list(step.output_messages),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return len(payload.encode("utf-8"))
 
 
 def _max_concurrency(calls: tuple[Step, ...]) -> int:
