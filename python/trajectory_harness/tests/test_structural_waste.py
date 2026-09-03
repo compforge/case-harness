@@ -112,6 +112,52 @@ def test_retry_usage_and_unchanged_retry_finding_preserve_argument_delta():
     assert detection.findings[0].step_ids == ("failed-1", "failed-2")
 
 
+def test_retry_usage_does_not_pair_parallel_calls_in_the_same_failed_step():
+    failure = Failure(kind="tool", phase="execute", error_type="invalid_argument")
+    trajectory = Trajectory(
+        trajectory_id="parallel-failure",
+        steps=(
+            Step(
+                step_id="parallel",
+                parent_step_id=None,
+                operation="execute_tool",
+                name="execute_tool read",
+                start_ms=0,
+                duration_ms=1,
+                status="error",
+                failure=failure,
+                input_messages=(
+                    {
+                        "role": "assistant",
+                        "parts": [
+                            {
+                                "type": "tool_call",
+                                "name": "read",
+                                "arguments": {"path": "same"},
+                            },
+                            {
+                                "type": "tool_call",
+                                "name": "read",
+                                "arguments": {"path": "same"},
+                            },
+                        ],
+                    },
+                ),
+            ),
+        ),
+    )
+
+    measurement = RetryUsageMeasurer().measure(trajectory)
+    detection = UnchangedToolRetryDetector().detect(trajectory)
+
+    assert measurement.measurements["retried_failed_tool_call_count"] == 0
+    assert measurement.measurements["unchanged_retry_count"] == 0
+    assert measurement.measurements["changed_retry_count"] == 0
+    assert measurement.measurements["recovered_retry_count"] == 0
+    assert detection.status == "analyzed"
+    assert not detection.findings
+
+
 def test_oversized_tool_observation_is_a_finding_not_a_failure():
     trajectory = Trajectory(
         trajectory_id="large-result",

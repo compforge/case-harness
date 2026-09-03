@@ -71,6 +71,7 @@ def tool_retry_transitions(steps: tuple[Step, ...]) -> tuple[ToolRetryTransition
                 candidate
                 for candidate in calls[index + 1 :]
                 if candidate.name == failed.name
+                and candidate.step.step_id != failed.step.step_id
             ),
             None,
         )
