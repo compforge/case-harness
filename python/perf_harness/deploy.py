@@ -1,54 +1,18 @@
-"""Subject — 压谁: a name, how to reach it, and (optionally) how to re-provision it.
-
-The Provisioner is the only seam that touches the deployment substrate. It
-realises a ResourceProfile on the Subject (reachability stays on
-``Subject.target`` — applying a profile never changes how to reach the service).
-It is OPTIONAL: no provisioner = the service is already deployed and the profiles
-merely label the trials. Everything else in perf_harness is substrate-agnostic;
-k8s lives here (HelmProvisioner) and in the K8s probes, nowhere else.
-"""
+"""Optional Deployer implementations for perf ResourceProfiles."""
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from harness_common import Deployer
 
-from perf_harness.model import ResourceProfile, Target
+from perf_harness.model import Deployment, ResourceProfile
 from perf_harness.sh import run_capture
 
 
-@dataclass
-class Subject:
-    """What gets loaded and observed: a name, how to reach it, and (optionally) the
-    provisioner that realises each ResourceProfile on it.
-
-    No provisioner = the common case: the service is already deployed (by a human /
-    CI) and the profiles in ``Experiment.resources`` merely *label* the trials. A
-    provisioner (helm) lets the harness sweep the profiles itself.
-    """
-
-    name: str
-    target: Target
-    provisioner: Provisioner | None = None
-
-
-class Provisioner(ABC):
-    """Realises a ResourceProfile on the Subject (and can undo it)."""
-
-    @abstractmethod
-    async def apply(self, profile: ResourceProfile) -> None:
-        """Make the Subject run under ``profile`` (deployed and ready)."""
-
-    async def teardown(self) -> None:
-        """Restore the Subject to its baseline. Default: nothing to undo."""
-        return None
-
-
-class HelmProvisioner(Provisioner):
+class HelmDeployer(Deployer[Deployment]):
     """Drive a ResourceProfile via ``helm upgrade`` against a k8s release.
 
     ``set_paths`` maps ResourceProfile fields to chart value paths so the same
-    provisioner works across services with different values.yaml shapes; the
+    deployer works across services with different values.yaml shapes; the
     defaults match common service charts (``uvicorn.workers``,
     ``resources.limits.*``). Unknown/None fields are skipped.
     """
@@ -94,7 +58,8 @@ class HelmProvisioner(Provisioner):
             args += ["--set", f"{path}={val}"]
         return args
 
-    async def apply(self, profile: ResourceProfile) -> None:
+    async def deploy(self, deployment: Deployment) -> None:
+        profile = deployment.resources
         cmd = [
             "helm",
             "--kubeconfig",

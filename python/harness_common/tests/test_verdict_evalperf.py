@@ -102,6 +102,7 @@ def test_perf_verdict_fail():
         trials=[
             NS(
                 arm=NS(id="arm"),
+                phase_errors=[],
                 stop=NS(early=False),
                 slo=[
                     _chk("p99_ms", "lte", 100, 150, "fail"),
@@ -146,6 +147,7 @@ def test_perf_verdict_skipped_check_not_pass():
         trials=[
             NS(
                 arm=NS(id="arm"),
+                phase_errors=[],
                 stop=NS(early=False),
                 slo=[_chk("p99_ms", "lte", 100, None, "skip")],
             )
@@ -164,7 +166,7 @@ def test_perf_verdict_no_slo_is_skipped_not_pass():
         run_id="r",
         created_at="t",
         passed=True,
-        trials=[NS(arm=NS(id="arm"), stop=NS(early=False), slo=[])],
+        trials=[NS(arm=NS(id="arm"), phase_errors=[], stop=NS(early=False), slo=[])],
     )
     doc = PV.build_verdict_doc(run)
     assert (
@@ -189,6 +191,7 @@ def test_perf_verdict_pass():
         trials=[
             NS(
                 arm=NS(id="arm"),
+                phase_errors=[],
                 stop=NS(early=False),
                 slo=[_chk("p99_ms", "lte", 100, 80, "pass")],
             )
@@ -215,6 +218,7 @@ def test_perf_verdict_names_cooldown_window():
         trials=[
             NS(
                 arm=NS(id="arm"),
+                phase_errors=[],
                 stop=NS(early=False),
                 slo=[
                     _chk(
@@ -242,6 +246,7 @@ def test_perf_verdict_cooldown_skip_fails_closed():
         trials=[
             NS(
                 arm=NS(id="arm"),
+                phase_errors=[],
                 stop=NS(early=False),
                 slo=[
                     _chk(
@@ -271,6 +276,7 @@ def test_perf_verdict_early_stop_fails_even_when_slo_passes():
         trials=[
             NS(
                 arm=NS(id="arm"),
+                phase_errors=[],
                 stop=NS(
                     early=True,
                     reason="error_rate",

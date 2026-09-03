@@ -4,9 +4,21 @@ from textwrap import dedent
 
 import pytest
 
-from e2e_harness.core.env import Env, load_env, _interpolate
+from harness_common import Experiment as BaseExperiment
+
+from e2e_harness.core.config import E2EConfig, Experiment, _interpolate, load_config
 from e2e_harness.core.profile import require_profile, require_capability
 from e2e_harness.runner.base import Outcome
+
+
+def test_e2e_experiment_extends_common_identity() -> None:
+    config = E2EConfig()
+    experiment = Experiment(
+        name="api-contract", service=config.service, caseset="widgets"
+    )
+
+    assert isinstance(experiment, BaseExperiment)
+    assert experiment.caseset == "widgets"
 
 
 class TestInterpolation:
@@ -33,7 +45,7 @@ class TestInterpolation:
         assert _interpolate("${A} ${B}") == "hello world"
 
 
-class TestLoadEnv:
+class TestLoadConfig:
     def test_load_from_yaml(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MY_URL", "http://localhost:8080")
         monkeypatch.setenv("MY_TOKEN", "token-1")
@@ -43,8 +55,14 @@ class TestLoadEnv:
             dedent("""\
             service:
               name: test-svc
+              component:
+                repository: {forge: github, path: example/service}
+                name: api
+              environment:
+                name: dev
+                kubeconfig: /tmp/kubeconfig
+                context: dev-cluster
               base_url: ${MY_URL}
-            auth:
               headers:
                 Authorization: Bearer ${MY_TOKEN}
             profile: minimal
@@ -53,22 +71,27 @@ class TestLoadEnv:
         """)
         )
 
-        env = load_env(config)
-        assert env.service.name == "test-svc"
-        assert env.service.base_url == "http://localhost:8080"
-        assert env.auth.headers == {"Authorization": "Bearer token-1"}
-        assert env.profile == "minimal"
-        assert env.custom["ttl"] == "60"
+        config = load_config(config)
+        assert config.service.name == "test-svc"
+        assert config.service.component.repository.forge.name == "github"
+        assert config.service.component.repository.path == "example/service"
+        assert config.service.environment.name == "dev"
+        assert config.service.environment.kubeconfig == "/tmp/kubeconfig"
+        assert config.service.environment.context == "dev-cluster"
+        assert config.service.base_url == "http://localhost:8080"
+        assert config.service.headers == {"Authorization": "Bearer token-1"}
+        assert config.profile == "minimal"
+        assert config.custom["ttl"] == "60"
 
     def test_load_from_env_vars(self, tmp_path, monkeypatch):
         monkeypatch.setenv("E2E_BASE_URL", "http://fallback:9090")
         monkeypatch.setenv("E2E_AUTH_HEADERS", '{"Authorization":"Bearer fallback"}')
         monkeypatch.setenv("E2E_PROFILE", "full")
 
-        env = load_env(tmp_path / "nonexistent.yaml")
-        assert env.service.base_url == "http://fallback:9090"
-        assert env.auth.headers == {"Authorization": "Bearer fallback"}
-        assert env.profile == "full"
+        config = load_config(tmp_path / "nonexistent.yaml")
+        assert config.service.base_url == "http://fallback:9090"
+        assert config.service.headers == {"Authorization": "Bearer fallback"}
+        assert config.profile == "full"
 
     def test_load_auth_headers_mapping(self, tmp_path, monkeypatch):
         config = tmp_path / "config.yaml"
@@ -76,69 +99,67 @@ class TestLoadEnv:
             dedent("""\
             service:
               base_url: http://localhost:8080
-            auth:
               headers:
                 X-Top-Tenant-Id: t1
                 X-Top-User-Id: u1
         """)
         )
 
-        env = load_env(config)
-        assert env.auth.headers == {
+        config = load_config(config)
+        assert config.service.headers == {
             "X-Top-Tenant-Id": "t1",
             "X-Top-User-Id": "u1",
         }
 
 
 class TestBuildAuthHeaders:
-    def _env(self, **auth_kwargs):
-        from e2e_harness.core.env import AuthConfig, ServiceConfig
+    def _config(self, **auth_kwargs):
+        from e2e_harness.core.config import Service
 
-        return Env(
-            service=ServiceConfig(base_url="http://localhost"),
-            auth=AuthConfig(**auth_kwargs),
+        return E2EConfig(
+            service=Service(name="test", base_url="http://localhost", **auth_kwargs),
         )
 
     def test_headers_are_injected_directly(self):
         from e2e_harness.runner.headers import build_auth_headers
 
-        env = self._env(
+        config = self._config(
             headers={"X-Top-Tenant-Id": "t1", "X-Top-User-Id": "u1"},
         )
-        headers = build_auth_headers(env)
+        headers = build_auth_headers(config)
         assert headers["X-Top-Tenant-Id"] == "t1"
         assert headers["X-Top-User-Id"] == "u1"
 
     def test_no_auth_headers_when_empty(self):
         from e2e_harness.runner.headers import build_auth_headers
 
-        env = self._env()
-        headers = build_auth_headers(env)
+        config = self._config()
+        headers = build_auth_headers(config)
         assert "X-Top-Tenant-Id" not in headers
         assert headers == {"Content-Type": "application/json"}
 
     def test_extra_overrides_auth(self):
         from e2e_harness.runner.headers import build_auth_headers
 
-        env = self._env(headers={"X-T": "t1"})
-        headers = build_auth_headers(env, extra={"X-T": "override"})
+        config = self._config(headers={"X-T": "t1"})
+        headers = build_auth_headers(config, extra={"X-T": "override"})
         assert headers["X-T"] == "override"
 
     def test_exclude_drops_after_merge(self):
         from e2e_harness.runner.headers import build_auth_headers
 
-        env = self._env(
+        config = self._config(
             headers={"X-T": "t1", "X-U": "u1"},
         )
-        headers = build_auth_headers(env, exclude={"X-T"})
+        headers = build_auth_headers(config, exclude={"X-T"})
         assert "X-T" not in headers
         assert headers["X-U"] == "u1"
 
     def test_custom_content_type(self):
         from e2e_harness.runner.headers import build_auth_headers
 
-        env = self._env()
-        headers = build_auth_headers(env, content_type="text/event-stream")
+        config = self._config()
+        headers = build_auth_headers(config, content_type="text/event-stream")
         assert headers["Content-Type"] == "text/event-stream"
 
 
@@ -170,28 +191,30 @@ class TestOutcome:
 
 class TestProfile:
     def test_require_profile_skip(self):
-        env = Env(profile="minimal")
+        config = E2EConfig(profile="minimal")
         with pytest.raises(pytest.skip.Exception):
-            require_profile(env, "full", "warm_off")
+            require_profile(config, "full", "warm_off")
 
     def test_require_profile_pass(self):
-        env = Env(profile="full")
-        require_profile(env, "full", "minimal")  # should not raise
+        config = E2EConfig(profile="full")
+        require_profile(config, "full", "minimal")  # should not raise
 
     def test_require_capability_unknown(self):
-        env = Env()
+        config = E2EConfig()
         with pytest.raises(pytest.skip.Exception):
-            require_capability(env, "storage_class")
+            require_capability(config, "storage_class")
 
     def test_require_capability_missing(self):
-        from e2e_harness.core.env import Capabilities
+        from e2e_harness.core.config import Capabilities
 
-        env = Env(capabilities=Capabilities(known=True, data={"other": "val"}))
+        config = E2EConfig(capabilities=Capabilities(known=True, data={"other": "val"}))
         with pytest.raises(pytest.skip.Exception):
-            require_capability(env, "storage_class")
+            require_capability(config, "storage_class")
 
     def test_require_capability_present(self):
-        from e2e_harness.core.env import Capabilities
+        from e2e_harness.core.config import Capabilities
 
-        env = Env(capabilities=Capabilities(known=True, data={"storage_class": "gp3"}))
-        require_capability(env, "storage_class")  # should not raise
+        config = E2EConfig(
+            capabilities=Capabilities(known=True, data={"storage_class": "gp3"})
+        )
+        require_capability(config, "storage_class")  # should not raise

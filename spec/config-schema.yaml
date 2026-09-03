@@ -2,7 +2,7 @@
 # 每个服务的 tests/e2e/config.yaml 遵循此结构
 
 type: object
-required: [service, auth]
+required: [service]
 properties:
 
   service:
@@ -12,18 +12,33 @@ properties:
       name:
         type: string
         description: 服务标识
+      component:
+        type: object
+        properties:
+          repository:
+            type: object
+            properties:
+              forge: {type: string}
+              path: {type: string}
+          name: {type: string}
+      environment:
+        type: object
+        properties:
+          name: {type: string}
+          kubeconfig:
+            type: string
+            description: Kubernetes kubeconfig 路径；空值表示由具体访问适配器决定是否使用 in-cluster 配置
+          context:
+            type: string
+            description: 可选 Kubernetes context
       base_url:
         type: string
         description: 被测服务根 URL，支持 ${VAR:-default} 插值
-
-  auth:
-    type: object
-    properties:
       headers:
         type: object
         additionalProperties:
           type: string
-        description: 框架注入到每个请求的认证 header；不预设租户、用户或 token 协议
+        description: 访问该 Service 时注入的 header；不预设租户、用户或 token 协议
 
   runtime:
     type: object

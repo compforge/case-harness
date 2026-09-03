@@ -1,11 +1,12 @@
 import pytest
 
 from perf_harness.config import load_experiment
+from perf_harness.deploy import HelmDeployer
 from perf_harness.drive.workload import MockWorkload
 from perf_harness.engine import Engine
 
 _MIX = """
-subject: { name: chat, base_url: "http://x:8001" }
+service: { name: chat, base_url: "http://x:8001" }
 resources: [ { workers: 2 } ]
 workload: { name: mock }
 facets: { difficulty: { values: [simple, complex], ordered: true } }
@@ -17,7 +18,7 @@ output_dir: /tmp/x
 """
 
 _SINGLE = """
-subject: { name: chat, base_url: "http://x" }
+service: { name: chat, base_url: "http://x" }
 resources: [ {} ]
 workload: { name: mock }
 payload: { ms: 5 }
@@ -25,7 +26,7 @@ load: { model: closed, levels: [1], ramp_s: 0, steady_s: 0.5 }
 """
 
 _BREAKER = """
-subject: { name: chat, base_url: "http://x" }
+service: { name: chat, base_url: "http://x" }
 resources: [ {} ]
 workload: { name: mock }
 load: { model: closed, levels: [2, 4], steady_s: 1, abort_on_error_rate: 0.1, breaker_min_n: 5 }
@@ -41,6 +42,30 @@ def test_config_parses_circuit_breaker(tmp_path):
     assert all(ld.graceful_stop_s == 30.0 for ld in exp.loads)  # default drain window
 
 
+def test_config_builds_helm_deployer_from_common_deployment_model(tmp_path):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(
+        "service:\n"
+        "  name: chat\n"
+        "  component:\n"
+        "    repository: {forge: github, path: example/chat}\n"
+        "    name: api\n"
+        "  environment: {name: dev, kubeconfig: /tmp/kubeconfig}\n"
+        "  namespace: default\n"
+        "  base_url: http://chat\n"
+        "deployer: {type: helm, release: chat, chart_path: ./chart}\n"
+        "resources: [{}]\n"
+        "workload: {name: mock}\n"
+        "load: {model: closed, levels: [1], steady_s: 0.1}\n"
+    )
+
+    experiment, _ = load_experiment(str(cfg), mock=True)
+
+    assert isinstance(experiment.deployer, HelmDeployer)
+    assert experiment.service.component.repository.forge.name == "github"
+    assert experiment.service.component.repository.path == "example/chat"
+
+
 @pytest.mark.parametrize(
     "bad",
     [
@@ -53,7 +78,7 @@ def test_config_parses_circuit_breaker(tmp_path):
 def test_config_rejects_bad_stop_policy(tmp_path, bad):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        "subject: { name: s, base_url: 'http://x' }\n"
+        "service: { name: s, base_url: 'http://x' }\n"
         "resources: [ {} ]\nworkload: { name: mock }\n"
         f"load: {{ model: closed, levels: [1], steady_s: 0.1, {bad} }}\n"
     )
@@ -64,7 +89,7 @@ def test_config_rejects_bad_stop_policy(tmp_path, bad):
 def test_config_rejects_unsupported_max_requests(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        "subject: { name: s, base_url: 'http://x' }\n"
+        "service: { name: s, base_url: 'http://x' }\n"
         "resources: [ {} ]\nworkload: { name: mock }\n"
         "load: { model: closed, levels: [1], steady_s: 0.1, max_requests: 10 }\n"
     )
@@ -78,7 +103,7 @@ def test_load_experiment_parses_cases_and_facets(tmp_path):
     experiment, out = load_experiment(str(cfg))
 
     assert out == "/tmp/x"
-    assert experiment.name == "chat"  # config has no `name:` → subject slug
+    assert experiment.name == "chat"  # config has no `name:` → service slug
     assert experiment.workload.name == "mock"
     assert len(experiment.loads) == 2  # two levels
     assert {c.id for c in experiment.cases} == {"a", "b"}
@@ -178,7 +203,7 @@ def test_load_experiment_backcompat_single_payload(tmp_path):
 
 
 _BASE = """
-subject: { name: s, base_url: "http://x" }
+service: { name: s, base_url: "http://x" }
 resources: [ {} ]
 workload: { name: mock }
 """
@@ -260,7 +285,7 @@ def test_slo_legacy_scope_key_rejected(tmp_path):
 
 
 _UNREGISTERED = """
-subject: { name: s, base_url: "http://x" }
+service: { name: s, base_url: "http://x" }
 resources: [ {} ]
 workload: { name: chat }
 load: { model: closed, levels: [1], steady_s: 0.1 }
@@ -291,8 +316,8 @@ def test_extension_module_registers_workload_and_probe(tmp_path, monkeypatch):
         "    source = 'test'\n"
         "    families = {'value': FamilySpec('count')}\n"
         "    def __init__(self, cfg):\n"
-        "        self._service = cfg.service\n"
-        "        self.name = f'{self.name}.{cfg.service}'\n"
+        "        self._service = cfg.service.name\n"
+        "        self.name = f'{self.name}.{cfg.service.name}'\n"
         "        self.answer = cfg.options['answer']\n"
         "    async def sample(self, ctx):\n"
         "        return {'value': float(self.answer)}\n"
@@ -303,7 +328,7 @@ def test_extension_module_registers_workload_and_probe(tmp_path, monkeypatch):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
         "extensions: [perf_consumer_ext]\n"
-        "subject: { name: s, base_url: 'http://x' }\n"
+        "service: { name: s, base_url: 'http://x' }\n"
         "resources: [ {} ]\n"
         "workload: { name: extension-workload }\n"
         "load: { model: closed, levels: [1], steady_s: 0.1 }\n"

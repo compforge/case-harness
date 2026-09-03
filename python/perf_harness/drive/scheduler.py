@@ -16,6 +16,7 @@ import contextlib
 import random
 import time
 
+from harness_common import OperationRun
 from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile
@@ -36,13 +37,16 @@ async def _fire(
     ctx: ProbeContext,
     case: Case,
     timed: list[tuple[float, Outcome]],
+    operation_runs: list[OperationRun[Outcome]] | None = None,
+    execution_id: str = "trial",
 ) -> None:
     # Window attribution follows dispatch time. Completion time would move a long
     # request into a later hold and corrupt both capacity and resource correlation.
     started_at_s = time.monotonic() - ctx.t0
     ctx.stats.start()
     try:
-        outcome = await workload.fire(FireContext(trial=trial, case=case))
+        fire_context = FireContext(trial=trial, case=case)
+        outcome = await workload.fire(fire_context)
     except Exception as e:  # noqa: BLE001 — never let one fire kill the generator
         outcome = Outcome(
             status=None,
@@ -60,6 +64,15 @@ async def _fire(
     # stamp the fired Case's facets (a Workload may have added runtime-derived ones)
     outcome.facets = {**case.facets, **outcome.facets}
     timed.append((started_at_s, outcome))
+    if operation_runs is not None:
+        operation_runs.append(
+            OperationRun(
+                id=f"{execution_id}:{len(operation_runs)}",
+                service=trial.service,
+                operation=workload.operation(FireContext(trial=trial, case=case)),
+                outcome=outcome,
+            )
+        )
 
 
 def _breaker_snapshot(
@@ -68,7 +81,7 @@ def _breaker_snapshot(
     """Mid-trial circuit breaker DECIDE step: a ``StopSnapshot`` once ≥ ``breaker_min_n``
     requests have been SENT and their cumulative error rate (judged failures ÷ sent)
     reaches ``abort_on_error_rate``, else ``None``. Counts the whole run incl. warmup —
-    a safety net (stop hammering a failing Subject), not a measurement. Drops aren't
+    a safety net (stop hammering a failing Service), not a measurement. Drops aren't
     sent; only completed fires are in ``timed`` (in-flight ones haven't appended yet).
     The snapshot is the trip view the report shows — not the post-warmup measurement."""
     threshold = load.abort_on_error_rate
@@ -118,6 +131,8 @@ async def drive_open(
     cases: list[Case],
     weights: list[float],
     timed: list[tuple[float, Outcome]],
+    operation_runs: list[OperationRun[Outcome]],
+    execution_id: str,
 ) -> TrialStop:
     """Open-loop: issue fires at the Schedule's time-varying arrival rate λ(t).
 
@@ -170,7 +185,19 @@ async def drive_open(
                     )
                 )
             else:
-                tasks.append(asyncio.create_task(_fire(workload, trial, ctx, case, timed)))
+                tasks.append(
+                    asyncio.create_task(
+                        _fire(
+                            workload,
+                            trial,
+                            ctx,
+                            case,
+                            timed,
+                            operation_runs,
+                            execution_id,
+                        )
+                    )
+                )
         await asyncio.sleep(tick)
     # ENACT: drain in-flight up to graceful_stop_s, then cancel; census → TrialStop
     inflight_at_stop, interrupted, forced = await _winddown(tasks, ctx, load.graceful_stop_s)
@@ -190,6 +217,8 @@ async def drive_closed(
     cases: list[Case],
     weights: list[float],
     timed: list[tuple[float, Outcome]],
+    operation_runs: list[OperationRun[Outcome]],
+    execution_id: str,
 ) -> TrialStop:
     """Closed-loop: track the Schedule's target concurrency over time.
 
@@ -212,7 +241,15 @@ async def drive_closed(
     async def user_loop() -> None:
         while not stopping.is_set() and time.monotonic() < deadline:
             fired_at = time.monotonic()
-            await _fire(workload, trial, ctx, _pick(cases, weights), timed)
+            await _fire(
+                workload,
+                trial,
+                ctx,
+                _pick(cases, weights),
+                timed,
+                operation_runs,
+                execution_id,
+            )
             wait = pacing.wait_s(time.monotonic() - fired_at)
             if wait > 0:
                 # interruptible think-time: wake promptly when stopping is set

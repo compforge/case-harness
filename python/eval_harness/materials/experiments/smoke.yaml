@@ -2,8 +2,12 @@
 # omit `arms` for a single run (a 1-Arm experiment).
 name: smoke
 evalset: cases/smoke.yaml # canonical CaseSet shared with other harnesses
-target:                   # base system-under-test config (SUT-agnostic: open `config` bag)
+service:                   # base system-under-test config (SUT-agnostic: open `config` bag)
   name: chat
+  component:
+    repository: {forge: github, path: example/chat}
+    name: api
+  environment: {name: local}
   config: {tenant_id: t1, host: {base_url: "http://localhost:8416"}}
 heavy_fields: [config.tenant_id]   # changing tenant re-provisions; everything else is light
 arms:                     # comparison arms (here: a heavy split via tenant)

@@ -29,7 +29,7 @@ from eval_harness.report.render import (
 from eval_harness.schedule.ratelimit import GateRegistry
 from eval_harness.schedule.reconcile import Provisioner, ReconcileEngine, Solver
 from eval_harness.verdict import write_verdict
-from eval_harness.worksheet.checkpoint import Checkpointer, from_jsonl
+from eval_harness.worksheet.checkpoint import Checkpointer, from_jsonl, to_jsonl
 from eval_harness.worksheet.worksheet import CellState, Worksheet
 
 
@@ -160,12 +160,15 @@ async def run_experiment(
             )
     else:
         ws = Worksheet.build(exp, run_id=rid)
+    ws.add_artifact("worksheet", "worksheet.jsonl")
 
     engine = ReconcileEngine(ws, exp, provisioner, solver, metrics, gates=gates)
     async with Checkpointer(ws, ckpt, interval_s=checkpoint_interval):
         await engine.run()
     write_reports(ws, exp, metrics, run_dir, config_path=config_path)
+    ws.add_artifact("results", "results.csv")
     write_verdict(run_dir, ws, resolve_weights(exp, metrics))  # cross-harness verdict.json
+    to_jsonl(ws, ckpt)
     if teardown:
         await teardown_provisions(ws, provisioner)  # opt-in: clean provisioned resources
     return ws

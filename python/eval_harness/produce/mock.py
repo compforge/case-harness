@@ -4,13 +4,13 @@ system under test (``cli --mock`` / examples / tests of the orchestration)."""
 from __future__ import annotations
 
 from eval_harness.model.evalset import EvalSet
-from eval_harness.model.experiment import Target
+from eval_harness.model.experiment import Service
 from eval_harness.schedule.reconcile import Solver, SolveResult
 from eval_harness.worksheet.worksheet import Row
 
 
 class EchoProvisioner:
-    async def prepare(self, key: str, target: Target, evalset: EvalSet) -> str:
+    async def prepare(self, key: str, service: Service, evalset: EvalSet) -> str:
         return f"mock-nb-{key[:6]}"
 
     async def clean(self, key: str, subject_id: str) -> None:
@@ -24,7 +24,7 @@ class EchoSolver(Solver):
     report renders meaningfully without any model.
     """
 
-    async def solve(self, row: Row, target: Target, subject_id: str) -> SolveResult:
+    async def solve(self, row: Row, service: Service, subject_id: str) -> SolveResult:
         if row.expected_behavior == "refuse":
             resp = "无法从文档中找到相关信息"
         else:

@@ -15,11 +15,15 @@
 # my-exp.yaml —— 压一个已部署的服务，最小配置
 name: example-sizing
 extensions: [my_project.perf]            # import 后注册 workload / 自定义 probe
-subject:
+service:
   name: example
+  component:
+    repository: { forge: github, path: my_org/my_repo }
+    name: api
+  environment: { name: dev, kubeconfig: ~/.kube/config }
   base_url: http://example.default.svc:8000
-  k8s: { kubeconfig: ~/.kube/config, namespace: default,      # 可选：开 k8s 资源观测
-         app_label: app.kubernetes.io/name=example }
+  namespace: default
+  k8s_selector: app.kubernetes.io/name=example   # 可选：开 k8s 资源观测
 
 workload: { name: example, path: /api/v1/run, timeout: 180 }  # 你注册的协议适配（见下）
 
@@ -30,7 +34,7 @@ cases:                                   # 本实验只选 case + 配 weight
 
 load: { model: closed, levels: [5, 10, 20, 40], ramp_s: 20, steady_s: 120 }  # 容量扫描
 
-observe:                                # 看谁（资源侧）；省 k8s 的条目 = subject 自己
+observe:                                # 看哪些 Service（资源侧）
   - name: example
     probes:
       - name: prometheus                # Prombed 抓 /metrics 并执行 PromQL
@@ -78,8 +82,9 @@ report.md/html · summary.csv · by_facet.csv · windows.csv · verdict.json  # 
 
 | 顶层 key | 干什么 | 细节 |
 |---------|--------|------|
-| `subject` | 压谁：`base_url`/`headers`/`k8s`；可选 `provisioner: {type: helm, …}` 让 harness 自己扫资源档 | 不写 provisioner = 直连已部署服务 |
-| `resources` | 资源档列表（workers/cpu/memory/replicas），网格第一轴 | 无 provisioner 时仅作标注 |
+| `service` | 压谁：Component + Environment + Service 身份，以及 `base_url`/`headers`/`namespace`/`k8s_selector` | 运行态目标 |
+| `deployer` | 可选部署实现，例如 `{type: helm, …}` | 不写 = 直连已部署服务 |
+| `resources` | 资源档列表（workers/cpu/memory/replicas），网格第一轴 | 无 deployer 时仅作标注 |
 | `load` | 压多狠、怎么随时间变：`model`(open/closed) + `levels` 或 `stages` + pacing/熔断/优雅停 | [`docs/load-model-redesign.md`](docs/load-model-redesign.md) |
 | `workload` | 协议适配器（你写、`register_workload` 注册；框架只内置 mock） | 见下「接入一个服务」 |
 | `extensions` | 运行前导入的 consumer 模块；模块注册 workload / 自定义 probe | 配置和 CLI/SDK 使用同一发现方式 |
@@ -98,7 +103,7 @@ report.md/html · summary.csv · by_facet.csv · windows.csv · verdict.json  # 
    Trial 依次经历 `setup → measurement → deactivation → cooldown → cleanup`；
    consumer 只需实现 `setup` / `deactivate` / `cleanup`。
 3. 在配置的 `extensions:` 写该模块名；需要业务观测源时用 `register_probe` 注册。
-4. 复制 [`examples/example.yaml`](examples/example.yaml) 改 `workload.name` / `subject` / `load`。
+4. 复制 [`examples/example.yaml`](examples/example.yaml) 改 `workload.name` / `service` / `load`。
 
 完整扩展契约、生命周期顺序和动态 Pod 曲线见
 [`docs/extensions.md`](docs/extensions.md)。

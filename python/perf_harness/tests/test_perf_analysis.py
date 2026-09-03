@@ -56,7 +56,8 @@ def _trial(level, stats, cpu_peaks: dict[str, float], breaker=None) -> TrialReco
         breaker_min_n=10,
     )
     return TrialRecord(
-        subject="chat",
+        id=f"{resources.label()}|{load.label()}",
+        service="chat",
         arm=Arm(f"{resources.label()}|{load.label()}", resources, load),
         windows=[
             Window(

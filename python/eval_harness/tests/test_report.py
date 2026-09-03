@@ -1,5 +1,5 @@
 from eval_harness.model.evalset import EvalSet, FacetSchema
-from eval_harness.model.experiment import Arm, Experiment, Target
+from eval_harness.model.experiment import Arm, Experiment, Service
 from eval_harness.model.sample import MetricResult
 from eval_harness.report.html import single_report_html
 from eval_harness.report.pivot import by_facet, compare, per_case_deltas
@@ -11,7 +11,7 @@ from eval_harness.worksheet.worksheet import CellState, Worksheet
 def _ws():
     exp = Experiment(
         name="cmp",
-        target=Target(name="chat", config={"tenant_id": "t1"}),
+        service=Service(name="chat", config={"tenant_id": "t1"}),
         evalsets=[
             EvalSet(
                 caseset="rag",

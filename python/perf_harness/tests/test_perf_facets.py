@@ -3,17 +3,17 @@ from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.drive.workload import MockWorkload, Workload
-from perf_harness.engine import Engine, Experiment, Subject
-from perf_harness.model import Outcome, ResourceProfile, Target
+from perf_harness.engine import Engine, Experiment
+from perf_harness.model import Outcome, ResourceProfile, Service
 
 
-def _subject() -> Subject:
-    return Subject("mock", Target(base_url="http://127.0.0.1:0"))
+def _subject() -> Service:
+    return Service("mock", base_url="http://127.0.0.1:0")
 
 
 async def test_facets_pivot_and_weighting():
     experiment = Experiment(
-        subject=_subject(),
+        service=_subject(),
         workload=MockWorkload(),
         resources=[ResourceProfile(workers=2)],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(4, 0.0, 0.5))],
@@ -54,7 +54,7 @@ async def test_open_loop_drops_are_separate_not_latency_samples():
     # are client_saturated drops. Drops must NOT contaminate latency (they'd drag
     # p50 toward 0) and are counted separately (n_dropped), attributed per facet.
     experiment = Experiment(
-        subject=_subject(),
+        service=_subject(),
         workload=_SlowWorkload(),
         resources=[ResourceProfile(workers=2)],
         loads=[
@@ -86,7 +86,7 @@ async def test_open_loop_drops_are_separate_not_latency_samples():
 
 async def test_no_cases_is_anonymous_no_facets():
     experiment = Experiment(
-        subject=_subject(),
+        service=_subject(),
         workload=MockWorkload(base_ms=2),
         resources=[ResourceProfile(workers=2)],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],

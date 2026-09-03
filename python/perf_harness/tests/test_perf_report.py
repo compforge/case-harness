@@ -38,7 +38,8 @@ def _trial(level=10) -> TrialRecord:
     load = LoadProfile(model="closed", schedule=Schedule.ramp_hold(level, 0.0, 1.0))
     stats = _stats()
     return TrialRecord(
-        subject="example",
+        id=f"{resources.label()}|{load.label()}",
+        service="example",
         arm=Arm(f"{resources.label()}|{load.label()}", resources, load),
         windows=[
             Window(

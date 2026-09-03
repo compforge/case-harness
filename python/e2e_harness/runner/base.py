@@ -11,6 +11,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+from harness_common import Outcome as BaseOutcome
+
 
 @dataclass
 class Request:
@@ -25,7 +27,7 @@ class Request:
 
 
 @dataclass
-class Outcome:
+class Outcome(BaseOutcome):
     """Standardized runner output — the contract between Runner and Judge.
 
     All runners produce Outcome regardless of protocol. Judge reads Outcome

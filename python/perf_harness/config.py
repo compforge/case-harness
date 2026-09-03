@@ -1,6 +1,6 @@
 """Config — a YAML run file → an Experiment (+ runs dir).
 
-Keeps the wiring (the subject, which Probes, the resources × load grid)
+Keeps the wiring (the service, which Probes, the resources × load grid)
 declarative so a run is reproducible and reviewable. See ``examples/`` for a
 filled-in file.
 """
@@ -13,21 +13,24 @@ from pathlib import Path
 from typing import get_args
 
 import yaml
+from harness_common import Component, Deployer, Forge, Repository
 from harness_common.overlay import Overlay
 from spec_case.facets import FacetSchema
 from spec_case.model import Case, CaseSet, load_caseset, validate
 
+from perf_harness.deploy import HelmDeployer
 from perf_harness.drive.load import LoadModel, LoadProfile, Pacing, PacingKind, Schedule, Stage
 from perf_harness.drive.workload import MockWorkload, Workload, build_workload
-from perf_harness.engine import Experiment, Subject
+from perf_harness.engine import Experiment
 from perf_harness.metric import MetricFamily, parse_ref, validate_ref
 from perf_harness.metric.store import PER_REQUEST_DESCRIPTORS, REQUEST_DESCRIPTORS, SLO_METRICS
 from perf_harness.model import (
-    K8sRef,
+    Deployment,
+    Environment,
     ResourceProfile,
+    Service,
     SloAssertion,
     SloOp,
-    Target,
     WindowKind,
     WindowSelector,
 )
@@ -44,7 +47,6 @@ from perf_harness.observe import (
     RestartProbe,
     build_probe,
 )
-from perf_harness.subject import HelmProvisioner, Provisioner
 
 # valid enum values, derived from the Literal types so they can't drift
 _LOAD_MODELS = get_args(LoadModel)
@@ -61,8 +63,8 @@ _PROBES = {
     "pods": PodCountProbe,
 }
 
-# probes that can observe a *downstream* service (read a pod by K8sRef, no URL) —
-# the subset allowed under `observe:`. client/metrics need the Subject's handles.
+# probes that can observe a downstream Service (read its pods, no URL) —
+# the subset allowed under `observe:`. client/metrics need the Service's handles.
 _K8S_PROBES = {"top", "rss", "restart", "limits", "pods"}
 
 
@@ -76,20 +78,16 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
     config_path = Path(path).expanduser().resolve()
     raw = yaml.safe_load(config_path.read_text())
     _load_extensions(raw.get("extensions"))
-    subj = raw["subject"]
-    subj_name = subj.get("name", "subject")
-    prov_cfg = subj.get("provisioner") or {}
-    if prov_cfg.get("type") == "static" or "base_url" in prov_cfg:
+    subj = raw["service"]
+    subj_name = subj.get("name", "service")
+    if "provisioner" in subj or "provisioner" in raw:
         raise ValueError(
-            "subject.provisioner.static was removed — reachability lives on the subject: "
-            "put base_url/headers/k8s directly under `subject:` and omit `provisioner` "
-            "(only `helm` remains, for harness-driven resource sweeps)"
+            "`provisioner` was renamed `deployer`; configure it at the experiment root"
         )
     if "base_url" not in subj:
-        raise ValueError("subject needs a `base_url` (how to reach the service)")
-    k8s = _parse_k8s(subj.get("k8s"))
-    target = Target(base_url=subj["base_url"], headers=subj.get("headers", {}), k8s=k8s)
-    provisioner = _parse_provisioner(subj.get("provisioner"), k8s)
+        raise ValueError("service needs a `base_url` (how to reach the service)")
+    service = _parse_service(subj)
+    deployer = _parse_deployer(raw.get("deployer"), service)
 
     wl_cfg = raw["workload"]
     workload = MockWorkload() if mock else build_workload(wl_cfg["name"], wl_cfg)
@@ -105,11 +103,11 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
         raise ValueError(
             "`probes:` was removed — `client` is always recorded; put "
             "prometheus/top/rss/restart/limits/pods or registered custom probes under "
-            "`observe:` (the Subject is the entry that omits `k8s`)"
+            "`observe:` (the Service is the entry that omits `k8s`)"
         )
     # client (load-gen's own inflight/sent) is harness-intrinsic → always on, not a
     # config knob. observe: is the one place for per-service resource observation.
-    probes = [ClientProbe(), *_parse_observe(raw.get("observe"))]
+    probes = [ClientProbe(), *_parse_observe(raw.get("observe"), service)]
     if "derived" in raw:
         raise ValueError(
             "`derived:` was removed — express server-side ratios and rates directly "
@@ -156,7 +154,8 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
         cooldown_s=cooldown_s,
     )
     experiment = Experiment(
-        subject=Subject(name=subj_name, target=target, provisioner=provisioner),
+        service=service,
+        deployer=deployer,
         workload=workload,
         resources=resources,
         loads=loads,
@@ -167,7 +166,7 @@ def load_experiment(path: str, *, mock: bool = False) -> tuple[Experiment, str]:
         slo=slo,
         abort_on_fail=bool(raw.get("abort_on_fail", False)),
         strict_slo=bool(raw.get("strict_slo", False)),  # skip → run failure (default lenient)
-        # experiment name = config `name` (the named experiment dir), default subject slug
+        # experiment name = config `name` (the named experiment dir), default service slug
         name=str(raw.get("name") or _slug(subj_name)),
         observe_interval_s=float(raw.get("observe_interval_s", 5.0)),
         cooldown_s=cooldown_s,
@@ -310,36 +309,68 @@ def _load_input(file: str | None, inline: dict | None) -> dict | None:
     return None
 
 
-def _parse_k8s(c: dict | None) -> K8sRef | None:
-    if not c:
-        return None
-    return K8sRef(
-        kubeconfig=os.path.expanduser(c["kubeconfig"]),
-        namespace=c["namespace"],
-        app_label=c["app_label"],
-        metrics_prefix=c.get("metrics_prefix", ""),
+def _parse_service(c: dict, fallback_environment: Environment | None = None) -> Service:
+    name = str(c.get("name", ""))
+    component = c.get("component") or {}
+    repository = component.get("repository") or {}
+    environment = c.get("environment") or {}
+    return Service(
+        name=name,
+        component=Component(
+            repository=Repository(
+                forge=Forge(name=str(repository.get("forge", ""))),
+                path=str(repository.get("path", "")),
+            ),
+            name=str(component.get("name") or name),
+        ),
+        environment=Environment(
+            name=str(
+                environment.get("name")
+                or (fallback_environment.name if fallback_environment else "")
+            ),
+            kubeconfig=os.path.expanduser(
+                str(
+                    environment.get("kubeconfig")
+                    or (fallback_environment.kubeconfig if fallback_environment else "")
+                )
+            ),
+            context=(
+                str(environment["context"])
+                if environment.get("context")
+                else (fallback_environment.context if fallback_environment else None)
+            ),
+        ),
+        base_url=str(c.get("base_url", "")).rstrip("/"),
+        headers={str(k): str(v) for k, v in (c.get("headers") or {}).items()},
+        namespace=str(c.get("namespace", "")),
+        k8s_selector=str(c.get("k8s_selector", "")),
+        metrics_prefix=str(c.get("metrics_prefix", "")),
         metrics_port=int(c.get("metrics_port", 8000)),
         container=c.get("container"),
     )
 
 
-def _parse_observe(items: list[dict] | None) -> list[Probe]:
+def _parse_observe(items: list[dict] | None, root_service: Service) -> list[Probe]:
     """``observe:`` → the ONE place for per-service resource observation, self +
-    downstream in one shape. Each item: ``name`` + ``probes`` + an OPTIONAL ``k8s``
-    block; omit ``k8s`` and the entry is the **Subject**. Pod probes read a K8sRef;
+    downstream in one shape. Each item is a Service plus ``probes``; omitted
+    Environment fields inherit from the experiment Service.
     ``prometheus`` embeds Prombed and requires declarative PromQL queries. Resource
     families remain service-labeled, so reports can compare the same signal across
     observed services."""
     out: list[Probe] = []
     for item in items or []:
-        service = str(item["name"])
-        obsolete = {"derive", "scrape", "metrics_url"} & item.keys()
+        service_name = str(item["name"])
+        service = (
+            root_service
+            if service_name == root_service.name
+            else _parse_service(item, root_service.environment)
+        )
+        obsolete = {"derive", "scrape", "metrics_url", "k8s"} & item.keys()
         if obsolete:
             raise ValueError(
-                f"observe[{service}]: removed keys {sorted(obsolete)!r}; configure "
+                f"observe[{service_name}]: removed keys {sorted(obsolete)!r}; configure "
                 "PromQL under `probes: [{name: prometheus, queries: [...]}]`"
             )
-        ref = _parse_k8s(item.get("k8s"))  # None → the Subject (its pod + base_url)
         # per_pod: top/limits emit one {pod}-labeled series per pod instead of the
         # service-level sum (per-pod usage vs its OWN request/limit on one chart)
         per_pod = bool(item.get("per_pod", False))
@@ -352,33 +383,34 @@ def _parse_observe(items: list[dict] | None) -> list[Probe]:
                 pname = probe_item.get("name")
                 if not isinstance(pname, str) or not pname:
                     raise ValueError(
-                        f"observe[{service}].probes entries need a string `name`: {probe_item!r}"
+                        f"observe[{service_name}].probes entries need a string `name`: "
+                        f"{probe_item!r}"
                     )
                 options = {str(k): v for k, v in probe_item.items() if k != "name"}
             else:
                 raise ValueError(
-                    f"observe[{service}].probes entries must be names or mappings, "
+                    f"observe[{service_name}].probes entries must be names or mappings, "
                     f"got {probe_item!r}"
                 )
             if pname in _K8S_PROBES:
                 if options:
                     raise ValueError(
-                        f"observe[{service}].probes[{pname}]: builtin probe has no options, "
+                        f"observe[{service_name}].probes[{pname}]: builtin probe has no options, "
                         f"got {sorted(options)}"
                     )
-                out.append(_PROBES[pname](k8s=ref, service=service, per_pod=per_pod))
+                out.append(_PROBES[pname](target_service=service, per_pod=per_pod))
             elif pname == "prometheus":
-                queries = _parse_prometheus_queries(options.pop("queries", None), service)
+                queries = _parse_prometheus_queries(options.pop("queries", None), service_name)
                 url = options.pop("url", None)
-                if ref is not None and not url:
+                if service != root_service and not url:
                     raise ValueError(
-                        f"observe[{service}].probes[prometheus]: a downstream service "
+                        f"observe[{service_name}].probes[prometheus]: a downstream service "
                         "needs an explicit `url`"
                     )
                 headers = options.pop("headers", None)
                 if headers is not None and not isinstance(headers, dict):
                     raise ValueError(
-                        f"observe[{service}].probes[prometheus].headers must be a mapping"
+                        f"observe[{service_name}].probes[prometheus].headers must be a mapping"
                     )
                 allowed_limits = {
                     "timeout_ms",
@@ -390,12 +422,12 @@ def _parse_observe(items: list[dict] | None) -> list[Probe]:
                 unknown = set(options) - allowed_limits
                 if unknown:
                     raise ValueError(
-                        f"observe[{service}].probes[prometheus]: unknown options "
+                        f"observe[{service_name}].probes[prometheus]: unknown options "
                         f"{sorted(unknown)!r}"
                     )
                 out.append(
                     PrometheusProbe(
-                        service=service,
+                        service=service_name,
                         queries=queries,
                         url=str(url) if url else None,
                         headers={str(k): str(v) for k, v in (headers or {}).items()},
@@ -404,7 +436,7 @@ def _parse_observe(items: list[dict] | None) -> list[Probe]:
                 )
             elif pname == "client":
                 raise ValueError(
-                    f"observe[{service}].probes: 'client' is intrinsic and cannot "
+                    f"observe[{service_name}].probes: 'client' is intrinsic and cannot "
                     "observe a service"
                 )
             else:
@@ -413,7 +445,6 @@ def _parse_observe(items: list[dict] | None) -> list[Probe]:
                         pname,
                         ProbeConfig(
                             service=service,
-                            k8s=ref,
                             per_pod=per_pod,
                             options=options,
                         ),
@@ -467,26 +498,29 @@ def _parse_prometheus_queries(items: object, service: str) -> list[PrometheusQue
     return out
 
 
-def _parse_provisioner(c: dict | None, k8s: K8sRef | None) -> Provisioner | None:
-    """``subject.provisioner:`` → a Provisioner, or None (the common case: the
+def _parse_deployer(c: dict | None, service: Service) -> Deployer[Deployment] | None:
+    """``deployer:`` → a Deployer, or None (the common case: the
     service is already deployed; ``resources:`` entries merely label the trials)."""
     if not c:
         return None
     kind = c.get("type", "helm")
     if kind == "helm":
-        if k8s is None:
-            raise ValueError("a helm provisioner requires `subject.k8s` (kubeconfig/namespace)")
-        return HelmProvisioner(
+        if not service.environment.kubeconfig or not service.namespace:
+            raise ValueError(
+                "a Helm deployer requires `service.environment.kubeconfig` and "
+                "`service.namespace`"
+            )
+        return HelmDeployer(
             release=c["release"],
             chart_path=os.path.expanduser(c["chart_path"]),
-            namespace=k8s.namespace,
-            kubeconfig=k8s.kubeconfig,
+            namespace=service.namespace,
+            kubeconfig=service.environment.kubeconfig,
             base_values=_expand(c.get("base_values")),
             set_paths=c.get("set_paths"),
             rollout_timeout_s=int(c.get("rollout_timeout_s", 180)),
             extra_set=c.get("extra_set"),
         )
-    raise ValueError(f"unknown provisioner type: {kind!r} (only `helm`)")
+    raise ValueError(f"unknown deployer type: {kind!r} (only `helm`)")
 
 
 def _parse_resources(c: dict) -> ResourceProfile:

@@ -14,8 +14,8 @@ from pathlib import Path
 import httpx
 
 from spec_case.model import load_caseset, validate
-from e2e_harness.core.env import Env
-from e2e_harness.engine import run_case, run_cases
+from e2e_harness.core.config import E2EConfig, Experiment, Service
+from e2e_harness.engine import run_case, run_cases, run_experiment
 from e2e_harness.runner.json_runner import JSONRunner
 
 _CASES_YAML = Path(__file__).parent.parent / "examples" / "note_cases.yaml"
@@ -36,8 +36,8 @@ def _sut(request: httpx.Request) -> httpx.Response:
 def _runner() -> JSONRunner:
     client = httpx.Client(transport=httpx.MockTransport(_sut), base_url="http://sut")
     return JSONRunner(
-        Env(), client=client
-    )  # Env() defaults: no auth, no base_url override
+        E2EConfig(), client=client
+    )  # E2EConfig() defaults: no auth, no base_url override
 
 
 def test_example_caseset_loads_and_all_pass_against_the_sut():
@@ -60,3 +60,23 @@ def test_engine_catches_a_real_defect():
 
     v = run_case(bad, _runner())
     assert v.status == "fail" and "got 400" in v.reason  # the engine flags the mismatch
+
+
+def test_experiment_run_retains_case_operation_and_outcome() -> None:
+    caseset = load_caseset(_CASES_YAML)
+    service = Service(name="note")
+    run = run_experiment(
+        Experiment(name="note", service=service, caseset=caseset.caseset),
+        [caseset.cases[0]],
+        _runner(),
+        run_id="evidence",
+    )
+
+    assert len(run.executions) == 1
+    case_run = run.executions[0]
+    assert case_run.id == caseset.cases[0].id
+    assert len(case_run.operation_runs) == 1
+    operation_run = case_run.operation_runs[0]
+    assert operation_run.service is service
+    assert operation_run.operation.method == "POST"
+    assert operation_run.outcome.status_code == 201

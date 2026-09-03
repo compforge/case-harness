@@ -51,10 +51,10 @@ from perf_harness.metric import (
 )
 from perf_harness.model import RequestStats, Run, Series, SloCheck, TrialRecord
 from perf_harness.report.palette import family_color as _family_color
-from perf_harness.runio import write_run_data, write_timeseries_data
+from perf_harness.runio import PerfReducer, write_timeseries_data
 from perf_harness.slo import slo_aware_capacity
 
-# subject is constant across a report's rows (one Experiment = one Subject) and is
+# service is constant across a report's rows (one Experiment = one Service) and is
 # already in the title — so it's not a table column.
 _KEY_COLS = ["resources", "model", "level"]
 _STAT_COLS = ["n", "ok", "rps", "err%", "drop%", "p50_ms", "p95_ms", "p99_ms", "err_top"]
@@ -378,7 +378,11 @@ def write_run(
     exp_dir = run_dir.parent  # runs/<experiment>/ — holds the per-experiment run.jsonl log
     # Facts and the machine verdict must survive an optional renderer failure. The
     # report is a downstream view and therefore runs only after raw/model persistence.
-    paths = write_run_data(run, run_dir)
+    reduced = PerfReducer().reduce(run, run_dir)
+    paths = {
+        "run.json" if artifact.name == "model" else artifact.name: str(run_dir / artifact.path)
+        for artifact in reduced
+    }
     paths["run_dir"] = str(run_dir)
 
     # cross-harness verdict.json (run-level SLO gate) — what devloop reads to self-correct
@@ -410,7 +414,7 @@ def write_run(
         slim = {
             "run_id": run.run_id,
             "created_at": run.created_at,
-            "subject": run.subject,
+            "service": run.service,
             "n_trials": len(run.trials),
         }
         with (exp_dir / "run.jsonl").open("a") as f:
@@ -605,8 +609,8 @@ def _build_doc(
 ) -> Report:
     """Map TrialRecords into the neutral report IR — same content/order as ``_render_md``,
     but §3 carries plotted Probe series instead of a pointer to timeseries.csv."""
-    subject = results[0].subject if results else "?"
-    report = Report(title=f"perf report — {subject}", meta=[("subject", subject)])
+    service = results[0].service if results else "?"
+    report = Report(title=f"perf report — {service}", meta=[("service", service)])
 
     # Run gate: a partial trial fails before the three-state SLO rollup.
     errors = [r for r in results if r.phase_errors]
@@ -1055,8 +1059,8 @@ def _render_md(
     facet_order: dict[str, list[str]] | None,
 ) -> str:
     lines: list[str] = []
-    subject = results[0].subject if results else "?"
-    lines.append(f"# perf report — {subject}")
+    service = results[0].service if results else "?"
+    lines.append(f"# perf report — {service}")
     lines.append("")
 
     _render_slo(lines, results)

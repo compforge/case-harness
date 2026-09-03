@@ -12,9 +12,9 @@ import (
 var healthzClient = &http.Client{Timeout: 5 * time.Second}
 
 // ProbeCapabilities hits <base_url><path> (e.g. "/healthz") once and records the
-// server's self-reported capabilities into env.Capabilities. Call it after LoadEnv
+// server's self-reported capabilities into config.Capabilities. Call it after LoadConfig
 // when tests need to gate on server features they can't know statically.
-func (e *Env) ProbeCapabilities(path string) {
+func (e *E2EConfig) ProbeCapabilities(path string) {
 	e.Capabilities = FetchCapabilities(e.Service.BaseURL, path)
 }
 

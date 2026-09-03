@@ -1,14 +1,14 @@
 import pytest
 
-from e2e_harness import Env, JSONRunner, load_env
+from e2e_harness import E2EConfig, JSONRunner, load_config
 
 
 @pytest.fixture(scope="session")
-def env() -> Env:
-    return load_env("config.yaml")
+def config() -> E2EConfig:
+    return load_config("config.yaml")
 
 
 @pytest.fixture(scope="session")
-def runner(env: Env):
-    with JSONRunner(env) as value:
+def runner(config: E2EConfig):
+    with JSONRunner(config) as value:
         yield value

@@ -30,7 +30,7 @@ case-harness/
 │   ├── perf_harness/    # 压力测试（perf）：资源约束下的容量/资源画像        → 见其 AGENTS.md
 │   ├── trace_harness/   # trace 分析（trace）：开盒 OTel/Jaeger span 归因，调用栈+判读+corpus → 见其 AGENTS.md
 │   ├── trajectory_harness/ # 轨迹评估：外部记录→Trajectory→Evaluator → 见其 AGENTS.md
-│   ├── common/          # 中立共享层：case / verdict / llm / facets + report_kit（报告 IR + HTML 渲染），五个 SDK 共用、无业务概念
+│   ├── common/          # 中立共享层：运行时身份、Experiment/Run/Artifact、verdict、llm + report_kit，五个 SDK 共用
 │   ├── harness_toolbox/ # Python 平台工具箱；跨 Harness 的环境操作与观测
 │   └── …/tests/         # 测试在各自包内（e2e_harness/tests 等；common 同），打包时排除
 ├── go/                  # Go SDK（e2e 参考实现 + toolbox/* 平台工具箱）→ 见 go/AGENTS.md
@@ -46,7 +46,7 @@ case-harness/
 - **同一 CaseSet，多种执行视角**：Eval / Perf 直接消费 spec-case CaseSet；Experiment 只能选择 Case、设置 weight 或其它运行参数，不能复制或覆盖资产字段。跨语言约束由 `conformance/case/` 证明。
 - **Case → Observation → Unit → Dataset → EvaluationRun / Worksheet → Report**：所有 Harness 都按这套顶层语义对齐。Dataset 固定可复用的 Unit facts；每次运行选择的 Detector、Evaluator、Measurer 与可选 Policy 直接表达评估侧重点，并在不重新执行 Case 的前提下为同一 Dataset 产生新的 Worksheet、Verdict 与 JSON / HTML Report。`detect / evaluate / measure` 是并列处理职责，输出 Finding、Evaluation 与 Measurement；Finding 不自动决定 Verdict。各 Harness 保留自己的 Unit grain、强类型 key、调度和聚合模型，详见 [`docs/kernel.md`](docs/kernel.md#dataset-与反复评估)。
 - **可验证交付从开发期开始**：被测项目随需求、外部行为变更和缺陷修复维护 Spec / Case，再由 case-harness 在部署后针对指定版本与环境执行为 Verdict。项目拥有验证资产与判定标准，部署领域拥有环境、凭据、触发和发布策略；API、CLI、Pipeline、Job 只是可替换适配。
-- 五个 Python SDK 共享同一个 uv 工程与 `spec/` 约定，**互不 import**；公共能力集中在 `common`（case / verdict / llm / facets + report_kit 报告 IR）这一中立共享层，而不是 SDK 之间互相复用。各 SDK 仍自带一小撮协议原语（Outcome 形状、runner、SSEParser；perf 自带 httpx 发压栈、trace 自带薄 driver）——**先复制后收敛**，确属公共再收进 `common`。trace 的 parquet 持久化走可选 extra `[trace-corpus]`，不给其它 SDK 增重。
+- 五个 Python SDK 共享同一个 uv 工程与 `spec/` 约定，**互不 import**；公共能力集中在 `common`（运行时身份、ExperimentRun/Execution/OperationRun/Outcome、Reducer/Artifact、verdict、llm + report_kit）这一中立共享层，而不是 SDK 之间互相复用。common 统一执行事实而不统一 runner/scheduler 等执行机制。各 SDK 仍自带协议原语（Outcome 具体形状、runner、SSEParser；perf 自带 httpx 发压栈、trace 自带薄 driver）——**先复制后收敛**，确属公共再收进 `common`。trace 的 parquet 持久化走可选 extra `[trace-corpus]`，不给其它 SDK 增重。
 - 新增能力先想清楚归哪类问题（对错 / 效果 / 容量 / 归因），落到对应 SDK；跨 SDK 的"公共抽象"冲动默认抑制，先复制后收敛，确属公共再进 `common`。
 - Go/Python e2e 共享 CaseRun 语义（prepare/execute/judge/cleanup、阶段 budget、Verdict），API 保持各自语言习惯；资产模型仍统一由 spec-case 持有。
 - Kubernetes 等[平台工具箱](docs/toolbox.md)按语言提供惯用 API，并共享操作与观测语义；它们不拥有

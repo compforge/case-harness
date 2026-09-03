@@ -13,7 +13,7 @@ import httpx
 
 from spec_case.model import load_caseset, validate
 from e2e_harness.cli import _runner as cli_runner
-from e2e_harness.core.env import Env
+from e2e_harness.core.config import E2EConfig
 from e2e_harness.engine import response_view, run_cases
 from e2e_harness.runner.base import Outcome
 from e2e_harness.runner.sse_runner import SSERunner
@@ -38,7 +38,7 @@ def _sse_sut(request: httpx.Request) -> httpx.Response:
 
 def _runner() -> SSERunner:
     return SSERunner(
-        Env(),
+        E2EConfig(),
         client=httpx.Client(
             transport=httpx.MockTransport(_sse_sut), base_url="http://sut"
         ),
@@ -46,7 +46,9 @@ def _runner() -> SSERunner:
 
 
 def test_cli_protocol_sse_selects_sse_runner():
-    assert isinstance(cli_runner(Env(), "sse"), SSERunner)  # `e2e run --protocol sse`
+    assert isinstance(
+        cli_runner(E2EConfig(), "sse"), SSERunner
+    )  # `e2e run --protocol sse`
 
 
 def test_response_view_exposes_events_and_count():
@@ -74,7 +76,7 @@ def test_engine_flags_a_truncated_stream():
         )
 
     runner = SSERunner(
-        Env(),
+        E2EConfig(),
         client=httpx.Client(
             transport=httpx.MockTransport(_truncated), base_url="http://sut"
         ),

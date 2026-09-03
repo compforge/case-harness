@@ -8,12 +8,12 @@ import httpx
 import pytest
 from spec_case.model import Case
 
-from perf_harness import Engine, Experiment, Subject
+from perf_harness import Engine, Experiment, Service
 from perf_harness.config import load_experiment
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.drive.workload import Workload, stream_sse
 from perf_harness.metric import MetricFamily
-from perf_harness.model import Outcome, ResourceProfile, SloAssertion, Target
+from perf_harness.model import Outcome, ResourceProfile, SloAssertion
 from perf_harness.observe import ClientProbe
 from perf_harness.report import write_report
 from perf_harness.slo import evaluate_slo
@@ -35,7 +35,7 @@ class _MetricWL(Workload):
 
 async def _one_trial():
     exp = Experiment(
-        subject=Subject("m", Target(base_url="http://127.0.0.1:0")),
+        service=Service("m", base_url="http://127.0.0.1:0"),
         workload=_MetricWL(),
         resources=[ResourceProfile(workers=2)],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(3, 0.0, 0.2))],
@@ -82,7 +82,7 @@ class _DeclaringWL(Workload):
 
 async def test_workload_describe_overrides_inference_partially():
     exp = Experiment(
-        subject=Subject("d", Target(base_url="http://127.0.0.1:0")),
+        service=Service("d", base_url="http://127.0.0.1:0"),
         workload=_DeclaringWL(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],
@@ -134,14 +134,14 @@ async def test_report_shows_metric_columns_and_header_tooltips(tmp_path):
     assert "time to first SSE byte" in html  # ttft_ms description surfaced
     md = (tmp_path / "report.md").read_text()
     assert "统一模型" not in md  # the legend line is gone
-    assert "| subject |" not in md  # subject is no longer a table column
+    assert "| service |" not in md  # service is no longer a table column
 
 
 async def test_facet_table_carries_per_request_metrics(tmp_path):
     # per_request metrics are sliceable → the by-facet md table must show them
     # (not just the overall §1 table); CSV already did.
     exp = Experiment(
-        subject=Subject("m", Target(base_url="http://127.0.0.1:0")),
+        service=Service("m", base_url="http://127.0.0.1:0"),
         workload=_MetricWL(),
         resources=[ResourceProfile(workers=2)],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(3, 0.0, 0.2))],
@@ -179,7 +179,7 @@ def test_config_accepts_per_request_metric_slo(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
         "name: x\n"
-        'subject: { name: s, base_url: "http://x" }\n'
+        'service: { name: s, base_url: "http://x" }\n'
         "resources: [ {} ]\n"
         "workload: { name: mock }\n"
         "load: { model: closed, levels: [1], ramp_s: 0, steady_s: 0.2 }\n"
@@ -230,7 +230,7 @@ def test_config_rejects_bad_metric_stat(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
         "name: x\n"
-        'subject: { name: s, base_url: "http://x" }\n'
+        'service: { name: s, base_url: "http://x" }\n'
         "resources: [ {} ]\n"
         "workload: { name: mock }\n"
         "load: { model: closed, levels: [1], ramp_s: 0, steady_s: 0.2 }\n"

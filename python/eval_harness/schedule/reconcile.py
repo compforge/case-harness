@@ -21,7 +21,7 @@ from typing import Any, Protocol
 
 from eval_harness.metric.base import BaseMetric
 from eval_harness.model.evalset import EvalSet
-from eval_harness.model.experiment import Experiment, Target
+from eval_harness.model.experiment import Experiment, Service
 from eval_harness.model.sample import Sample
 from eval_harness.schedule.ratelimit import GateRegistry, RateGate
 from eval_harness.worksheet.worksheet import CellState, Row, SolveCell, Worksheet
@@ -51,7 +51,7 @@ class Provisioner(Protocol):
     so the provisioner needs no separate manifest of its own.
     """
 
-    async def prepare(self, key: str, target: Target, evalset: EvalSet) -> str: ...
+    async def prepare(self, key: str, service: Service, evalset: EvalSet) -> str: ...
     async def clean(self, key: str, subject_id: str) -> None: ...
 
 
@@ -68,9 +68,9 @@ class Solver(ABC):
     """
 
     @abstractmethod
-    async def solve(self, row: Row, target: Target, subject_id: str) -> SolveResult: ...
+    async def solve(self, row: Row, service: Service, subject_id: str) -> SolveResult: ...
 
-    async def fetch(self, row: Row, target: Target, subject_id: str) -> SolveResult | None:
+    async def fetch(self, row: Row, service: Service, subject_id: str) -> SolveResult | None:
         return None
 
 
@@ -78,16 +78,16 @@ async def _maybe_await(x: Any) -> Any:
     return await x if inspect.isawaitable(x) else x
 
 
-def _sut_endpoint(target: Target) -> str:
+def _sut_endpoint(service: Service) -> str:
     """Rate-limit bucket key for a SUT call — the run API the solver hits.
 
     Different models/endpoints are different buckets (independent limits), so model-alpha vs
     model-beta don't throttle each other. Prefer the typed ``llm`` spec (base_url + model);
-    fall back to the target's ``name``.
+    fall back to the service's ``name``.
     """
-    if target.llm and (target.llm.base_url or target.llm.model):
-        return f"{target.llm.base_url or ''}::{target.llm.model or ''}"
-    return target.name or "default"
+    if service.llm and (service.llm.base_url or service.llm.model):
+        return f"{service.llm.base_url or ''}::{service.llm.model or ''}"
+    return service.name or "default"
 
 
 class ReconcileEngine:
@@ -116,17 +116,17 @@ class ReconcileEngine:
         # retry that clashes with the partial resource). Retries still happen on resume.
         self.provision_attempts = provision_attempts
         self.backoff_base = backoff_base
-        # Arm id → resolved target; provision key → resolved target + its EvalSet.
+        # Arm id → resolved service; provision key → resolved service + its EvalSet.
         # An experiment may span corpora, so a key is (Arm-heavy × corpus); each key
         # provisions its own corpus's resource.
-        self._target_by_arm: dict[str, Target] = {}
-        self._target_by_key: dict[str, Target] = {}
+        self._target_by_arm: dict[str, Service] = {}
+        self._target_by_key: dict[str, Service] = {}
         self._evalset_by_key: dict[str, EvalSet] = {}
         for arm in exp.resolved_arms():
-            rt = arm.resolve(exp.target)
+            rt = arm.resolve(exp.service)
             self._target_by_arm[arm.id] = rt
             for es in exp.evalsets:
-                key = arm.key(es.corpus, exp.target, exp.heavy_fields)
+                key = arm.key(es.corpus, exp.service, exp.heavy_fields)
                 self._target_by_key.setdefault(key, rt)
                 self._evalset_by_key.setdefault(key, es)
 
@@ -146,12 +146,12 @@ class ReconcileEngine:
         await asyncio.gather(*(self._provision(k) for k in pending))
 
     async def _provision(self, key: str) -> None:
-        target = self._target_by_key[key]
-        gate = self.gates.sut(_sut_endpoint(target))
+        service = self._target_by_key[key]
+        gate = self.gates.sut(_sut_endpoint(service))
         try:
             sid = await self._attempt(
                 gate,
-                lambda: self.provisioner.prepare(key, target, self._evalset_by_key[key]),
+                lambda: self.provisioner.prepare(key, service, self._evalset_by_key[key]),
                 attempts=self.provision_attempts,
             )
             self.ws.set_provision_ok(key, sid)
@@ -163,9 +163,9 @@ class ReconcileEngine:
         if not prov or prov.state is not CellState.OK:
             return  # provision unavailable → cannot solve this row (left PENDING/whatever)
         if row.solve.state is not CellState.OK:
-            target = self._target_by_arm[row.arm_id]
+            service = self._target_by_arm[row.arm_id]
             try:
-                res = await self._fetch_or_solve(row, target, prov.subject_id)
+                res = await self._fetch_or_solve(row, service, prov.subject_id)
                 row.solve = SolveCell(
                     state=CellState.OK,
                     response=res.response,
@@ -185,15 +185,15 @@ class ReconcileEngine:
         ]
         await asyncio.gather(*(self._score_one(row, sample, name) for name in todo))
 
-    async def _fetch_or_solve(self, row: Row, target: Target, subject_id: str) -> SolveResult:
+    async def _fetch_or_solve(self, row: Row, service: Service, subject_id: str) -> SolveResult:
         """Reuse an already-stored SUT result if ``fetch`` finds one (cheap, ungated);
         otherwise trigger ``solve`` under the SUT rate gate. The default ``fetch`` returns
         None, so a solver that doesn't override it always triggers."""
-        hit = await self.solver.fetch(row, target, subject_id)
+        hit = await self.solver.fetch(row, service, subject_id)
         if hit is not None:
             return hit
-        gate = self.gates.sut(_sut_endpoint(target))
-        return await self._attempt(gate, lambda: self.solver.solve(row, target, subject_id))
+        gate = self.gates.sut(_sut_endpoint(service))
+        return await self._attempt(gate, lambda: self.solver.solve(row, service, subject_id))
 
     async def _score_one(self, row: Row, sample: Sample, name: str) -> None:
         metric = self.metric_by_name.get(name)

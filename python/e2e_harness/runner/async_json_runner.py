@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from e2e_harness.core.env import Env
+from e2e_harness.core.config import E2EConfig
 from e2e_harness.runner.async_base import AsyncBaseRunner
 from e2e_harness.runner.base import Outcome, Request
 from e2e_harness.runner.headers import build_auth_headers
@@ -21,11 +21,11 @@ from e2e_harness.runner.headers import build_auth_headers
 class AsyncJSONRunner(AsyncBaseRunner):
     """Async runner for standard JSON REST/RPC APIs."""
 
-    def __init__(self, env: Env, *, client: httpx.AsyncClient | None = None):
-        self._env = env
+    def __init__(self, config: E2EConfig, *, client: httpx.AsyncClient | None = None):
+        self._env = config
         self._client = client or httpx.AsyncClient(
-            base_url=env.service.base_url,
-            timeout=httpx.Timeout(env.runtime.http_timeout_s),
+            base_url=config.service.base_url,
+            timeout=httpx.Timeout(config.runtime.http_timeout_s),
         )
 
     async def trigger(self, request: Request) -> Outcome:

@@ -1,7 +1,7 @@
 """The Workload — the per-service protocol adapter (one of the two extension points).
 
 A ``Workload`` is *how to fire*: given a ``Case`` (the request input, as data), it
-fires one request against the Target and returns an ``Outcome``. It deliberately
+fires one request against the Service and returns an ``Outcome``. It deliberately
 does **not** hold payloads or decide *which* Case to fire — Cases are data
 (authored in the consumer repo, like an eval_harness evalset) and the Engine
 selects one per fire by weight. So the Workload only knows the protocol (e.g.
@@ -22,10 +22,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
+from harness_common import Operation
 from spec_case.model import Case
 
 from perf_harness.metric import FacetDescriptor, MetricFamily
-from perf_harness.model import Outcome, ResourceProfile, Target, Verdict
+from perf_harness.model import Outcome, ResourceProfile, Service, Verdict
 
 if TYPE_CHECKING:
     from perf_harness.drive.load import LoadProfile
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
 class TrialContext:
     """Immutable handles and coordinates shared throughout one Trial."""
 
-    target: Target
+    service: Service
     client: httpx.AsyncClient
     run_id: str
     resources: ResourceProfile
@@ -61,6 +62,15 @@ class Workload(ABC):
     #: stable id used by the workload registry (build_workload / config ``workload.name``)
     name: str = "workload"
 
+    def operation(self, ctx: FireContext) -> Operation:
+        """Identify the Service capability exercised by this fire.
+
+        A protocol adapter that serves multiple Operations can override this
+        from the Case input. The stable default treats the registered Workload
+        name as the capability name.
+        """
+        return Operation(name=self.name)
+
     async def setup(self, ctx: TrialContext) -> None:
         """Prepare external state before measurement and observation begin.
 
@@ -83,7 +93,7 @@ class Workload(ABC):
 
     @abstractmethod
     async def fire(self, ctx: FireContext) -> Outcome:
-        """Fire one request built from ``ctx.case.input`` against its Trial target.
+        """Fire one request built from ``ctx.case.input`` against its Trial Service.
 
         ``fire`` records the *raw observation* only (status, timing, frame/byte
         counts, protocol signals in ``outcome.meta``) — it does NOT decide
@@ -228,7 +238,7 @@ def _sse_data(line: bytes) -> bytes | None:
 
 
 class MockWorkload(Workload):
-    """A zero-dependency Workload for smoke runs and tests (no live Subject).
+    """A zero-dependency Workload for smoke runs and tests (no live Service).
 
     Sleeps ``case.input["ms"]`` (or ``base_ms``) + a deterministic jitter and
     reports success — so the Engine/Probe/Report pipeline (and per-facet

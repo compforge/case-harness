@@ -2,7 +2,7 @@
 
 ## 项目定位与边界
 
-不测对错（`e2e_harness`）、不测质量（`eval_harness`），测**容量与资源画像**：把服务放到某个资源档下、施加压力、观察它随时间的表现，回答"在 xx 资源 + xx qps 下扛得住多少、cpu/内存/错误率如何"。**自给自足**，不 import 另两个 SDK；k8s 只活在 `subject.py`（HelmProvisioner）+ `observe/k8s.py` 两处。
+不测对错（`e2e_harness`）、不测质量（`eval_harness`），测**容量与资源画像**：把服务放到某个资源档下、施加压力、观察它随时间的表现，回答"在 xx 资源 + xx qps 下扛得住多少、cpu/内存/错误率如何"。**自给自足**，不 import 另两个 SDK；k8s 只活在 `deploy.py`（HelmDeployer）+ `observe/k8s.py` 两处。
 
 本目录是 Perf Harness 跨语言契约的 Python 实现，不是其它语言实现的 canonical source。共享名词、
 调度语义、对齐键和落盘字段以 `../../spec/perf-contract.md` 及对应 schema 为准。
@@ -17,13 +17,13 @@ report / SLO / analyze 都按 (arm_id, window_id, <family>{labels}.<stat>) 查�
 
 ## 代码地图与核心模块
 
-顶层目录顺序即数据流（subject → drive → observe → metric → 消费者）：
+顶层目录顺序即数据流（model → drive → observe → metric → 消费者）：
 
 ```
 perf_harness/
 ├── cli.py · config.py · sh.py   # 入口与装配；config 解析 + fail-fast 校验
-├── model.py        # 名词层（纯数据）：Arm/TrialRecord/Window/Outcome/Verdict/Run/TrialStop
-├── subject.py      # 压谁：Subject(name+target+provisioner?) + HelmProvisioner（唯一碰 helm 处）
+├── model.py        # 名词层（纯数据）：Environment/Service/Arm/TrialRecord/Window/Outcome/Verdict/Run/TrialStop
+├── deploy.py       # 可选部署执行器；HelmDeployer 是唯一碰 helm 处
 ├── engine.py       # 纯编排：扫网格，每格 apply → drive → observe → reduce
 ├── drive/          # 怎么压（扩展点①）
 │   ├── load.py     #   LoadProfile：model(open/closed) × Schedule(强度随时间) × Pacing
@@ -46,7 +46,7 @@ perf_harness/
 
 ### 脊柱（动它先想清楚）
 
-- **metric 是收腰**：组件产 metric、分析/报告读 metric，只经 `MetricStore` 按 `<family>{labels}.<stat>` 寻址；service / facet 是实体 label，时间只由 Window 选择，不能再伪装成 metric label。模型细节见 `docs/metric-model.md`。
+- **metric 是收腰**：producer 产 metric、分析/报告读 metric，只经 `MetricStore` 按 `<family>{labels}.<stat>` 寻址；service / facet 是实体 label，时间只由 Window 选择，不能再伪装成 metric label。模型细节见 `docs/metric-model.md`。
 - **Stage ≠ Window**：Stage 是计划的负载控制段；Window 是实际观测边界，请求按发射时刻归窗，request/resource 使用同一 start/end。重复 stage 名仍有不同 `window_id`。
 - **加压是 x 轴不是 metric**：响应面 `metric = f(Arm, Window, slice)`；Arm 是命名配置，Trial 是该 Arm 的一次真实执行。
 
@@ -67,7 +67,7 @@ perf_harness/
 
 ### 产物与运行
 
-- 一次 run = 一个命名 experiment，产物落 `runs/<experiment>/<run_id>/` 累积不覆盖；落盘三层 raw（outcomes.jsonl/timeseries.csv）→ 模型（run.json，schema 版本化，`load_run` 离线重建）→ 视图（report/CSV，纯下游）。
+- `Experiment` 扩展 common 的具名验证意图；`Run` 扩展 common `ExperimentRun`，`TrialRecord` 是 common `Execution` 的 perf 子类，每次真实请求记录为 `OperationRun → Outcome`。`PerfReducer` 只读这些事实并把 Artifact 落到 `runs/<experiment>/<run_id>/`，累积不覆盖。落盘三层 raw（outcomes.jsonl/timeseries.csv）→ 模型（run.json，schema 版本化，`load_run` 离线重建）→ 视图（report/CSV，纯下游）。
 - `verdict.json` 是跨 harness 契约（spec/verdict-schema.yaml，devloop 消费），改动需五家对齐。
 - 请求侧指标走客户端 Outcome（没 `/metrics` 的服务也能压）；`/metrics` 只喂资源侧。
 

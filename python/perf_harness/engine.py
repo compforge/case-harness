@@ -1,6 +1,6 @@
 """Engine — pure orchestration: resolve Arms and execute one Trial per Arm.
 
-One Trial: apply the ResourceProfile (via the Subject's provisioner, if any) →
+One Trial: deploy the ResourceProfile (via the Experiment's Deployer, if any) →
 open a client → drive the load (``drive.scheduler``) while the observer samples
 every Probe (``observe.observe_loop``) → collapse outcomes + series into a
 TrialRecord (``_aggregate``, minting via ``metric.reduce``). The grid is swept
@@ -18,6 +18,8 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field, replace
 
 import httpx
+from harness_common import Deployer, OperationRun
+from harness_common import Experiment as BaseExperiment
 from harness_common.overlay import Overlay
 from spec_case.model import Case
 
@@ -33,6 +35,7 @@ from perf_harness.metric.reduce import request_stats, unit_of
 from perf_harness.metric.store import PER_REQUEST_DESCRIPTORS, REQUEST_DESCRIPTORS
 from perf_harness.model import (
     Arm,
+    Deployment,
     Outcome,
     Phase,
     PhaseError,
@@ -41,8 +44,8 @@ from perf_harness.model import (
     Run,
     Sample,
     Series,
+    Service,
     SloAssertion,
-    Target,
     TrialRecord,
     TrialStop,
     Window,
@@ -56,7 +59,6 @@ from perf_harness.observe import (
     observe_loop,
 )
 from perf_harness.slo import evaluate_slo
-from perf_harness.subject import Subject
 
 
 def _phase_error(phase: Phase, exc: Exception) -> PhaseError:
@@ -84,8 +86,8 @@ class _TrialExecution:
         self.phase_errors.append(_phase_error(phase or self.phase, exc))
 
 
-@dataclass
-class Experiment:
+@dataclass(kw_only=True)
+class Experiment(BaseExperiment):
     """A named, reproducible perf study — one config = one Experiment.
 
     Its arms are the resources × load sweep. ``cases`` is the pool the Engine picks
@@ -95,10 +97,11 @@ class Experiment:
     facets their report sort order.
     """
 
-    subject: Subject
+    service: Service
     workload: Workload
     resources: list[ResourceProfile]
     loads: list[LoadProfile]
+    deployer: Deployer[Deployment] | None = None
     probes: list[Probe] = field(default_factory=list)
     cases: list[Case] = field(default_factory=list)
     # experiment workload mix: load weight per case.id (unwritten → 1.0; unknown id → error).
@@ -158,10 +161,12 @@ class Engine:
         try:
             applied: ResourceProfile | None = None
             for arm in exp.resolved_arms():
-                if exp.subject.provisioner is not None and arm.resources != applied:
-                    await exp.subject.provisioner.apply(arm.resources)
+                if exp.deployer is not None and arm.resources != applied:
+                    await exp.deployer.deploy(
+                        Deployment(service=exp.service, resources=arm.resources)
+                    )
                     applied = arm.resources
-                trial = await self._run_trial(exp.subject.target, arm)
+                trial = await self._run_trial(exp.service, arm)
                 # A breaker-ended trial only observed a partial load window. Even
                 # if every evaluated SLO happens to pass, it cannot prove this
                 # load level was sustained.
@@ -187,18 +192,19 @@ class Engine:
                 if trial.phase_errors or (exp.abort_on_fail and failed):
                     break
         finally:
-            if exp.teardown and exp.subject.provisioner is not None:
-                await exp.subject.provisioner.teardown()
+            if exp.teardown and exp.deployer is not None:
+                await exp.deployer.teardown()
         return Run(
             run_id=self.run_id,
             experiment=exp.name,
             created_at=started,
-            subject=exp.subject.name,
+            executions=trials,
+            service=exp.service.name,
             trials=trials,
             passed=passed,
         )
 
-    async def _run_trial(self, target: Target, arm: Arm) -> TrialRecord:
+    async def _run_trial(self, service: Service, arm: Arm) -> TrialRecord:
         exp = self.experiment
         profile, load = arm.resources, arm.load
         stats = ClientStats()
@@ -208,22 +214,23 @@ class Engine:
         # load traffic on a saturated pool (P1: don't lose evidence at saturation)
         obs_limits = httpx.Limits(max_connections=8, max_keepalive_connections=8)
         timed: list[tuple[float, Outcome]] = []
+        operation_runs: list[OperationRun[Outcome]] = []
         store: ProbeStore = {}
         probe_errors: dict[str, ProbeErrors] = {}
         measurement_end_s = 0.0
         cooldown_start_s: float | None = None
         cooldown_end_s: float | None = None
-        # trust_env=False: the load generator connects DIRECTLY to the Subject's
+        # trust_env=False: the load generator connects DIRECTLY to the Service's
         # base_url — never via an ambient HTTP(S)_PROXY/ALL_PROXY from the shell (a
         # stray proxy env would silently reroute or, if malformed, crash client
-        # creation). A real proxy, if ever needed, should be an explicit Target field.
+        # creation). A real proxy, if ever needed, should be explicit Service access config.
         async with (
             httpx.AsyncClient(limits=limits, http2=False, trust_env=False) as client,
             httpx.AsyncClient(limits=obs_limits, http2=False, trust_env=False) as obs_client,
         ):
             execution = _TrialExecution(
                 context=TrialContext(
-                    target=target,
+                    service=service,
                     client=client,
                     run_id=self.run_id,
                     resources=profile,
@@ -238,7 +245,7 @@ class Engine:
                 await exp.workload.setup(execution.context)
                 execution.enter("measurement")
                 ctx = ProbeContext(
-                    target=target,
+                    service=service,
                     client=client,
                     t0=time.monotonic(),
                     stats=stats,
@@ -249,7 +256,14 @@ class Engine:
                 )
                 drive = drive_open if load.model == "open" else drive_closed
                 trial_stop = await drive(
-                    exp.workload, execution.context, ctx, self._cases, self._weights, timed
+                    exp.workload,
+                    execution.context,
+                    ctx,
+                    self._cases,
+                    self._weights,
+                    timed,
+                    operation_runs,
+                    arm.id,
                 )
                 # Post-load samples remain in the raw series for cooldown/scale-down
                 # charts, but summaries must describe only the load measurement window.
@@ -311,6 +325,7 @@ class Engine:
             cooldown_end_s=cooldown_end_s,
         )
         trial.stop = trial_stop  # how the trial ended (deadline / breaker) + enact census
+        trial.operation_runs = operation_runs
         trial.outcomes = timed  # raw layer (incl. warmup/drops) — runio persists these
         trial.phase_errors = execution.phase_errors
         return trial
@@ -503,7 +518,8 @@ class Engine:
                 )
 
         return TrialRecord(
-            subject=exp.subject.name,
+            id=arm.id,
+            service=exp.service.name,
             arm=arm,
             windows=windows,
             series=series_out,

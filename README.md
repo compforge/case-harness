@@ -38,10 +38,37 @@ Dataset + Detectors / Evaluators / Measurers / optional Policy
         measure  → Measurement
     → Worksheet (Unit + Finding + Evaluation + Measurement)
     → Metric / Verdict / Report (JSON / HTML)
+
+Experiment
+    → ExperimentRun
+        → Execution × N (for example E2E CaseRun / perf Trial)
+            → OperationRun × N
+                → Outcome
+    → Reducer.reduce(recorded facts)
+    → Artifact × N
+        → Verdict
+        → Report
 ```
 
 | Concept | Meaning |
 |---|---|
+| **Forge** | A system that hosts source-code repositories, such as GitHub, GitLab, or an internal code platform. |
+| **Repository** | A code repository identified by its Forge and path; one Repository may contain multiple Components. |
+| **Product** | A business product composed from Components. Product-to-Component membership is registry data and may be many-to-many. |
+| **Component** | A stable buildable or releasable unit within a code Repository. One Repository may contain one or many Components, and Components without runtime workloads have no Service. |
+| **Environment** | A named deployment and runtime environment that identifies where execution evidence was produced; access details and credentials remain deployment-owned. |
+| **Service** | One Component's named runtime presence in an Environment, identified by its service name, Component, and Environment rather than by a code repository or platform workload alone. |
+| **Operation** | A named capability exposed by a Service. |
+| **HttpOperation** | An Operation exposed through an HTTP method and path; its base URL remains part of the runtime Service. |
+| **Deployment** | One attempt to create or update a Service by deploying its Component into an Environment. |
+| **Deployer** | The protocol-neutral port implemented by Helm, Docker, or another deployment mechanism. |
+| **Experiment** | A named, reproducible verification intent. Each harness specializes it with its own cases, arms, workload, metrics, or policies. |
+| **ExperimentRun** | One real execution of an Experiment, identified by `run_id` and creation time. Domain harnesses may expose it simply as `Run`. |
+| **Execution** | A domain-defined unit of work within an ExperimentRun. E2E specializes it as CaseRun; perf specializes it as Trial. |
+| **OperationRun** | One execution of an Operation against a Service. It owns the raw Outcome produced by that call. |
+| **Outcome** | Raw domain evidence produced by an OperationRun. Protocol-specific fields stay on domain subclasses. |
+| **Reducer** | A domain projection from recorded ExperimentRun facts to Artifacts. It never calls the tested Service. |
+| **Artifact** | A named, durable output of an ExperimentRun. Its content and schema remain domain-owned; common code records only its logical name and relative path. |
 | **Case** | Stable, reusable test input and judgment data, identified by `case_id`; the canonical format is owned by [spec-case](https://github.com/compforge/spec-case). |
 | **Observation** | What actually happened when a Case ran: an outcome, response, performance sample, trace, or trajectory with source identity. |
 | **Unit** | A harness-defined evaluation unit sourced from a Case and one or more Observations; one Worksheet row represents one Unit. |
@@ -52,8 +79,7 @@ Dataset + Detectors / Evaluators / Measurers / optional Policy
 | **Evaluation** | A Judge or Evaluator's contract-based quality conclusion about a Unit, such as a verdict, score, or explanation. |
 | **Measurement** | A factual value extracted from a Unit, such as tokens, latency, calls, or resource usage, without a quality verdict. |
 | **Worksheet** | One EvaluationRun's row-wise result over a Dataset, with Finding, Evaluation, and Measurement cells added to each Unit. |
-| **Run** | The artifact and lifecycle boundary for one real execution, carrying environment and alignment identity. |
-| **Report** | A machine-facing JSON or human-facing HTML projection of a Worksheet. |
+| **Report** | A human-facing rendering derived from one or more Artifacts; it never reruns the Experiment. |
 | **Verdict** | The common machine-readable result consumed by humans, CI, and agent development loops. |
 
 A Case can be viewed from more than one angle. When one execution already produced responses, performance samples, traces, or a trajectory, those observations form a reusable Dataset. Selecting different Detectors, Evaluators, Measurers, or Policies then produces new EvaluationRuns, Worksheets, and reports without triggering duplicate execution.

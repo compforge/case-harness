@@ -46,7 +46,7 @@ describe("TypeScript perf harness", () => {
     };
     const run = await new Engine({
       name: "closed",
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       workload,
       loads: [rampHold("closed", 5, 0, 0.12, { graceful_stop_s: 1 })],
     }).run();
@@ -63,7 +63,7 @@ describe("TypeScript perf harness", () => {
       fire: async () => ({ status: 200, duration_ms: 1 }),
     };
     const run = await new Engine({
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       workload,
       loads: [rampHold("closed", 5, 0, 1, { max_requests: 12 })],
     }).run();
@@ -78,7 +78,7 @@ describe("TypeScript perf harness", () => {
     try {
       const caseSet = loadCaseSet(SHARED_CASESET);
       const run = await new Engine({
-        subject: { name: "chat", target: {} },
+        service: { name: "chat" },
         workload: {
           fire: async ({ case: selected }) => ({
             status: 200,
@@ -102,7 +102,7 @@ describe("TypeScript perf harness", () => {
 
   test("rejects experiment-local Case overrides and unknown selections", () => {
     const base = {
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
       loads: [rampHold("closed", 1, 0, 1)],
     };
@@ -119,7 +119,7 @@ describe("TypeScript perf harness", () => {
       fire: async () => ({ status: 503, duration_ms: 1 }),
     };
     const run = await new Engine({
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       workload,
       loads: [rampHold("closed", 2, 0, 1, {
         abort_on_error_rate: 0.5,
@@ -132,17 +132,17 @@ describe("TypeScript perf harness", () => {
 
   test("validates shared safety fields before starting load", () => {
     expect(() => new Engine({
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
       loads: [rampHold("closed", 1, 0, 1, { max_requests: 0 })],
     })).toThrow("max_requests");
     expect(() => new Engine({
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
       loads: [rampHold("closed", 1, 0, 1, { warmup_s: -1 })],
     })).toThrow("warmup_s");
     expect(() => new Engine({
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
       loads: [{
         model: "closed",
@@ -150,7 +150,7 @@ describe("TypeScript perf harness", () => {
       }],
     })).toThrow("levels and durations");
     expect(() => new Engine({
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       workload: { fire: async () => ({ status: 200, duration_ms: 1 }) },
       loads: [rampHold("closed", 1, 0, 1, {
         pacing: { kind: "between", secs: 2, max_secs: 1 },
@@ -182,7 +182,7 @@ describe("TypeScript perf harness", () => {
 
   test("preserves phase errors as diagnostic artifacts and stops the sweep", async () => {
     const engine = new Engine({
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       workload: {
         setup: async () => { throw new Error("setup failed"); },
         fire: async () => ({ status: 200, duration_ms: 1 }),
@@ -219,7 +219,7 @@ describe("TypeScript perf harness", () => {
     const reason = new Error("stop run");
     const events: string[] = [];
     const engine = new Engine({
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       signal: controller.signal,
       workload: {
         setup: async (context) => {
@@ -245,30 +245,30 @@ describe("TypeScript perf harness", () => {
 
   test("empty raw outcome stream contains no invalid blank record", () => {
     expect(serializeOutcomes({
-      schema: 3,
+      schema: 4,
       run_id: "empty",
       experiment: "perf",
       created_at: new Date(0).toISOString(),
-      subject: "chat",
+      service: "chat",
       passed: false,
       n_trials: 0,
       trials: [],
     })).toBe("");
   });
 
-  test("persists shared schema-3 model and raw outcomes", async () => {
+  test("persists shared schema-4 model and raw outcomes", async () => {
     const run = await new Engine({
-      subject: { name: "chat", target: {} },
+      service: { name: "chat" },
       workload: { fire: async () => ({ status: 200, duration_ms: 1, meta: { trace_id: "t1" } }) },
       loads: [rampHold("closed", 1, 0, 0.03, { max_requests: 1 })],
     }, { run_id: "fixed" }).run();
     const document = serializeRun(run);
-    expect(document).toMatchObject({ schema: 3, run_id: "fixed", n_trials: 1 });
+    expect(document).toMatchObject({ schema: 4, run_id: "fixed", n_trials: 1 });
 
     const directory = mkdtempSync(join(tmpdir(), "ts-perf-"));
     try {
       writeRunData(run, directory);
-      expect(JSON.parse(readFileSync(join(directory, "run.json"), "utf8"))).toMatchObject({ schema: 3 });
+      expect(JSON.parse(readFileSync(join(directory, "run.json"), "utf8"))).toMatchObject({ schema: 4 });
       expect(JSON.parse(readFileSync(join(directory, "outcomes.jsonl"), "utf8"))).toMatchObject({
         trial: run.trials[0]!.id,
         meta: { trace_id: "t1" },
@@ -289,7 +289,7 @@ describe("TypeScript perf harness", () => {
     const outcome = JSON.parse(readFileSync(join(PERF_FIXTURES, "basic.outcomes.jsonl"), "utf8"));
 
     expect(run).toMatchObject({
-      schema: 3,
+      schema: 4,
       trials: [{
         id: "default__closed-5c",
         arm: { id: "default__closed-5c" },

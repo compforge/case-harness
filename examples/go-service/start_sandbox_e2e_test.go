@@ -30,12 +30,12 @@ type startState struct {
 }
 
 func TestStartSandboxHappyPath(t *testing.T) {
-	env, err := core.LoadEnv("config.yaml")
+	config, err := core.LoadConfig("config.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	core.RequireProfile(t, env, "full", "minimal")
-	r := runner.NewJSONRunner(env)
+	core.RequireProfile(t, config, "full", "minimal")
+	r := runner.NewJSONRunner(config)
 	state := startState{}
 
 	result := caserun.Run(
@@ -45,11 +45,11 @@ func TestStartSandboxHappyPath(t *testing.T) {
 		&state,
 		caserun.Definition[startState]{
 			Prepare: func(_ context.Context, state *startState) error {
-				ttl, err := strconv.ParseInt(env.Custom["ttl_seconds"], 10, 64)
+				ttl, err := strconv.ParseInt(config.Custom["ttl_seconds"], 10, 64)
 				if err != nil {
 					return fmt.Errorf("parse ttl_seconds: %w", err)
 				}
-				state.conversation = core.UniqueID(env.Custom["conv_prefix"])
+				state.conversation = core.UniqueID(config.Custom["conv_prefix"])
 				state.request = runner.Request{
 					Method: "POST",
 					Path:   "/api/v1/sandboxes/start",
@@ -84,11 +84,11 @@ func TestStartSandboxHappyPath(t *testing.T) {
 }
 
 func TestStartSandboxReuse(t *testing.T) {
-	env, err := core.LoadEnv("config.yaml")
+	config, err := core.LoadConfig("config.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := runner.NewJSONRunner(env)
+	r := runner.NewJSONRunner(config)
 	state := startState{}
 	result := caserun.Run(
 		context.Background(),
@@ -97,7 +97,7 @@ func TestStartSandboxReuse(t *testing.T) {
 		&state,
 		caserun.Definition[startState]{
 			Prepare: func(_ context.Context, state *startState) error {
-				state.conversation = core.UniqueID(env.Custom["conv_prefix"])
+				state.conversation = core.UniqueID(config.Custom["conv_prefix"])
 				state.request = runner.Request{
 					Method: "POST",
 					Path:   "/api/v1/sandboxes/start",

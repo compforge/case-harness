@@ -2,7 +2,7 @@ import pytest
 
 from eval_harness.metric.base import BaseMetric
 from eval_harness.model.evalset import EvalSet
-from eval_harness.model.experiment import Arm, Experiment, Target
+from eval_harness.model.experiment import Arm, Experiment, Service
 from eval_harness.schedule.ratelimit import GateRegistry
 from eval_harness.schedule.reconcile import ReconcileEngine, Solver, SolveResult
 from eval_harness.tests.eval_cases import make_eval_case
@@ -18,7 +18,7 @@ class MockProvisioner:
         self.fail_times = fail_times
         self.attempts: dict[str, int] = {}
 
-    async def prepare(self, key, target, evalset):
+    async def prepare(self, key, service, evalset):
         self.attempts[key] = self.attempts.get(key, 0) + 1
         if key in self.fail_keys and self.attempts[key] <= self.fail_times:
             raise RuntimeError("provision boom")
@@ -33,7 +33,7 @@ class MockSolver(Solver):
         self.fail_cases = set(fail_cases)
         self.calls = 0
 
-    async def solve(self, row, target, subject_id):
+    async def solve(self, row, service, subject_id):
         self.calls += 1
         if row.case_id in self.fail_cases:
             raise RuntimeError("solve boom")
@@ -77,7 +77,7 @@ def _exp(cases=None, arms=None):
     ]
     return Experiment(
         name="exp",
-        target=Target(name="chat", config={"tenant_id": "t1"}),
+        service=Service(name="chat", config={"tenant_id": "t1"}),
         evalsets=[EvalSet(caseset="rag", cases=cases)],
         arms=arms or [Arm(id="model-alpha")],
         metrics=["correctness", "latency"],
@@ -201,11 +201,11 @@ class FetchSolver(Solver):
     def __init__(self):
         self.solve_calls = 0
 
-    async def solve(self, row, target, subject_id):
+    async def solve(self, row, service, subject_id):
         self.solve_calls += 1
         return SolveResult(response="triggered")
 
-    async def fetch(self, row, target, subject_id):
+    async def fetch(self, row, service, subject_id):
         return SolveResult(response="from-cache", retrieved=["c"], meta={"message_id": "cached"})
 
 
@@ -227,7 +227,7 @@ async def test_prepare_receives_evalset():
     seen: dict = {}
 
     class CapProv:
-        async def prepare(self, key, target, evalset):
+        async def prepare(self, key, service, evalset):
             seen["es"] = evalset
             return "nb"
 

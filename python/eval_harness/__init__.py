@@ -45,7 +45,7 @@ from eval_harness.model.evalset import eval_view as eval_view
 from eval_harness.model.experiment import Arm as Arm
 from eval_harness.model.experiment import Experiment as Experiment
 from eval_harness.model.experiment import LLMSpec as LLMSpec
-from eval_harness.model.experiment import Target as Target
+from eval_harness.model.experiment import Service as Service
 from eval_harness.model.sample import MetricResult as MetricResult
 from eval_harness.model.sample import Sample as Sample
 from eval_harness.schedule.ratelimit import GateRegistry as GateRegistry

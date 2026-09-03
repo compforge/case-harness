@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Iterator
 
 
-from e2e_harness.core.env import AuthConfig, Env, ServiceConfig
+from e2e_harness.core.config import E2EConfig, Service
 from e2e_harness.runner.async_json_runner import AsyncJSONRunner
 from e2e_harness.runner.async_sse_runner import AsyncSSERunner
 from e2e_harness.runner.base import Request
@@ -121,10 +121,11 @@ def _serve(handler_cls) -> Iterator[str]:
         thread.join(timeout=2)
 
 
-def _env(base_url: str) -> Env:
-    return Env(
-        service=ServiceConfig(name="t", base_url=base_url),
-        auth=AuthConfig(headers={"X-T": "ten", "X-U": "usr"}),
+def _env(base_url: str) -> E2EConfig:
+    return E2EConfig(
+        service=Service(
+            name="t", base_url=base_url, headers={"X-T": "ten", "X-U": "usr"}
+        ),
     )
 
 

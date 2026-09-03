@@ -7,27 +7,27 @@ the last part lets negative-auth tests intentionally omit a required header.
 
 from __future__ import annotations
 
-from e2e_harness.core.env import Env
+from e2e_harness.core.config import E2EConfig
 
 
 def build_auth_headers(
-    env: Env,
+    config: E2EConfig,
     *,
     extra: dict[str, str] | None = None,
     exclude: set[str] | None = None,
     content_type: str = "application/json",
 ) -> dict[str, str]:
-    """Build a header dict: Content-Type + env.auth → header map + extras − exclude.
+    """Build a header dict: Content-Type + Service headers + extras − exclude.
 
     Resolution order:
       1. ``Content-Type`` (overridable via ``extra``)
-      2. Generic headers from ``env.auth.headers``
+      2. Generic headers from ``config.service.headers``
       3. Per-request ``extra`` (overrides everything above)
       4. Drop keys in ``exclude`` (after merging, so callers can omit auth headers
          injected by the runner — needed for missing-auth negative tests)
     """
     headers: dict[str, str] = {"Content-Type": content_type}
-    headers.update(env.auth.headers)
+    headers.update(config.service.headers)
     if extra:
         headers.update(extra)
     if exclude:

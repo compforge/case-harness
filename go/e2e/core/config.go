@@ -1,4 +1,4 @@
-// Package core provides environment configuration loading for e2e tests.
+// Package core provides configuration loading for e2e tests.
 package core
 
 import (
@@ -12,13 +12,52 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type ServiceConfig struct {
-	Name    string `yaml:"name"`
-	BaseURL string `yaml:"base_url"`
+type Forge struct {
+	Name string `yaml:"name"`
 }
 
-type AuthConfig struct {
-	Headers map[string]string `yaml:"headers"`
+type Repository struct {
+	Forge Forge  `yaml:"forge"`
+	Path  string `yaml:"path"`
+}
+
+type Product struct {
+	Name string `yaml:"name"`
+}
+
+type Component struct {
+	Repository Repository `yaml:"repository"`
+	Name       string     `yaml:"name"`
+}
+
+type Environment struct {
+	Name string `yaml:"name"`
+}
+
+type KubernetesEnvironment struct {
+	Environment `yaml:",inline"`
+	Kubeconfig  string `yaml:"kubeconfig"`
+	Context     string `yaml:"context,omitempty"`
+}
+
+type Service struct {
+	Name        string                `yaml:"name"`
+	Component   Component             `yaml:"component"`
+	Environment KubernetesEnvironment `yaml:"environment"`
+	BaseURL     string                `yaml:"base_url"`
+	Headers     map[string]string     `yaml:"headers"`
+}
+
+// Operation is one named capability exposed by a Service.
+type Operation struct {
+	Name string `yaml:"name"`
+}
+
+// HTTPOperation is an Operation exposed through an HTTP method and path.
+type HTTPOperation struct {
+	Operation `yaml:",inline"`
+	Method    string `yaml:"method"`
+	Path      string `yaml:"path"`
 }
 
 type RuntimeConfig struct {
@@ -33,9 +72,8 @@ type Capabilities struct {
 	Data  map[string]any
 }
 
-type Env struct {
-	Service      ServiceConfig
-	Auth         AuthConfig
+type E2EConfig struct {
+	Service      Service
 	Runtime      RuntimeConfig
 	Profile      string
 	Capabilities Capabilities
@@ -98,9 +136,9 @@ func interpolateValue(v any) (any, error) {
 	}
 }
 
-// LoadEnv loads configuration from a YAML file with env var interpolation.
+// LoadConfig loads configuration from a YAML file with environment-variable interpolation.
 // Falls back to environment variables if the file doesn't exist.
-func LoadEnv(configPath string) (*Env, error) {
+func LoadConfig(configPath string) (*E2EConfig, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -118,28 +156,40 @@ func LoadEnv(configPath string) (*Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	if auth, ok := resolved["auth"].(map[string]any); ok {
-		if headers, exists := auth["headers"]; exists {
+	if service, ok := resolved["service"].(map[string]any); ok {
+		if headers, exists := service["headers"]; exists {
 			if _, ok := headers.(map[string]any); !ok {
-				return nil, fmt.Errorf("parse config %s: auth.headers must be a mapping", configPath)
+				return nil, fmt.Errorf("parse config %s: service.headers must be a mapping", configPath)
 			}
 		}
 	}
 
-	return parseEnv(resolved), nil
+	return parseConfig(resolved), nil
 }
 
-func loadFromEnvVars() (*Env, error) {
+func loadFromEnvVars() (*E2EConfig, error) {
 	headers, err := authHeadersFromEnv()
 	if err != nil {
 		return nil, err
 	}
-	return &Env{
-		Service: ServiceConfig{
+	return &E2EConfig{
+		Service: Service{
 			Name:    os.Getenv("E2E_SERVICE_NAME"),
 			BaseURL: os.Getenv("E2E_BASE_URL"),
+			Component: Component{
+				Repository: Repository{
+					Forge: Forge{Name: os.Getenv("E2E_FORGE")},
+					Path:  os.Getenv("E2E_COMPONENT_REPOSITORY"),
+				},
+				Name: os.Getenv("E2E_COMPONENT_NAME"),
+			},
+			Environment: KubernetesEnvironment{
+				Environment: Environment{Name: os.Getenv("E2E_ENVIRONMENT")},
+				Kubeconfig:  os.Getenv("E2E_KUBECONFIG"),
+				Context:     os.Getenv("E2E_KUBE_CONTEXT"),
+			},
+			Headers: headers,
 		},
-		Auth: AuthConfig{Headers: headers},
 		Runtime: RuntimeConfig{
 			HTTPTimeoutS:   120,
 			PollIntervalMS: 500,
@@ -151,8 +201,8 @@ func loadFromEnvVars() (*Env, error) {
 	}, nil
 }
 
-func parseEnv(data map[string]any) *Env {
-	env := &Env{
+func parseConfig(data map[string]any) *E2EConfig {
+	config := &E2EConfig{
 		Runtime: RuntimeConfig{
 			HTTPTimeoutS:   120,
 			PollIntervalMS: 500,
@@ -164,40 +214,50 @@ func parseEnv(data map[string]any) *Env {
 	}
 
 	if svc, ok := data["service"].(map[string]any); ok {
-		env.Service.Name = strVal(svc, "name")
-		env.Service.BaseURL = strings.TrimRight(strVal(svc, "base_url"), "/")
-	}
-	if auth, ok := data["auth"].(map[string]any); ok {
-		env.Auth.Headers = make(map[string]string)
-		if headers, ok := auth["headers"].(map[string]any); ok {
+		config.Service.Name = strVal(svc, "name")
+		config.Service.BaseURL = strings.TrimRight(strVal(svc, "base_url"), "/")
+		if component, ok := svc["component"].(map[string]any); ok {
+			if repository, ok := component["repository"].(map[string]any); ok {
+				config.Service.Component.Repository.Forge.Name = strVal(repository, "forge")
+				config.Service.Component.Repository.Path = strVal(repository, "path")
+			}
+			config.Service.Component.Name = strVal(component, "name")
+		}
+		if environment, ok := svc["environment"].(map[string]any); ok {
+			config.Service.Environment.Name = strVal(environment, "name")
+			config.Service.Environment.Kubeconfig = strVal(environment, "kubeconfig")
+			config.Service.Environment.Context = strVal(environment, "context")
+		}
+		config.Service.Headers = make(map[string]string)
+		if headers, ok := svc["headers"].(map[string]any); ok {
 			for key, value := range headers {
-				env.Auth.Headers[key] = fmt.Sprint(value)
+				config.Service.Headers[key] = fmt.Sprint(value)
 			}
 		}
 	}
 	if rt, ok := data["runtime"].(map[string]any); ok {
 		if v := intVal(rt, "http_timeout_s"); v > 0 {
-			env.Runtime.HTTPTimeoutS = v
+			config.Runtime.HTTPTimeoutS = v
 		}
 		if v := intVal(rt, "poll_interval_ms"); v > 0 {
-			env.Runtime.PollIntervalMS = v
+			config.Runtime.PollIntervalMS = v
 		}
 		if v := intVal(rt, "poll_timeout_s"); v > 0 {
-			env.Runtime.PollTimeoutS = v
+			config.Runtime.PollTimeoutS = v
 		}
 		if v := intVal(rt, "parallel"); v > 0 {
-			env.Runtime.Parallel = v
+			config.Runtime.Parallel = v
 		}
 	}
 	if p := strVal(data, "profile"); p != "" {
-		env.Profile = p
+		config.Profile = p
 	}
 	if custom, ok := data["custom"].(map[string]any); ok {
 		for k, v := range custom {
-			env.Custom[k] = fmt.Sprint(v)
+			config.Custom[k] = fmt.Sprint(v)
 		}
 	}
-	return env
+	return config
 }
 
 func authHeadersFromEnv() (map[string]string, error) {

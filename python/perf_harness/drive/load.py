@@ -160,7 +160,7 @@ class LoadProfile:
     (judged failures ÷ sent, INCLUDING the warmup window — it's a safety net, not a
     measurement) reaches this fraction, the driver stops issuing new load, lets
     in-flight requests drain, and ends the trial early (``TrialRecord.stop.early``).
-    Use it to avoid hammering a struggling Subject (e.g. a dev pod) for the full
+    Use it to avoid hammering a struggling Service (e.g. a dev pod) for the full
     steady window once it's clearly failing. Applies to both open and closed.
 
     ``graceful_stop_s`` is the wind-down policy used whenever a trial stops (breaker

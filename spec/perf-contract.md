@@ -38,7 +38,7 @@ Case schema。
 里声明权重。权重属于本次加压计划，而不是 Case 资产。Harness 负责按 mix 选择 Case、调度 dispatch、
 控制并发/到达率、停止和归约，并在 `Window.by_case` 产出逐 Case 统计。
 
-具体服务协议由 Workload/driver 实现。一次 Trial 的 Target、资源、负载与 run id 形成共享且不可变的
+具体服务协议由 Workload/driver 实现。一次 Trial 的 Service、资源、负载与 run id 形成共享且不可变的
 TrialContext；Harness 每次 dispatch 只调用一次 `fire(FireContext)`，其中 FireContext 在 TrialContext
 之上组合本次 Case。driver 负责把 Case input 变成一次 HTTP/SSE 等请求并返回一次 Outcome，必须支持
 Harness 发起的并发调用，不能修改共享 TrialContext 或在内部再启动隐藏的加压循环。这样，同一个 Case

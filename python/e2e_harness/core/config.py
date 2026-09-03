@@ -1,4 +1,4 @@
-"""Environment configuration loader.
+"""E2E harness configuration loader.
 
 Reads config.yaml with ${VAR:-default} interpolation, falling back to
 environment variables when config.yaml is absent.
@@ -14,17 +14,34 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from harness_common import Component, Forge, KubernetesEnvironment, Repository
+from harness_common import Experiment as BaseExperiment
+from harness_common import Service as BaseService
 
 
-@dataclass
-class ServiceConfig:
-    name: str = ""
+@dataclass(frozen=True, slots=True)
+class Service(BaseService):
+    """E2E view of a Service, including HTTP access configuration."""
+
+    component: Component = field(
+        default_factory=lambda: Component(
+            repository=Repository(forge=Forge(name=""), path=""),
+            name="",
+        )
+    )
+    environment: KubernetesEnvironment = field(
+        default_factory=lambda: KubernetesEnvironment(name="")
+    )
     base_url: str = ""
-
-
-@dataclass
-class AuthConfig:
     headers: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(kw_only=True)
+class Experiment(BaseExperiment):
+    """One E2E verification suite executed against a Service."""
+
+    service: Service
+    caseset: str
 
 
 @dataclass
@@ -50,9 +67,8 @@ class DiscoverConfigSection:
 
 
 @dataclass
-class Env:
-    service: ServiceConfig = field(default_factory=ServiceConfig)
-    auth: AuthConfig = field(default_factory=AuthConfig)
+class E2EConfig:
+    service: Service = field(default_factory=lambda: Service(name=""))
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     profile: str = "full"
     capabilities: Capabilities = field(default_factory=Capabilities)
@@ -91,8 +107,8 @@ def _interpolate_recursive(obj: Any) -> Any:
     return obj
 
 
-def load_env(config_path: str | Path = "config.yaml") -> Env:
-    """Load Env from config.yaml (with env interpolation) or pure env vars."""
+def load_config(config_path: str | Path = "config.yaml") -> E2EConfig:
+    """Load config.yaml with environment-variable interpolation or env-only fallback."""
     path = Path(config_path)
 
     if path.exists():
@@ -103,7 +119,7 @@ def load_env(config_path: str | Path = "config.yaml") -> Env:
     else:
         data = _build_from_env()
 
-    return _parse_env(data)
+    return _parse_config(data)
 
 
 def _build_from_env() -> dict:
@@ -115,32 +131,56 @@ def _build_from_env() -> dict:
     return {
         "service": {
             "name": os.environ.get("E2E_SERVICE_NAME", ""),
+            "component": {
+                "repository": {
+                    "forge": os.environ.get("E2E_FORGE", ""),
+                    "path": os.environ.get("E2E_COMPONENT_REPOSITORY", ""),
+                },
+                "name": os.environ.get("E2E_COMPONENT_NAME", ""),
+            },
+            "environment": {
+                "name": os.environ.get("E2E_ENVIRONMENT", ""),
+                "kubeconfig": os.environ.get("E2E_KUBECONFIG", ""),
+                "context": os.environ.get("E2E_KUBE_CONTEXT") or None,
+            },
             "base_url": os.environ.get("E2E_BASE_URL", ""),
+            "headers": headers,
         },
-        "auth": {"headers": headers},
         "runtime": {},
         "profile": os.environ.get("E2E_PROFILE", "full"),
         "custom": {},
     }
 
 
-def _parse_env(data: dict) -> Env:
+def _parse_config(data: dict) -> E2EConfig:
     svc = data.get("service", {})
-    auth_raw = data.get("auth", {})
     rt = data.get("runtime", {})
     custom = data.get("custom", {})
     disc = data.get("discover", {}) or {}
 
-    auth_headers = auth_raw.get("headers") or {}
-    return Env(
-        service=ServiceConfig(
+    component = svc.get("component") or {}
+    repository = component.get("repository") or {}
+    environment = svc.get("environment") or {}
+    headers = svc.get("headers") or {}
+    return E2EConfig(
+        service=Service(
             name=svc.get("name", ""),
+            component=Component(
+                repository=Repository(
+                    forge=Forge(name=str(repository.get("forge", ""))),
+                    path=str(repository.get("path", "")),
+                ),
+                name=str(component.get("name", "")),
+            ),
+            environment=KubernetesEnvironment(
+                name=str(environment.get("name", "")),
+                kubeconfig=str(environment.get("kubeconfig", "")),
+                context=(
+                    str(environment["context"]) if environment.get("context") else None
+                ),
+            ),
             base_url=svc.get("base_url", "").rstrip("/"),
-        ),
-        auth=AuthConfig(
-            headers={str(k): str(v) for k, v in auth_headers.items()}
-            if auth_headers
-            else {},
+            headers={str(k): str(v) for k, v in headers.items()} if headers else {},
         ),
         runtime=RuntimeConfig(
             http_timeout_s=int(rt.get("http_timeout_s", 120)),

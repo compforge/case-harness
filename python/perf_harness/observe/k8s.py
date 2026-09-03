@@ -1,9 +1,9 @@
 """K8s-family probes — the common Source today, but only one Source family.
 
-These read the Subject's pod via ``kubectl`` (top / exec ps / restartCount).
+These read the Service's pod via ``kubectl`` (top / exec ps / restartCount).
 The parsers are pure functions so they are unit-tested without a cluster; the
-probes that wrap them simply shell out and skip themselves when the Target has
-no ``K8sRef``.
+probes that wrap them simply shell out and skip themselves when the Service has
+no Kubernetes coordinates.
 """
 
 from __future__ import annotations
@@ -11,23 +11,23 @@ from __future__ import annotations
 import json
 
 from perf_harness.metric import series_id
-from perf_harness.model import K8sRef
+from perf_harness.model import Service
 from perf_harness.observe.base import FamilySpec, Probe, ProbeContext
 from perf_harness.sh import run_capture
 
 
-async def _pod_name(k8s: K8sRef) -> str | None:
+async def _pod_name(service: Service) -> str | None:
     out = await run_capture(
         [
             "kubectl",
             "--kubeconfig",
-            k8s.kubeconfig,
+            service.environment.kubeconfig,
             "-n",
-            k8s.namespace,
+            service.namespace,
             "get",
             "pod",
             "-l",
-            k8s.app_label,
+            service.k8s_selector,
             "-o",
             "jsonpath={.items[0].metadata.name}",
         ]
@@ -36,34 +36,35 @@ async def _pod_name(k8s: K8sRef) -> str | None:
 
 
 class _K8sProbe(Probe):
-    """Base for kubectl-family probes — observe the Subject's pod by default, or a
-    specific service's pod when bound to its own ``K8sRef`` + ``service`` label.
+    """Base for kubectl-family probes — observe the Service's pod by default, or a
+    specific Service's pod when explicitly bound to it.
 
     ``observe:`` in the config builds these against downstream services on the
     request chain (e.g. api / worker), so one run can chart cpu/mem across the
-    whole chain, not just the Subject. A bound probe prefixes its metric name with
+    whole chain, not just the Service. A bound probe prefixes its metric name with
     the service (``top`` → ``top.worker``) — series never collide, and the report
     overlays same-unit series (api cpu vs worker cpu) on one chart.
     """
 
     source = "k8s"
 
-    def __init__(
-        self, *, k8s: K8sRef | None = None, service: str | None = None, per_pod: bool = False
-    ) -> None:
-        self._k8s = k8s
-        self._service = service
+    def __init__(self, *, target_service: Service | None = None, per_pod: bool = False) -> None:
+        self._target_service = target_service
+        self._service = target_service.name if target_service else None
         # per_pod fans the service-level reading out into one series per pod: sample()
         # keys carry a {pod} label (series_id form) on top of the probe's {service}, and
         # everything downstream (engine grouping, charts, pivot) treats pod as just
         # another label. Only top/limits honor it; off → the sum-over-pods (unchanged).
         self._per_pod = per_pod
-        if service:  # unique store id (top.chat); family stays "top", service is a label
-            self.name = f"{self.name}.{service}"
+        if target_service:  # unique store id; family stays "top", service is a label
+            self.name = f"{self.name}.{target_service.name}"
 
-    def _ref(self, ctx: ProbeContext) -> K8sRef | None:
-        """The K8sRef to observe: the bound service's, else the Subject's."""
-        return self._k8s or ctx.target.k8s
+    def _ref(self, ctx: ProbeContext) -> Service | None:
+        """The explicitly bound Service, else the experiment Service."""
+        service = self._target_service or ctx.service
+        if not (service.environment.kubeconfig and service.namespace and service.k8s_selector):
+            return None
+        return service
 
 
 class KubectlTopProbe(_K8sProbe):
@@ -78,8 +79,8 @@ class KubectlTopProbe(_K8sProbe):
     }
 
     async def sample(self, ctx: ProbeContext) -> dict[str, float]:
-        k8s = self._ref(ctx)
-        if not k8s:
+        service = self._ref(ctx)
+        if not service:
             return {}
         # select ALL pods of the service (-l label), not just items[0]: by default the
         # reading is the per-tick SUM across replicas (gauge summary = peak-of-sum,
@@ -89,13 +90,13 @@ class KubectlTopProbe(_K8sProbe):
             [
                 "kubectl",
                 "--kubeconfig",
-                k8s.kubeconfig,
+                service.environment.kubeconfig,
                 "-n",
-                k8s.namespace,
+                service.namespace,
                 "top",
                 "pod",
                 "-l",
-                k8s.app_label,
+                service.k8s_selector,
                 "--no-headers",
             ]
         )
@@ -128,23 +129,23 @@ class PerWorkerRSSProbe(_K8sProbe):
     }
 
     async def sample(self, ctx: ProbeContext) -> dict[str, float]:
-        k8s = self._ref(ctx)
-        if not k8s:
+        service = self._ref(ctx)
+        if not service:
             return {}
-        pod = await _pod_name(k8s)
+        pod = await _pod_name(service)
         if not pod:
             return {}
         cmd = [
             "kubectl",
             "--kubeconfig",
-            k8s.kubeconfig,
+            service.environment.kubeconfig,
             "-n",
-            k8s.namespace,
+            service.namespace,
             "exec",
             pod,
         ]
-        if k8s.container:
-            cmd += ["-c", k8s.container]
+        if service.container:
+            cmd += ["-c", service.container]
         cmd += ["--", "ps", "-eo", "pid,rss,args"]
         text = await run_capture(cmd)
         n_workers, rss_total_mi = parse_ps_rss(text)
@@ -163,20 +164,20 @@ class RestartProbe(_K8sProbe):
     }
 
     async def sample(self, ctx: ProbeContext) -> dict[str, float]:
-        k8s = self._ref(ctx)
-        if not k8s:
+        service = self._ref(ctx)
+        if not service:
             return {}
         out = await run_capture(
             [
                 "kubectl",
                 "--kubeconfig",
-                k8s.kubeconfig,
+                service.environment.kubeconfig,
                 "-n",
-                k8s.namespace,
+                service.namespace,
                 "get",
                 "pod",
                 "-l",
-                k8s.app_label,
+                service.k8s_selector,
                 "-o",
                 "jsonpath={.items[*].status.containerStatuses[*].restartCount}",
             ]
@@ -201,20 +202,20 @@ class PodCountProbe(_K8sProbe):
     }
 
     async def sample(self, ctx: ProbeContext) -> dict[str, float]:
-        k8s = self._ref(ctx)
-        if not k8s:
+        service = self._ref(ctx)
+        if not service:
             return {}
         text = await run_capture(
             [
                 "kubectl",
                 "--kubeconfig",
-                k8s.kubeconfig,
+                service.environment.kubeconfig,
                 "-n",
-                k8s.namespace,
+                service.namespace,
                 "get",
                 "pod",
                 "-l",
-                k8s.app_label,
+                service.k8s_selector,
                 "-o",
                 "json",
             ]
@@ -272,8 +273,8 @@ class ResourceLimitsProbe(_K8sProbe):
     }
 
     async def sample(self, ctx: ProbeContext) -> dict[str, float]:
-        k8s = self._ref(ctx)
-        if not k8s:
+        service = self._ref(ctx)
+        if not service:
             return {}
         # one `get pod -o json` read; the per-pod parse is the single source — the
         # service-level reading is just its sum, so the two views can never disagree
@@ -281,13 +282,13 @@ class ResourceLimitsProbe(_K8sProbe):
             [
                 "kubectl",
                 "--kubeconfig",
-                k8s.kubeconfig,
+                service.environment.kubeconfig,
                 "-n",
-                k8s.namespace,
+                service.namespace,
                 "get",
                 "pod",
                 "-l",
-                k8s.app_label,
+                service.k8s_selector,
                 "-o",
                 "json",
             ]

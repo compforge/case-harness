@@ -1,4 +1,4 @@
-from perf_harness.model import Sample, Target
+from perf_harness.model import Sample, Service
 from perf_harness.observe import (
     KubectlTopProbe,
     ProbeContext,
@@ -13,9 +13,11 @@ def test_probe_client_prefers_observer_client():
     # HTTP-source probes to the isolated observer client, falling back to load.
     load = object()  # sentinels — we only check identity routing
     obs = object()
-    ctx = ProbeContext(target=Target(base_url="http://x"), client=load, t0=0.0, observer_client=obs)
+    ctx = ProbeContext(
+        service=Service(base_url="http://x"), client=load, t0=0.0, observer_client=obs
+    )
     assert ctx.probe_client is obs
-    ctx_no_obs = ProbeContext(target=Target(base_url="http://x"), client=load, t0=0.0)
+    ctx_no_obs = ProbeContext(service=Service(base_url="http://x"), client=load, t0=0.0)
     assert ctx_no_obs.probe_client is load
 
 

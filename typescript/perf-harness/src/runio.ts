@@ -40,7 +40,7 @@ function statsJson(stats: RequestStats | undefined): Record<string, unknown> | n
 function trialJson(trial: TrialRecord): Record<string, unknown> {
   return {
     id: trial.id,
-    subject: trial.subject,
+    service: trial.service,
     started_at: trial.started_at,
     finished_at: trial.finished_at,
     arm: {
@@ -80,11 +80,11 @@ function outcomeJson(trial: TrialRecord, t: number, outcome: Outcome): Record<st
 
 export function serializeRun(run: Run): Record<string, unknown> {
   return {
-    schema: 3,
+    schema: 4,
     run_id: run.run_id,
     experiment: run.experiment,
     created_at: run.created_at,
-    subject: run.subject,
+    service: run.service,
     passed: run.passed,
     n_trials: run.n_trials,
     trials: run.trials.map(trialJson),

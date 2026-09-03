@@ -19,7 +19,7 @@ Prometheus、Kubernetes 等资源观测由消费方通过 Prombed 或自己的�
 | `scheduler.ts` | 发压、熔断、请求上限与停止语义 |
 | `reduce.ts` | Outcome 到 Window/RequestStats 的归约 |
 | `engine.ts` | Experiment 与 Arm/Trial 编排 |
-| `runio.ts` | Python schema 3 对齐的 raw/model 产物 |
+| `runio.ts` | Python schema 4 对齐的 raw/model 产物 |
 
 ## 关键约定
 

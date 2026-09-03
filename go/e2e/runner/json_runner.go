@@ -14,18 +14,18 @@ import (
 
 // JSONRunner sends HTTP requests and parses JSON responses into Outcome.
 type JSONRunner struct {
-	env    *core.Env
+	config *core.E2EConfig
 	client *http.Client
 }
 
 // NewJSONRunner creates a runner for standard JSON REST/RPC APIs.
-func NewJSONRunner(env *core.Env) *JSONRunner {
-	timeout := time.Duration(env.Runtime.HTTPTimeoutS) * time.Second
+func NewJSONRunner(config *core.E2EConfig) *JSONRunner {
+	timeout := time.Duration(config.Runtime.HTTPTimeoutS) * time.Second
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
 	return &JSONRunner{
-		env: env,
+		config: config,
 		client: &http.Client{
 			Timeout: timeout,
 		},
@@ -47,7 +47,7 @@ func (r *JSONRunner) Trigger(ctx context.Context, req Request) (*Outcome, error)
 		method = http.MethodPost
 	}
 
-	url := r.env.Service.BaseURL + req.Path
+	url := r.config.Service.BaseURL + req.Path
 	httpReq, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -55,7 +55,7 @@ func (r *JSONRunner) Trigger(ctx context.Context, req Request) (*Outcome, error)
 
 	// Set headers
 	httpReq.Header.Set("Content-Type", "application/json")
-	for k, v := range r.env.Auth.Headers {
+	for k, v := range r.config.Service.Headers {
 		httpReq.Header.Set(k, v)
 	}
 	for k, v := range req.Headers {

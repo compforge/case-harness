@@ -9,8 +9,8 @@ The whole harness is four lines::
 
 This module holds the nouns that are *just data* (no behaviour): the
 time-series primitives (`Sample`/`Series`), one request's `Outcome` + its
-`Verdict`, the `ResourceProfile` (资源档) + reachability (`Target`/`K8sRef`),
-    and the per-Trial/-Run aggregates (`RequestStats`/`TrialRecord`/`Run`). The load
+`Verdict`, the domain `Environment` / `Service`, the `ResourceProfile` (资源档),
+and the per-Trial/-Run aggregates (`RequestStats`/`TrialRecord`/`Run`). The load
 *shape* vocabulary (`LoadProfile`/`Schedule`/`Pacing`) lives in `load.py`;
 behaviour (firing load, sampling probes, provisioning) lives in sibling modules.
 """
@@ -20,6 +20,18 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
+
+from harness_common import (
+    Component,
+    Execution,
+    ExperimentRun,
+    Forge,
+    KubernetesEnvironment,
+    Repository,
+)
+from harness_common import Deployment as BaseDeployment
+from harness_common import Outcome as BaseOutcome
+from harness_common import Service as BaseService
 
 from perf_harness.metric import Caveat, MetricFamily, MetricSummary
 
@@ -52,7 +64,7 @@ class Series:
 
 
 @dataclass
-class Outcome:
+class Outcome(BaseOutcome):
     """Client-side result of one Workload.fire() — the request-side truth.
 
     Two-stage contract: ``fire`` records the *raw observation* (status, timing,
@@ -65,7 +77,7 @@ class Outcome:
 
     Latency percentiles, throughput and the error taxonomy are aggregated from
     these (not from a server histogram), so they are always available even when
-    the Subject exposes no /metrics.
+    the Service exposes no /metrics.
     """
 
     status: int | None
@@ -106,33 +118,41 @@ class Verdict:
 
 
 # ---------------------------------------------------------------------------
-# ResourceProfile (资源档) + Subject reachability
+# Environment / Service runtime view + ResourceProfile (资源档)
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class K8sRef:
-    """Coordinates a K8s-family Source needs to observe the Subject's pod.
+Environment = KubernetesEnvironment
 
-    Optional on a Target: when absent, K8s probes are skipped (e.g. a Subject
-    at a non-cluster endpoint).
-    """
 
-    kubeconfig: str
-    namespace: str
-    app_label: str  # e.g. "app.kubernetes.io/name=example"
-    metrics_prefix: str = ""  # starlette_exporter prefix, e.g. "chat"
+@dataclass(frozen=True, slots=True)
+class Service(BaseService):
+    """Perf view of a Service, including reachability and observation coordinates."""
+
+    name: str = ""
+    component: Component = field(
+        default_factory=lambda: Component(
+            repository=Repository(forge=Forge(name=""), path=""),
+            name="",
+        )
+    )
+    environment: Environment = field(default_factory=lambda: Environment(name=""))
+    base_url: str = ""
+    headers: dict[str, str] = field(default_factory=dict, repr=False)
+    namespace: str = ""
+    k8s_selector: str = ""
+    metrics_prefix: str = ""
     metrics_port: int = 8000
     container: str | None = None
 
 
 @dataclass(frozen=True)
 class ResourceProfile:
-    """资源档: the resource budget the Subject runs under for one Trial.
+    """资源档: the resource budget the Service runs under for one Trial.
 
-    Substrate-agnostic data — it does not care whether a HelmProvisioner drove it,
-    a DockerProvisioner did, or a human set it and the harness merely *records* it
-    (no provisioner). ``extra`` carries arbitrary ``helm --set`` style overrides.
+    Substrate-agnostic data — it does not care whether a HelmDeployer drove it,
+    a DockerDeployer did, or a human set it and the harness merely *records* it
+    (no deployer). ``extra`` carries arbitrary ``helm --set`` style overrides.
     """
 
     cpu: str | None = None  # "2" / "500m"
@@ -153,6 +173,13 @@ class ResourceProfile:
         return "/".join(parts) or "default"
 
 
+@dataclass(frozen=True, slots=True)
+class Deployment(BaseDeployment):
+    """A perf Deployment that applies one ResourceProfile to the Service."""
+
+    resources: ResourceProfile
+
+
 @dataclass(frozen=True)
 class Arm:
     """One named configuration participating in an Experiment comparison."""
@@ -160,15 +187,6 @@ class Arm:
     id: str
     resources: ResourceProfile
     load: LoadProfile
-
-
-@dataclass(frozen=True)
-class Target:
-    """The Subject's reachability — substrate-agnostic. ``k8s`` enables K8s probes."""
-
-    base_url: str
-    headers: dict[str, str] = field(default_factory=dict)
-    k8s: K8sRef | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -315,10 +333,10 @@ class Window:
 
 
 @dataclass
-class TrialRecord:
+class TrialRecord(Execution[Outcome]):
     """The recorded execution of one Arm, reduced into addressable Windows."""
 
-    subject: str
+    service: str
     arm: Arm
     windows: list[Window]
     series: dict[str, Series]
@@ -434,7 +452,7 @@ class SloCheck:
 
 
 @dataclass
-class Run:
+class Run(ExperimentRun):
     """One execution of an Experiment — its identity plus the per-Trial results.
 
     ``Engine.run()`` returns this; ``write_run`` lays it out under
@@ -445,9 +463,6 @@ class Run:
     CI.
     """
 
-    run_id: str
-    experiment: str
-    created_at: str  # ISO local time the run started
-    subject: str
+    service: str
     trials: list[TrialRecord]
     passed: bool = True

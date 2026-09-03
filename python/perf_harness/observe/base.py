@@ -6,8 +6,8 @@ says how to collapse its own series into the summary row (``summarize``).
 
 "Source" is just *which handle on the ProbeContext a Probe reads*: the http
 client (scrape any /metrics), the client-side ClientStats (load generator's own
-view), or the Subject's K8s coordinates (see ``k8s.py``). Decoupling the
-Source from the Subject is what lets one run mix client-side + server-side +
+view), or the Service's K8s coordinates (see ``k8s.py``). Decoupling the
+Source from the Service is what lets one run mix client-side + server-side +
 downstream probes and so attribute a slowdown rather than guess.
 """
 
@@ -29,7 +29,7 @@ from perf_harness.metric import (
     series_id,
 )
 from perf_harness.metric.reduce import time_series_summary
-from perf_harness.model import ProbeErrors, Sample, Target
+from perf_harness.model import ProbeErrors, Sample, Service
 
 
 class ClientStats:
@@ -58,7 +58,7 @@ class ProbeContext:
     server-side evidence matters most. Falls back to ``client`` when unset.
     """
 
-    target: Target
+    service: Service
     client: httpx.AsyncClient
     t0: float
     stats: ClientStats = field(default_factory=ClientStats)
@@ -95,7 +95,7 @@ class Probe(ABC):
     name: str = "probe"
     #: where this probe reads — groups its metrics for bottleneck attribution
     source: str = ""
-    #: which service this probe observes (a downstream entry / the Subject); the
+    #: which service this probe observes (a downstream entry / the Service); the
     #: family stays un-prefixed and ``service`` becomes a label on every metric.
     _service: str | None = None
 
@@ -269,11 +269,11 @@ class PrometheusProbe(Probe):
         return bytes(body)
 
     def _start_trial(self, ctx: ProbeContext) -> None:
-        url = self._url or ctx.target.base_url.rstrip("/") + "/metrics"
-        # Subject credentials apply only to its implicit endpoint. A downstream
-        # Prometheus URL must opt in its own headers; forwarding Subject auth would
+        url = self._url or ctx.service.base_url.rstrip("/") + "/metrics"
+        # Service credentials apply only to its implicit endpoint. A downstream
+        # Prometheus URL must opt in its own headers; forwarding Service auth would
         # cross a service trust boundary.
-        target_headers = ctx.target.headers if self._url is None else {}
+        target_headers = ctx.service.headers if self._url is None else {}
         target = ScrapeTarget(
             url,
             headers={
