@@ -8,7 +8,7 @@ The canonical path is **judgment-as-data**: a structured ``common.Case`` (``inpu
 - ``engine`` / ``assertion``: run a case + evaluate ``judge.e2e.assert`` → verdict
 - ``cli`` / ``casegen``: ``e2e run`` (run) and ``casegen`` (marker → case.yaml)
 - ``runner``: protocol adapters (JSON / SSE) producing ``Outcome``
-- ``core``: env loading + profile gating
+- ``core``: config loading + profile gating
 - ``judge.metric``: soft outcome metrics
 - ``casegen``: NL authoring front-end — ``@case``/``@spec`` markers + AST discovery + the
   compiler that turns them into ``common.Case`` (``contract`` / ``discover`` / ``compiler``)
@@ -35,18 +35,19 @@ from e2e_harness.casegen.discover import DiscoveredCase as DiscoveredCase
 from e2e_harness.casegen.discover import discover as discover
 from e2e_harness.assertion import Assertion as Assertion
 from e2e_harness.assertion import run_asserts as run_asserts
-from e2e_harness.core.env import Env as Env
-from e2e_harness.core.env import load_env as load_env
+from e2e_harness.core.config import E2EConfig as E2EConfig
+from e2e_harness.core.config import Experiment as Experiment
+from e2e_harness.core.config import load_config as load_config
 from e2e_harness.core.profile import require_capability as require_capability
 from e2e_harness.core.profile import require_profile as require_profile
 from e2e_harness.engine import run_case as run_case
 from e2e_harness.engine import run_cases as run_cases
 from e2e_harness.caserun import Budgets as Budgets
 from e2e_harness.caserun import CaseRef as CaseRef
+from e2e_harness.caserun import CasePlan as CasePlan
 from e2e_harness.caserun import CaseRun as CaseRun
 from e2e_harness.caserun import Fail as Fail
 from e2e_harness.caserun import PhaseContext as PhaseContext
-from e2e_harness.caserun import CaseRunResult as CaseRunResult
 from e2e_harness.caserun import Skip as Skip
 from e2e_harness.caserun import run_lifecycle as run_lifecycle
 from e2e_harness.matrix import Variant as Variant
@@ -62,9 +63,12 @@ from e2e_harness.judge.metric import score_outcome as score_outcome
 from e2e_harness.runner.async_base import AsyncBaseRunner as AsyncBaseRunner
 from e2e_harness.runner.async_json_runner import AsyncJSONRunner as AsyncJSONRunner
 from e2e_harness.runner.async_sse_runner import AsyncSSERunner as AsyncSSERunner
+from e2e_harness.engine import E2ERun as E2ERun
+from e2e_harness.engine import run_experiment as run_experiment
 from e2e_harness.runner.base import BaseRunner as BaseRunner
 from e2e_harness.runner.base import Outcome as Outcome
 from e2e_harness.runner.base import Request as Request
+from e2e_harness.reducer import E2EReducer as E2EReducer
 from e2e_harness.runner.events import collect_text as collect_text
 from e2e_harness.runner.events import count_events as count_events
 from e2e_harness.runner.events import events as events

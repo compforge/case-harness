@@ -26,7 +26,7 @@ class MyWorkload(Workload):
 
     async def fire(self, ctx: FireContext) -> Outcome:
         response = await ctx.trial.client.post(
-            ctx.trial.target.base_url + "/chat",
+            ctx.trial.service.base_url + "/chat",
             json=ctx.case.input,
             headers={"x-perf-run-id": ctx.trial.run_id},
         )
@@ -77,7 +77,7 @@ class QueueProbe(Probe):
         self.path = str(cfg.options["path"])
 
     async def sample(self, ctx):
-        response = await ctx.probe_client.get(ctx.target.base_url + self.path)
+        response = await ctx.probe_client.get(ctx.service.base_url + self.path)
         response.raise_for_status()
         return {"depth": float(response.json()["depth"])}
 
@@ -99,7 +99,7 @@ factory 中写 load 编排或业务判定。
 
 ## 动态 Pod 数量
 
-`pods` 根据 observe entry 的 `k8s.namespace + app_label` 每个采样周期读取当前 Pod 集合，产出：
+`pods` 根据 observe entry 的 `namespace + k8s_selector` 每个采样周期读取当前 Pod 集合，产出：
 
 ```text
 pods.count{service="worker",state="total|active|ready|running|pending|unschedulable|terminating"}

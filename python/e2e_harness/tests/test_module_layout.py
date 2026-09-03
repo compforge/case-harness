@@ -13,6 +13,7 @@ def test_top_level_aggregates_canonical_surface():
         Budgets,
         Case,
         CaseRef,
+        CasePlan,
         CaseRun,
         CaseSpec,
         DiscoverConfig,
@@ -37,6 +38,7 @@ def test_top_level_aggregates_canonical_surface():
         for x in [
             Case,
             CaseRef,
+            CasePlan,
             CaseRun,
             Budgets,
             Variant,

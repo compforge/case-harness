@@ -12,10 +12,10 @@ from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.drive.workload import Workload
-from perf_harness.engine import Engine, Experiment, Subject
+from perf_harness.engine import Engine, Experiment
 from perf_harness.metric import series_id
 from perf_harness.metric.store import MetricStore
-from perf_harness.model import Outcome, ResourceProfile, SloAssertion, Target, WindowSelector
+from perf_harness.model import Outcome, ResourceProfile, Service, SloAssertion, WindowSelector
 from perf_harness.observe import FamilySpec, Probe
 from perf_harness.report import write_run
 from perf_harness.runio import RUN_SCHEMA, load_outcomes, load_run
@@ -49,7 +49,7 @@ class _WL(Workload):
 
 async def _run(tmp_path):
     exp = Experiment(
-        subject=Subject("chat", Target(base_url="http://127.0.0.1:0")),
+        service=Service("chat", base_url="http://127.0.0.1:0"),
         workload=_WL(),
         resources=[ResourceProfile(workers=2, memory="2Gi")],
         loads=[
@@ -114,6 +114,11 @@ async def test_load_run_round_trips_the_store(tmp_path):
     run, run_dir = await _run(tmp_path)
     loaded = load_run(run_dir)
     assert loaded.run_id == run.run_id and len(loaded.trials) == 1
+    assert loaded.artifact_paths() == {
+        "model": "run.json",
+        "outcomes": "outcomes.jsonl",
+        "timeseries": "timeseries.csv",
+    }
     live, offline = run.trials[0], loaded.trials[0]
     # the offline MetricStore answers the SAME addressed reads as the live one
     refs = [
@@ -210,7 +215,7 @@ async def test_probe_errors_round_trip(tmp_path):
             raise RuntimeError("endpoint down")
 
     exp = Experiment(
-        subject=Subject("chat", Target(base_url="http://127.0.0.1:0")),
+        service=Service("chat", base_url="http://127.0.0.1:0"),
         workload=_WL(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.2))],
@@ -234,7 +239,7 @@ async def test_setup_error_still_writes_complete_run_artifacts(tmp_path):
             return Outcome(status=200, duration_ms=1.0)
 
     exp = Experiment(
-        subject=Subject("chat", Target(base_url="http://127.0.0.1:0")),
+        service=Service("chat", base_url="http://127.0.0.1:0"),
         workload=_BrokenSetup(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1))],

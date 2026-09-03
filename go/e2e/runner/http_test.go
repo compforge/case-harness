@@ -22,11 +22,11 @@ func TestJSONRunnerUsesGenericHeadersAndExplicitExclusions(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner := NewJSONRunner(&core.Env{
-		Service: core.ServiceConfig{BaseURL: server.URL},
-		Auth: core.AuthConfig{Headers: map[string]string{
-			"Authorization": "Bearer token",
-		}},
+	runner := NewJSONRunner(&core.E2EConfig{
+		Service: core.Service{
+			BaseURL: server.URL,
+			Headers: map[string]string{"Authorization": "Bearer token"},
+		},
 		Runtime: core.RuntimeConfig{HTTPTimeoutS: 1},
 	})
 	outcome, err := runner.Trigger(context.Background(), Request{

@@ -5,7 +5,7 @@ import time
 from e2e_harness.caserun import (
     Budgets,
     CaseRef,
-    CaseRun,
+    CasePlan,
     Fail,
     Skip,
     run_lifecycle,
@@ -25,7 +25,7 @@ def test_full_lifecycle_passes_state_and_records_evidence():
     result = run_lifecycle(
         CaseRef("sandbox-runtime", "idle_gc"),
         state,
-        CaseRun(
+        CasePlan(
             prepare=lambda _, s: s.append("prepare"),
             execute=lambda _, s: s.append("execute"),
             judge=lambda _, s: s.append("judge"),
@@ -63,7 +63,7 @@ def test_cleanup_runs_after_execute_error_and_wins_when_it_errors():
     result = run_lifecycle(
         CaseRef("sandbox-runtime", "cleanup_error"),
         state,
-        CaseRun(execute=execute, cleanup=cleanup, budgets=_budgets()),
+        CasePlan(execute=execute, cleanup=cleanup, budgets=_budgets()),
     )
 
     assert state == ["cleanup"]
@@ -79,7 +79,7 @@ def test_judgment_failure_is_not_an_execution_error():
     result = run_lifecycle(
         CaseRef("sandbox-runtime", "eventual_gc"),
         {},
-        CaseRun(execute=lambda *_: None, judge=judge, budgets=_budgets()),
+        CasePlan(execute=lambda *_: None, judge=judge, budgets=_budgets()),
     )
 
     assert result.status == "fail"
@@ -95,7 +95,7 @@ def test_skip_still_cleans_up():
     result = run_lifecycle(
         CaseRef("sandbox-runtime", "pod_only"),
         state,
-        CaseRun(
+        CasePlan(
             prepare=prepare,
             execute=lambda *_: None,
             cleanup=lambda _, s: s.append("cleanup"),
@@ -116,7 +116,7 @@ def test_returning_after_budget_is_an_error_but_cleanup_has_fresh_budget():
     result = run_lifecycle(
         CaseRef("sandbox-runtime", "timeout"),
         state,
-        CaseRun(
+        CasePlan(
             execute=execute,
             cleanup=lambda _, s: s.append("cleanup"),
             budgets=_budgets(execute_s=0.001),

@@ -14,8 +14,11 @@ Worksheet so a single checkpoint captures the whole resumable state.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Any
+
+from harness_common import ExperimentRun
 
 from eval_harness.model.evalset import eval_view
 from eval_harness.model.experiment import Experiment
@@ -97,7 +100,7 @@ class Row:
         )
 
 
-class Worksheet:
+class Worksheet(ExperimentRun):
     def __init__(
         self,
         experiment: str,
@@ -106,11 +109,15 @@ class Worksheet:
         rows: dict[tuple[str, str, str], Row] | None = None,
         provisions: dict[str, Provision] | None = None,
         run_id: str = "",
+        created_at: str = "",
     ) -> None:
-        self.experiment = experiment
+        super().__init__(
+            run_id=run_id,
+            experiment=experiment,
+            created_at=created_at,
+        )
         self.experiment_hash = experiment_hash
         self.metric_names = list(metric_names)
-        self.run_id = run_id  # this run's reuse namespace (carried on rows + checkpoint meta)
         # keyed by (arm_id, corpus, case_id) — corpus in the key so an experiment can span
         # corpora without case_id collisions across corpora.
         self.rows: dict[tuple[str, str, str], Row] = rows or {}
@@ -127,11 +134,17 @@ class Worksheet:
         share one — many corpora, one worksheet. ``run_id`` is this run's reuse
         namespace, stamped onto every row.
         """
-        target = exp.target
-        ws = cls(exp.name, exp.experiment_hash(), list(exp.metrics), run_id=run_id)
+        service = exp.service
+        ws = cls(
+            exp.name,
+            exp.experiment_hash(),
+            list(exp.metrics),
+            run_id=run_id,
+            created_at=datetime.now().astimezone().isoformat(),
+        )
         for arm in exp.resolved_arms():
             for corpus, case in exp.cases():
-                key = arm.key(corpus, target, exp.heavy_fields)
+                key = arm.key(corpus, service, exp.heavy_fields)
                 ws.provisions.setdefault(key, Provision(key=key))
                 v = eval_view(case)  # eval's read of the canonical case → Row seed fields
                 row = Row(

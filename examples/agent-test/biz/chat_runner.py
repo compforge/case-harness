@@ -17,8 +17,8 @@ class ChatRunner(BaseEvalRunner):
     business_name = "chat"
 
     async def trigger_one(self, case, prep_case) -> RunHandle:
-        env = self.ctx.pipeline.env  # service-side Pipeline exposes an Env or similar
-        async with AsyncSSERunner(env) as runner:
+        config = self.ctx.pipeline.env  # service-side Pipeline exposes compatible e2e config
+        async with AsyncSSERunner(config) as runner:
             outcome = await runner.trigger(Request(
                 method="POST", path="/",
                 body={"ResourceID": prep_case.subject_id, "Query": case.question},

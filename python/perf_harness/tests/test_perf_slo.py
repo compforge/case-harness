@@ -4,14 +4,14 @@ from perf_harness.cli import main
 from perf_harness.config import load_experiment
 from perf_harness.drive.load import LoadProfile, Schedule, Stage
 from perf_harness.drive.workload import MockWorkload
-from perf_harness.engine import Engine, Experiment, Subject
+from perf_harness.engine import Engine, Experiment
 from perf_harness.metric import GaugeSummary, MetricFamily
 from perf_harness.model import (
     Arm,
     RequestStats,
     ResourceProfile,
+    Service,
     SloAssertion,
-    Target,
     TrialRecord,
     TrialStop,
     Window,
@@ -35,7 +35,8 @@ def _trial(level: float, p99: float, *, err: float = 0.0, n_dropped: int = 0) ->
     resources = ResourceProfile(workers=2)
     load = LoadProfile(model="open", schedule=Schedule.ramp_hold(level, 0.0, 1.0))
     return TrialRecord(
-        subject="s",
+        id=f"{resources.label()}|{load.label()}",
+        service="s",
         arm=Arm(f"{resources.label()}|{load.label()}", resources, load),
         windows=[
             Window("measurement", "measurement", "measurement", 0.0, 1.0, True, request=stats),
@@ -216,7 +217,7 @@ def test_slo_aware_capacity_applies_global_resource_slo_to_each_hold():
 # ---- config parse + fail-fast ----
 
 _BASE = """
-subject: { name: s, base_url: "http://x" }
+service: { name: s, base_url: "http://x" }
 resources: [ {} ]
 workload: { name: mock }
 """
@@ -261,6 +262,7 @@ def test_cooldown_slo_accepts_resource_series_labels(tmp_path):
         "  - name: worker\n"
         "    probes:\n"
         "      - name: prometheus\n"
+        "        url: http://worker/metrics\n"
         "        queries:\n"
         "          - { name: task_count, promql: 'sum by (task_type, state) (task_count)', "
         "kind: gauge, labels: [task_type, state] }\n"
@@ -280,6 +282,7 @@ def test_cooldown_slo_rejects_unknown_resource_label(tmp_path):
         "  - name: worker\n"
         "    probes:\n"
         "      - name: prometheus\n"
+        "        url: http://worker/metrics\n"
         "        queries:\n"
         "          - { name: task_count, promql: 'sum by (task_type, state) (task_count)', "
         "kind: gauge, labels: [task_type, state] }\n"
@@ -366,7 +369,7 @@ def test_slo_needs_exactly_one_op(tmp_path):
 
 def _exp(slo, *, abort=False) -> Experiment:
     return Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=MockWorkload(base_ms=2),
         resources=[ResourceProfile()],
         loads=[

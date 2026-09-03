@@ -12,17 +12,15 @@ prose plus three hand-rolled paths:
   ``experiment_hash`` (a
   same-config rerun lands in the SAME dir and resumes in place — a content-addressed reuse
   namespace, not a history snapshot). The shared contract is only that it is unique per scope.
-- **products land under** ``runs/<scope>/<run-id>/``. The verdict.json + the rich artifacts
+- **Artifacts land under** ``runs/<scope>/<run-id>/``. The verdict.json + the rich artifacts
   (results.csv / run.json / report …) all sit there at one predictable depth, so a consumer
   globs ``runs/**/verdict.json`` regardless of harness. See ``spec/conventions.md`` 「Run
   产物与 verdict 出口」.
 
-This is a *data/convention* seam, not a behavioural one: there is deliberately no shared
-``Engine`` or ``Experiment`` base class. The three engines share this vocabulary, not
-substitutable behaviour (eval's engine is a function, perf's a class, e2e is pytest-driven),
-and run-id derivation diverges on purpose — so each harness *calls* ``run_dir_for``; none
-inherits. Hoisting the layout (not the behaviour) is what keeps the constraint enforced in
-one place while the harnesses stay decoupled.
+This is a *data/convention* seam, not a behavioural one. ``Experiment`` and
+``ExperimentRun`` provide common identity, while engines remain domain-owned and
+non-substitutable (eval's engine is a function, perf's a class, e2e is pytest-driven).
+Run-id derivation also diverges on purpose, so each harness calls ``run_dir_for``.
 """
 
 from __future__ import annotations

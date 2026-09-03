@@ -1,12 +1,12 @@
 """Load a single ``experiment.yaml`` → ``Experiment``.
 
 One entry file describes the whole run: ``evalset`` (a canonical CaseSet reference),
-``target`` (base SUT config), ``arms`` / ``matrix`` (comparison arms),
+``service`` (base SUT config), ``arms`` / ``matrix`` (comparison arms),
 ``metrics`` and ``weights``. Relative CaseSet paths resolve from ``materials_root``;
 the CaseSet owns its identity, sources, facet vocabulary, cases and per-face judgment.
 
 String values support ``${VAR}`` / ``${VAR:-default}`` interpolation from the
-environment, so secrets (e.g. ``target.llm.api_key``) stay out of the yaml /
+environment, so secrets (e.g. ``service.llm.api_key``) stay out of the yaml /
 git — an unset var with no default fails loud rather than sending an empty value.
 """
 
@@ -21,7 +21,7 @@ import yaml
 from spec_case.model import CaseSet, Source, load_caseset, validate
 
 from eval_harness.model.evalset import EvalSet, SourceRecord
-from eval_harness.model.experiment import Arm, Experiment, Target
+from eval_harness.model.experiment import Arm, Experiment, Service
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
@@ -82,6 +82,21 @@ def _load_evalset(spec: Any, root: Path) -> EvalSet:
     )
 
 
+def _service(raw: dict[str, Any]) -> Service:
+    """Normalize the concise YAML identity into common value objects."""
+    data = dict(raw)
+    if data.get("component"):
+        component = dict(data["component"])
+        if component.get("repository"):
+            repository = dict(component["repository"])
+            forge = repository.get("forge", "")
+            if not isinstance(forge, dict):
+                repository["forge"] = {"name": str(forge)}
+            component["repository"] = repository
+        data["component"] = component
+    return Service.model_validate(data)
+
+
 def load_experiment(path: str | Path, materials_root: str | Path | None = None) -> Experiment:
     path = Path(path)
     raw = _interpolate(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
@@ -99,7 +114,7 @@ def load_experiment(path: str | Path, materials_root: str | Path | None = None) 
     exp = Experiment(
         name=raw["name"],
         description=raw.get("description") or "",
-        target=Target(**raw["target"]),
+        service=_service(raw["service"]),
         evalsets=evalsets,
         arms=[Arm(**e) for e in (raw.get("arms") or [])],
         matrix=raw.get("matrix") or {},

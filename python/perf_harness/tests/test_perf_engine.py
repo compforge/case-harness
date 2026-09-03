@@ -5,14 +5,14 @@ from spec_case.model import Case
 
 from perf_harness.drive.load import LoadProfile, Pacing, Schedule
 from perf_harness.drive.workload import FireContext, MockWorkload, TrialContext, Workload
-from perf_harness.engine import Engine, Experiment, Subject
+from perf_harness.engine import Engine, Experiment
 from perf_harness.model import (
     Outcome,
     PhaseError,
     ResourceProfile,
     Sample,
+    Service,
     SloAssertion,
-    Target,
     WindowSelector,
 )
 from perf_harness.observe import ClientProbe, FamilySpec, Probe
@@ -36,9 +36,9 @@ class _RaisesWL(Workload):
 
 
 async def test_engine_smoke_offline():
-    subject = Subject("mock", Target(base_url="http://127.0.0.1:0"))
+    service = Service("mock", base_url="http://127.0.0.1:0")
     experiment = Experiment(
-        subject=subject,
+        service=service,
         workload=MockWorkload(base_ms=5),
         resources=[ResourceProfile(workers=2)],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(3, 0.0, 0.4))],
@@ -47,9 +47,12 @@ async def test_engine_smoke_offline():
     )
     run = await Engine(experiment).run()
 
-    assert run.run_id and run.subject == "mock"
+    assert run.run_id and run.service == "mock"
     assert len(run.trials) == 1
     r = run.trials[0]
+    assert run.executions == run.trials
+    assert r.operation_runs
+    assert r.operation_runs[0].outcome in [outcome for _, outcome in r.outcomes]
     assert r.measurement.request.n > 0
     assert r.measurement.request.n_ok == r.measurement.request.n
     assert r.measurement.request.error_rate == 0.0
@@ -62,7 +65,7 @@ async def test_engine_smoke_offline():
 
 async def test_engine_stamps_case_id_and_preserves_exception_detail():
     experiment = Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=_RaisesWL(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.05))],
@@ -79,9 +82,9 @@ async def test_engine_stamps_case_id_and_preserves_exception_detail():
 
 
 async def test_engine_sweeps_grid():
-    subject = Subject("mock", Target(base_url="http://127.0.0.1:0"))
+    service = Service("mock", base_url="http://127.0.0.1:0")
     experiment = Experiment(
-        subject=subject,
+        service=service,
         workload=MockWorkload(base_ms=2),
         resources=[ResourceProfile(workers=2), ResourceProfile(workers=4)],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],
@@ -97,7 +100,7 @@ async def test_engine_sweeps_grid():
 def test_perf_arm_ids_must_be_unique():
     duplicate = ResourceProfile(workers=2)
     experiment = Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=MockWorkload(base_ms=2),
         resources=[duplicate, duplicate],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],
@@ -108,7 +111,7 @@ def test_perf_arm_ids_must_be_unique():
 
 def test_perf_arm_id_disambiguates_configs_with_same_display_label():
     experiment = Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=MockWorkload(base_ms=2),
         resources=[ResourceProfile(replicas=1), ResourceProfile(replicas=2)],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],
@@ -157,9 +160,9 @@ async def test_circuit_breaker_aborts_trial_on_error_rate():
     # a 5s steady at concurrency 4 would normally fire thousands; the breaker should
     # trip within the first ~0.1s supervisor tick once error rate ≥ 50% (min_n=5),
     # so the trial ends almost immediately and is flagged aborted.
-    subject = Subject("b", Target(base_url="http://127.0.0.1:0"))
+    service = Service("b", base_url="http://127.0.0.1:0")
     exp = Experiment(
-        subject=subject,
+        service=service,
         workload=_AlwaysFailWL(),
         resources=[ResourceProfile()],
         loads=[
@@ -190,9 +193,9 @@ async def test_circuit_breaker_aborts_trial_on_error_rate():
 async def test_no_breaker_runs_full_window_not_aborted():
     # without abort_on_error_rate, even an all-failing workload runs the full (short)
     # window and ends with reason="deadline" — the breaker is opt-in.
-    subject = Subject("b", Target(base_url="http://127.0.0.1:0"))
+    service = Service("b", base_url="http://127.0.0.1:0")
     exp = Experiment(
-        subject=subject,
+        service=service,
         workload=_AlwaysFailWL(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],
@@ -218,9 +221,9 @@ async def test_hard_stop_force_cancels_inflight_and_counts_interrupted():
     # graceful_stop_s=0 → at the deadline the in-flight (slow) requests are force-
     # cancelled and counted as `interrupted`, and a cancelled request NEVER becomes a
     # latency sample (overall.n stays 0). Validates the A4 invariant + the census.
-    subject = Subject("h", Target(base_url="http://127.0.0.1:0"))
+    service = Service("h", base_url="http://127.0.0.1:0")
     exp = Experiment(
-        subject=subject,
+        service=service,
         workload=_SlowWL(),
         resources=[ResourceProfile()],
         loads=[
@@ -240,9 +243,9 @@ async def test_hard_stop_force_cancels_inflight_and_counts_interrupted():
 
 
 async def test_engine_open_model_smoke():
-    subject = Subject("mock", Target(base_url="http://127.0.0.1:0"))
+    service = Service("mock", base_url="http://127.0.0.1:0")
     experiment = Experiment(
-        subject=subject,
+        service=service,
         workload=MockWorkload(base_ms=2),
         resources=[ResourceProfile(workers=2)],
         loads=[
@@ -296,7 +299,7 @@ async def test_trial_hooks_wrap_load_and_cooldown_only_extends_raw_series():
             return {"post_load": float(state["post_load"])}
 
     exp = Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=LifecycleWorkload(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.12))],
@@ -338,7 +341,7 @@ async def test_cleanup_runs_when_setup_fails():
             events.append("cleanup")
 
     exp = Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=BrokenSetup(),
         resources=[ResourceProfile()],
         loads=[
@@ -371,7 +374,7 @@ async def test_cleanup_error_does_not_hide_setup_error():
             raise RuntimeError("cleanup failed")
 
     exp = Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=BrokenLifecycle(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1))],
@@ -398,7 +401,7 @@ async def test_cancellation_propagates_after_cleanup():
             events.append("cleanup")
 
     exp = Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=CancelledSetup(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1))],
@@ -417,7 +420,7 @@ async def test_cleanup_error_marks_completed_trial_as_phase_error():
             raise RuntimeError("cleanup failed")
 
     exp = Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=BrokenCleanup(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.05))],
@@ -440,7 +443,7 @@ async def test_cooldown_slo_missing_data_fails_closed():
             return {}
 
     exp = Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=MockWorkload(base_ms=1),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.05))],
@@ -464,7 +467,7 @@ def test_cooldown_window_omits_stale_or_failed_probe_data():
             raise NotImplementedError
 
     exp = Experiment(
-        subject=Subject("mock", Target(base_url="http://127.0.0.1:0")),
+        service=Service("mock", base_url="http://127.0.0.1:0"),
         workload=MockWorkload(base_ms=1),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.05))],

@@ -1,7 +1,7 @@
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.drive.workload import MockWorkload, Workload
-from perf_harness.engine import Engine, Experiment, Subject
-from perf_harness.model import Outcome, ResourceProfile, Target, Verdict
+from perf_harness.engine import Engine, Experiment
+from perf_harness.model import Outcome, ResourceProfile, Service, Verdict
 
 
 def test_base_judge_status_and_exc():
@@ -67,7 +67,7 @@ class _Failing(Workload):
 
 async def test_engine_buckets_judged_errors():
     exp = Experiment(
-        subject=Subject("x", Target(base_url="http://127.0.0.1:0")),
+        service=Service("x", base_url="http://127.0.0.1:0"),
         workload=_Failing(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],

@@ -4,7 +4,7 @@ one worksheet, provisioned per corpus, with corpus as a built-in report dimensio
 from __future__ import annotations
 
 from eval_harness.model.evalset import EvalSet
-from eval_harness.model.experiment import Experiment, Target
+from eval_harness.model.experiment import Experiment, Service
 from eval_harness.model.sample import MetricResult
 from eval_harness.report.pivot import by_corpus
 from eval_harness.report.render import digest_csv, failures_csv, results_csv
@@ -15,7 +15,7 @@ from eval_harness.worksheet.worksheet import CellState, Worksheet
 def _multi_exp():
     return Experiment(
         name="suite",
-        target=Target(name="chat", config={"tenant_id": "t1"}),
+        service=Service(name="chat", config={"tenant_id": "t1"}),
         evalsets=[
             EvalSet(
                 caseset="finance",
@@ -34,7 +34,7 @@ def _multi_exp():
 def test_single_corpus_is_one_evalset():
     exp = Experiment(
         name="e",
-        target=Target(name="chat"),
+        service=Service(name="chat"),
         evalsets=[EvalSet(caseset="solo", cases=[make_eval_case(id="q1", query="q")])],
         metrics=["correctness"],
     )

@@ -24,6 +24,8 @@ import csv
 import json
 from pathlib import Path
 
+from harness_common import Artifact, Reducer
+
 from perf_harness.drive.load import LoadProfile, Pacing, Schedule, Stage
 from perf_harness.metric import (
     CounterSummary,
@@ -53,7 +55,7 @@ from perf_harness.model import (
 )
 
 #: bump when run.json's shape changes incompatibly — offline readers check this first
-RUN_SCHEMA = 3
+RUN_SCHEMA = 4
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +340,7 @@ def _outcome_from(d: dict) -> tuple[str, float, Outcome]:
 def _trial_json(r: TrialRecord) -> dict:
     return {
         "id": r.label(),
-        "subject": r.subject,
+        "service": r.service,
         "arm": {
             "id": r.arm.id,
             "resources": _resources_json(r.arm.resources),
@@ -381,10 +383,11 @@ def _trial_json(r: TrialRecord) -> dict:
     }
 
 
-def _trial_from(d: dict, subject: str) -> TrialRecord:
+def _trial_from(d: dict, service: str) -> TrialRecord:
     arm = d["arm"]
     return TrialRecord(
-        subject=d.get("subject", subject),
+        id=arm["id"],
+        service=d.get("service", service),
         arm=Arm(
             id=arm["id"],
             resources=_resources_from(arm["resources"]),
@@ -470,7 +473,7 @@ def write_run_data(run: Run, run_dir: str | Path) -> dict[str, str]:
         "run_id": run.run_id,
         "experiment": run.experiment,
         "created_at": run.created_at,
-        "subject": run.subject,
+        "service": run.service,
         "passed": run.passed,
         "n_trials": len(run.trials),
         "trials": [_trial_json(r) for r in run.trials],
@@ -489,11 +492,23 @@ def write_run_data(run: Run, run_dir: str | Path) -> dict[str, str]:
                 f.write("\n")
 
     timeseries = write_timeseries_data(run.trials, out)
+    run.add_artifact("model", "run.json")
+    run.add_artifact("outcomes", "outcomes.jsonl")
+    run.add_artifact("timeseries", "timeseries.csv")
     return {
         "run.json": str(run_json),
         "outcomes": str(outcomes),
         "timeseries": str(timeseries),
     }
+
+
+class PerfReducer(Reducer[Run]):
+    """Persist perf raw/model facts without re-running the workload."""
+
+    def reduce(self, run: Run, run_dir: Path) -> list[Artifact]:
+        write_run_data(run, run_dir)
+        names = {"model", "outcomes", "timeseries"}
+        return [artifact for artifact in run.artifacts if artifact.name in names]
 
 
 def load_run(run_dir: str | Path, *, with_series: bool = True) -> Run:
@@ -510,8 +525,8 @@ def load_run(run_dir: str | Path, *, with_series: bool = True) -> Run:
             f"run.json schema {schema!r} not supported (expected {RUN_SCHEMA}); "
             f"re-run with a matching perf_harness or read the file directly"
         )
-    subject = doc.get("subject", "")
-    trials = [_trial_from(d, subject) for d in doc.get("trials") or []]
+    service = doc.get("service", "")
+    trials = [_trial_from(d, service) for d in doc.get("trials") or []]
 
     ts = out / "timeseries.csv"
     if with_series and ts.exists():
@@ -529,14 +544,21 @@ def load_run(run_dir: str | Path, *, with_series: bool = True) -> Run:
                     series = r.series[sid] = Series(metric=sid, unit=fam.unit if fam else "")
                 series.samples.append(Sample(t=float(row["t"]), value=float(row["value"])))
 
-    return Run(
+    run = Run(
         run_id=doc["run_id"],
         experiment=doc["experiment"],
         created_at=doc.get("created_at", ""),
-        subject=subject,
+        executions=trials,
+        service=service,
         trials=trials,
         passed=bool(doc.get("passed", True)),
     )
+    run.add_artifact("model", "run.json")
+    if (out / "outcomes.jsonl").exists():
+        run.add_artifact("outcomes", "outcomes.jsonl")
+    if ts.exists():
+        run.add_artifact("timeseries", "timeseries.csv")
+    return run
 
 
 def load_outcomes(run_dir: str | Path) -> dict[str, list[tuple[float, Outcome]]]:

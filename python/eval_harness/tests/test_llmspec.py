@@ -2,14 +2,14 @@ import pytest
 import yaml
 
 from eval_harness.config import load_experiment
-from eval_harness.model.experiment import Arm, LLMSpec, Target, expand_matrix
+from eval_harness.model.experiment import Arm, LLMSpec, Service, expand_matrix
 from eval_harness.schedule.reconcile import _sut_endpoint
 
 _HEAVY = ["config.tenant_id"]
 
 
 def _target(llm=None):
-    return Target(
+    return Service(
         name="chat",
         config={"tenant_id": "t1"},
         llm=llm or LLMSpec(base_url="http://aigw", api_key="K", model="m0"),
@@ -25,7 +25,7 @@ def test_llm_override_patches_and_inherits():
 
 def test_llm_override_when_base_llm_is_none():
     r = Arm(id="x", overrides={"llm.model": "m1"}).resolve(
-        Target(name="chat", config={"tenant_id": "t1"})
+        Service(name="chat", config={"tenant_id": "t1"})
     )
     assert r.llm.model == "m1"
 
@@ -60,7 +60,7 @@ _BODY = {
 }
 
 
-def _write(tmp_path, target):
+def _write(tmp_path, service):
     d = tmp_path / "experiments"
     d.mkdir()
     (tmp_path / "cases.yaml").write_text(
@@ -68,7 +68,7 @@ def _write(tmp_path, target):
         "  - {id: q1, input: {query: q}, judge: {eval: {ground_truth: a}}}\n",
         encoding="utf-8",
     )
-    body = {**_BODY, "target": target}
+    body = {**_BODY, "service": service}
     f = d / "exp.yaml"
     f.write_text(yaml.safe_dump(body, allow_unicode=True), encoding="utf-8")
     return f
@@ -76,23 +76,23 @@ def _write(tmp_path, target):
 
 def test_interpolation_resolves_env(tmp_path, monkeypatch):
     monkeypatch.setenv("MYKEY", "secret123")
-    target = {"name": "chat", "llm": {"model": "m", "api_key": "${MYKEY}"}}
-    exp = load_experiment(_write(tmp_path, target))
-    assert exp.target.llm.api_key == "secret123"
+    service = {"name": "chat", "llm": {"model": "m", "api_key": "${MYKEY}"}}
+    exp = load_experiment(_write(tmp_path, service))
+    assert exp.service.llm.api_key == "secret123"
 
 
 def test_interpolation_default(tmp_path, monkeypatch):
     monkeypatch.delenv("HOSTX", raising=False)
-    target = {
+    service = {
         "name": "chat",
         "config": {"host": {"base_url": "${HOSTX:-http://default}"}},
     }
-    exp = load_experiment(_write(tmp_path, target))
-    assert exp.target.config["host"]["base_url"] == "http://default"
+    exp = load_experiment(_write(tmp_path, service))
+    assert exp.service.config["host"]["base_url"] == "http://default"
 
 
 def test_interpolation_missing_fails_loud(tmp_path, monkeypatch):
     monkeypatch.delenv("NOPE", raising=False)
-    target = {"name": "chat", "config": {"host": {"base_url": "${NOPE}"}}}
+    service = {"name": "chat", "config": {"host": {"base_url": "${NOPE}"}}}
     with pytest.raises(ValueError, match="unset env var"):
-        load_experiment(_write(tmp_path, target))
+        load_experiment(_write(tmp_path, service))

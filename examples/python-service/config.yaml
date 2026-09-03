@@ -1,8 +1,10 @@
 service:
   name: control-server
+  component:
+    repository: { forge: github, path: example/control }
+    name: control-server
+  environment: { name: local }
   base_url: ${CONTROL_BASE_URL:-http://localhost:8080}
-
-auth:
   headers:
     Authorization: Bearer ${CONTROL_TOKEN}
 

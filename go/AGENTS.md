@@ -12,7 +12,7 @@ go/
 │   ├── caserun/        # prepare/execute/judge/cleanup + phase budgets/evidence + Recorder
 │   ├── testrun/        # go test 的 Run 聚合、TestMain 集成与统一 Verdict 出口
 │   ├── matrix/         # variant Cartesian product；arm_id/facets 投影
-│   ├── core/           # Env / profile+capability / context-aware Poll/Retry/Consistently
+│   ├── core/           # Config + runtime identities / profile+capability / context-aware Poll/Retry/Consistently
 │   ├── runner/         # 纯 Runner(ctx) + Outcome / JSONRunner / RawRequest
 │   ├── judge/          # 不依赖 testing.T 的 Assertion
 │   ├── burst/          # burst.Run[T] 泛型并发发射

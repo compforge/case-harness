@@ -10,14 +10,14 @@ import type {
   PhaseError,
   ResourceProfile,
   Run,
-  Subject,
+  Service,
   TrialRecord,
 } from "./model";
 import type { TrialContext, Workload } from "./workload";
 
 export interface Experiment {
   name?: string;
-  subject: Subject;
+  service: Service;
   workload: Workload;
   resources?: ResourceProfile[];
   loads: LoadProfile[];
@@ -137,7 +137,7 @@ export class Engine {
       const abort = () => controller.abort(this.#experiment.signal?.reason);
       this.#experiment.signal?.addEventListener("abort", abort, { once: true });
       const context: TrialContext = {
-        subject: this.#experiment.subject,
+        service: this.#experiment.service,
         arm,
         run_id: this.#runId,
         signal: controller.signal,
@@ -150,7 +150,7 @@ export class Engine {
         await this.#experiment.onTrialStart?.(execution.workload, started);
         driven = await drive({
           workload: this.#experiment.workload,
-          context: { subject: execution.workload.subject, run_id: execution.workload.run_id },
+          context: { service: execution.workload.service, run_id: execution.workload.run_id },
           arm,
           cases: this.#cases,
           weights: this.#weights,
@@ -197,7 +197,7 @@ export class Engine {
       };
       const trial: TrialRecord = {
         id: arm.id,
-        subject: this.#experiment.subject.name,
+        service: this.#experiment.service.name,
         arm,
         started_at: started.toISOString(),
         finished_at: finished.toISOString(),
@@ -216,11 +216,11 @@ export class Engine {
       if (trial.phase_errors.length) break;
     }
     return {
-      schema: 3,
+      schema: 4,
       run_id: this.#runId,
       experiment: this.#experiment.name ?? "perf",
       created_at: created.toISOString(),
-      subject: this.#experiment.subject.name,
+      service: this.#experiment.service.name,
       passed: trials.length === arms(this.#experiment).length
         && trials.every((trial) => !trial.phase_errors.length
           && (trial.stop.reason === "deadline" || trial.stop.reason === "request_limit")),

@@ -20,7 +20,15 @@ const workload: Workload = {
 
 const run = await new Engine({
   name: "service-capacity",
-  subject: { name: "service", target: {} },
+  service: {
+    name: "service",
+    component: {
+      repository: { forge: { name: "github" }, path: "org/product" },
+      name: "api",
+    },
+    environment: { name: "dev" },
+    base_url: "http://service",
+  },
   workload,
   caseSet,
   caseMix: [{ id: "ordinary_chat", weight: 4 }, { id: "knowledge_chat", weight: 1 }],

@@ -2,13 +2,13 @@ $schema: https://json-schema.org/draft/2020-12/schema
 $id: https://compforge.dev/schemas/perf-run-schema.yaml
 title: Perf Harness Run
 type: object
-required: [schema, run_id, experiment, created_at, subject, passed, n_trials, trials]
+required: [schema, run_id, experiment, created_at, service, passed, n_trials, trials]
 properties:
-  schema: {type: integer, const: 3}
+  schema: {type: integer, const: 4}
   run_id: {type: string, minLength: 1}
   experiment: {type: string, minLength: 1}
   created_at: {type: string}
-  subject: {type: string, minLength: 1}
+  service: {type: string, minLength: 1}
   passed: {type: boolean}
   n_trials: {type: integer, minimum: 0}
   trials: {type: array, items: {$ref: '#/$defs/trial'}}
@@ -133,10 +133,10 @@ $defs:
     additionalProperties: true
   trial:
     type: object
-    required: [id, subject, arm, stop, slo, registry, windows, probe_errors]
+    required: [id, service, arm, stop, slo, registry, windows, probe_errors]
     properties:
       id: {type: string, minLength: 1}
-      subject: {type: string, minLength: 1}
+      service: {type: string, minLength: 1}
       started_at: {type: string}
       finished_at: {type: string}
       arm:

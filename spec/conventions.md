@@ -81,9 +81,14 @@ Outcome 可序列化，支持阶段可恢复（保存 outcome → 重跑 judge �
 ```yaml
 service:
   name: <service-name>
+  component:
+    repository:
+      forge: <forge-name>
+      path: <repository-path>
+    name: <component-name>
+  environment:
+    name: <environment-name>
   base_url: ${ENV_VAR:-default}
-
-auth:
   headers:
     Authorization: Bearer ${API_TOKEN}
     X-Tenant-ID: ${TENANT_ID}
@@ -151,9 +156,9 @@ Finding、Evaluation 与 Measurement。实现可以融合执行、填表和 chec
 业务无关的 `common` / `report_kit`。一致性落在 Kernel 语义、`spec/` 数据格式与 conformance，
 不落在共享领域代码。
 
-## Run 产物与 verdict 出口（跨 harness）
+## ExperimentRun、Artifact 与 verdict 出口（跨 harness）
 
-五类 harness 的运行产物布局对齐到同一骨架，让消费方（devloop 等）"读 verdict 自纠偏"时
+五类 harness 的 ExperimentRun 产物布局对齐到同一骨架，让消费方（devloop 等）"读 verdict 自纠偏"时
 一个 glob + 一份 schema 全收：
 
 ```
@@ -162,8 +167,13 @@ runs/<scope>/<run-id>/
 └── <富产物>            # 各 harness 自有：results.csv / run.json / junit.xml / report/ …
 ```
 
-- **scope**：harness 中立的运行单元名（run 目录第一段）。`eval`/`perf`/`trace`/`trajectory` = experiment 或数据集运行名；
-  `e2e` = 套件/服务名（e2e 无 experiment 这一对照轴，不为它发明一个）。
+`Artifact` 是 ExperimentRun 产生的领域数据，公共契约只记录其逻辑名称和相对路径；raw、model、
+checkpoint 等内容及 schema 由各 Harness 持有。`Report` 是一个或多个 Artifact 的下游渲染，不能
+在渲染阶段重新执行 Experiment 或补造源事实。
+
+- **scope**：harness 中立的 Experiment 名（run 目录第一段）。`e2e` 通常采用套件名，
+  `eval`/`perf`/`trace`/`trajectory` 通常采用实验或数据集运行名；名字不要求 Experiment
+  一定具有多个对照 Arm。
 - **run-id**：scope 内一次 run 的唯一标识，派生各 harness 自治，但语义分两类：
   perf/e2e/trajectory 用**时间戳或周期 id**（每次 run 留一份历史，累积不覆盖）；eval 用 **`experiment_hash`**
   （同配置 rerun 落同一 run 目录、原地 resume——内容寻址的复用 namespace，而非历史快照）。

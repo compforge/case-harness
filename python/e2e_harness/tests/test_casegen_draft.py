@@ -62,7 +62,7 @@ def test_draft_inlines_nl_into_desc_and_leaves_input_assert_empty():
 
 def test_unfilled_draft_errors_in_engine_not_silently_skipped():
     c = DraftCompiler().compile(_dc())
-    v = run_case(c, _NeverRunner())  # errors before firing → _NeverRunner never reached
+    v = run_case(c, _NeverRunner())  # errors before firing → runner never reached
     assert (
         v.status == "error" and "draft not filled" in v.reason
     )  # can't be hidden green

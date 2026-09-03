@@ -15,6 +15,8 @@ import json
 import os
 from pathlib import Path
 
+from harness_common import Artifact
+
 from eval_harness.model.sample import MetricResult
 from eval_harness.worksheet.worksheet import (
     CellState,
@@ -101,6 +103,8 @@ def to_jsonl(ws: Worksheet, path: str | Path) -> None:
         "experiment": ws.experiment,
         "experiment_hash": ws.experiment_hash,
         "run_id": ws.run_id,
+        "created_at": ws.created_at,
+        "artifacts": [{"name": artifact.name, "path": artifact.path} for artifact in ws.artifacts],
         "metric_names": ws.metric_names,
         "provisions": [
             {"key": p.key, "state": p.state.value, "subject_id": p.subject_id, "error": p.error}
@@ -140,14 +144,17 @@ def from_jsonl(path: str | Path) -> Worksheet:
         )
         for p in meta.get("provisions", [])
     }
-    return Worksheet(
+    ws = Worksheet(
         experiment=meta["experiment"],
         experiment_hash=meta["experiment_hash"],
         metric_names=meta["metric_names"],
         rows=rows,
         provisions=provisions,
         run_id=meta.get("run_id", ""),
+        created_at=meta.get("created_at", ""),
     )
+    ws.artifacts = [Artifact(**artifact) for artifact in meta.get("artifacts", [])]
+    return ws
 
 
 class Checkpointer:

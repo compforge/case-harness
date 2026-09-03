@@ -11,13 +11,15 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from spec_case.model import load_caseset, validate
 from harness_common.run import run_dir_for
-from harness_common.verdict import RunVerdict, write_verdict
-from e2e_harness.core.env import Env, load_env
-from e2e_harness.engine import run_cases
+from harness_common.verdict import RunVerdict
+from e2e_harness.core.config import E2EConfig, Experiment, Service, load_config
+from e2e_harness.engine import run_experiment
+from e2e_harness.reducer import E2EReducer
 from e2e_harness.runner.base import BaseRunner
 from e2e_harness.runner.json_runner import JSONRunner
 from e2e_harness.runner.sse_runner import SSERunner
@@ -35,11 +37,12 @@ def run_files(
     runs_dir: str,
     run_id: str,
     scope: str | None = None,
+    service: Service | None = None,
 ) -> tuple[RunVerdict, Path]:
-    """Load case.yaml file(s) → run every case through ``runner`` → write ``verdict.json``.
+    """Load case.yaml file(s) → execute every Case → write ``verdict.json``.
 
-    The runner is injected so this core is unit-testable with a mock-transport runner; the CLI
-    builds the real one from Env. ``scope`` defaults to the first case set's name. Returns the
+    The protocol runner is injected so this core is unit-testable with a mock transport; the CLI
+    builds the real one from E2EConfig. ``scope`` defaults to the first case set's name. Returns the
     run verdict and the path written.
     """
     cases = []
@@ -61,33 +64,42 @@ def run_files(
     if len(ids) != len(set(ids)):
         raise SystemExit("e2e: duplicate case id across CaseSet input files")
     caseset = casesets[0]
-    rv = run_cases(
-        cases,
-        runner,
-        scope=scope or "e2e",
-        run_id=run_id,
+    experiment = Experiment(
+        name=scope or caseset,
+        service=service or Service(name=scope or caseset),
         caseset=caseset,
     )
-    path = write_verdict(run_dir_for(runs_dir, rv.scope, rv.run_id), rv)
+    run = run_experiment(
+        experiment,
+        cases,
+        runner,
+        run_id=run_id,
+    )
+    rv = run.verdict
+    run_dir = run_dir_for(runs_dir, rv.scope, rv.run_id)
+    artifacts = E2EReducer().reduce(run, run_dir)
+    for artifact in artifacts:
+        run.add_artifact(artifact.name, artifact.path)
+    path = run_dir / artifacts[0].path
     return rv, path
 
 
-def _build_env(config: str | None, base_url: str | None) -> Env:
-    env = load_env(config) if config else Env()
+def _build_config(config_path: str | None, base_url: str | None) -> E2EConfig:
+    config = load_config(config_path) if config_path else E2EConfig()
     if base_url:
-        env.service.base_url = base_url.rstrip("/")
-    if not env.service.base_url:
+        config.service = replace(config.service, base_url=base_url.rstrip("/"))
+    if not config.service.base_url:
         raise SystemExit(
             "e2e: no SUT base_url — pass --base-url or set service.base_url in --config"
         )
-    return env
+    return config
 
 
-def _runner(env: Env, protocol: str) -> BaseRunner:
+def _runner(config: E2EConfig, protocol: str) -> BaseRunner:
     if protocol == "json":
-        return JSONRunner(env)
+        return JSONRunner(config)
     if protocol == "sse":
-        return SSERunner(env)
+        return SSERunner(config)
     raise SystemExit(f"e2e: unknown protocol {protocol!r}")
 
 
@@ -106,13 +118,15 @@ def _summary(rv: RunVerdict, path: Path) -> str:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    runner = _runner(_build_env(args.config, args.base_url), args.protocol)
+    config = _build_config(args.config, args.base_url)
+    runner = _runner(config, args.protocol)
     rv, path = run_files(
         args.cases,
         runner,
         runs_dir=args.runs_dir,
         run_id=args.run_id or make_run_id(),
         scope=args.scope,
+        service=config.service,
     )
     print(_summary(rv, path))
     return 0 if rv.status == "pass" else 1  # CI gate: non-pass → non-zero
@@ -128,7 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("cases", nargs="+", help="case.yaml file(s)")
     run.add_argument("--base-url", help="SUT base url (overrides --config)")
-    run.add_argument("--config", help="config.yaml for Env (base_url / auth / timeout)")
+    run.add_argument("--config", help="e2e config.yaml (base_url / auth / timeout)")
     run.add_argument(
         "--protocol",
         default="json",

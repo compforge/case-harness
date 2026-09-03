@@ -1,6 +1,6 @@
 """Validity lens — how far THIS run's conclusions can be trusted.
 
-Audits the run itself, not the subject: early stops / interrupted in-flight,
+Audits the run itself, not the service: early stops / interrupted in-flight,
 whether the error breaker was even reachable at the observed request rate (a
 breaker that can't accumulate ``min_n`` within the window is decoration), facet
 slices with no contrast (a declared dimension where only one value ever fired),

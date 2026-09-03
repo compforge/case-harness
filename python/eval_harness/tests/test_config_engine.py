@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+from harness_common import Experiment as BaseExperiment
+from harness_common import ExperimentRun
 
 import eval_harness
 from eval_harness.config import _load_evalset, load_experiment
@@ -22,7 +24,7 @@ SHARED_CASESET = (
 
 
 class _Prov:
-    async def prepare(self, key, target, evalset):
+    async def prepare(self, key, service, evalset):
         return f"nb-{key[:6]}"
 
     async def clean(self, key, subject_id):
@@ -32,7 +34,7 @@ class _Prov:
 class _EchoSolver(Solver):
     """Echo ground_truth for answer cases; emit a refusal for refuse cases."""
 
-    async def solve(self, row, target, subject_id):
+    async def solve(self, row, service, subject_id):
         if row.expected_behavior == "refuse":
             resp = "无法从文档中找到相关信息"
         else:
@@ -47,6 +49,7 @@ class _EchoSolver(Solver):
 
 def test_load_experiment_resolves_cases_and_facets():
     exp = load_experiment(SMOKE)
+    assert isinstance(exp, BaseExperiment)
     assert exp.name == "smoke"
     assert exp.evalsets[0].caseset == "smoke"
     assert [c.id for c in exp.evalsets[0].cases] == ["f1", "f2", "r1"]
@@ -86,6 +89,11 @@ async def test_run_experiment_end_to_end(tmp_path):
         config_path=SMOKE,
     )
     assert ws.is_complete()
+    assert isinstance(ws, ExperimentRun)
+    assert ws.artifact_paths() == {
+        "worksheet": "worksheet.jsonl",
+        "results": "results.csv",
+    }
     # answer cases exact-match 1.0; refuse case keyword_refusal 1.0
     assert ws.rows[("model-alpha", "smoke", "f1")].scores["exact_match"].result.score == 1.0
     assert ws.rows[("model-alpha", "smoke", "r1")].scores["keyword_refusal"].result.score == 1.0
@@ -110,13 +118,13 @@ async def test_run_experiment_end_to_end(tmp_path):
 def test_single_env_writes_flat_report_md(tmp_path):
     from eval_harness.engine import write_reports
     from eval_harness.model.evalset import EvalSet
-    from eval_harness.model.experiment import Experiment, Target
+    from eval_harness.model.experiment import Experiment, Service
     from eval_harness.tests.eval_cases import make_eval_case
     from eval_harness.worksheet.worksheet import Worksheet
 
     exp = Experiment(
         name="solo",
-        target=Target(name="chat"),
+        service=Service(name="chat"),
         evalsets=[EvalSet(caseset="c", cases=[make_eval_case(id="q1", query="q")])],
         metrics=[],
     )
@@ -135,7 +143,7 @@ async def test_resume_via_run_experiment(tmp_path):
     class _Boom(Solver):
         calls = 0
 
-        async def solve(self, row, target, subject_id):
+        async def solve(self, row, service, subject_id):
             type(self).calls += 1
             raise RuntimeError("down")
 

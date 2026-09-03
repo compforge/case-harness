@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
-from perf_harness.model import K8sRef
+from perf_harness.model import Service
 from perf_harness.observe.base import Probe
 
 
@@ -18,8 +18,7 @@ from perf_harness.observe.base import Probe
 class ProbeConfig:
     """Normalized context passed to a registered probe factory."""
 
-    service: str
-    k8s: K8sRef | None = None
+    service: Service
     per_pod: bool = False
     options: Mapping[str, object] = field(default_factory=dict)
 

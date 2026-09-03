@@ -1,8 +1,8 @@
 import type { Case } from "@compforge/spec-case/model";
-import type { Arm, Outcome, Subject, Verdict } from "./model";
+import type { Arm, Outcome, Service, Verdict } from "./model";
 
 export interface TrialContext {
-  subject: Subject;
+  service: Service;
   arm: Arm;
   run_id: string;
   signal: AbortSignal;

@@ -71,6 +71,7 @@ def _build(ws: Worksheet, weights: dict[str, float]) -> _v.RunVerdict:
             "worksheet": "worksheet.jsonl",
             "report": "report.md",
         },
+        created_at=ws.created_at or None,
     )
 
 

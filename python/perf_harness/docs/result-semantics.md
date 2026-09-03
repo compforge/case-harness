@@ -27,7 +27,7 @@ Window 表达。这样资源指标和请求指标能在同一时间边界上比�
 3. Engine 在 warmup、Stage、提前停止和 cooldown 的实际边界上建立 Window：
    `measurement` 与各 `ramp` / `hold` 可重叠，cooldown 独立。
 4. reducer 对每个 Window 同时归约 Outcome 和 Probe series，写入 `TrialRecord.windows`。
-5. `MetricStore.query(trial, ref, window)` 统一读取；run.json schema 3 保存 Arm、Window 与归约结果，
+5. `MetricStore.query(trial, ref, window)` 统一读取；run.json schema 4 保存 Arm、Window 与归约结果，
    `load_run()` 可离线重放报告和 SLO。
 
 ## 关键设计

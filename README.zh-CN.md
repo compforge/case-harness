@@ -38,10 +38,37 @@ Dataset + Detectors / Evaluators / Measurers / optional Policy
         measure  → Measurement
     → Worksheet（Unit + Finding + Evaluation + Measurement）
     → Metric / Verdict / Report（JSON / HTML）
+
+Experiment
+    → ExperimentRun
+        → Execution × N（例如 E2E CaseRun / perf Trial）
+            → OperationRun × N
+                → Outcome
+    → Reducer.reduce（只读已记录事实）
+    → Artifact × N
+        → Verdict
+        → Report
 ```
 
 | 概念 | 含义 |
 |---|---|
+| **Forge** | 托管代码 Repository 的系统，例如 GitHub、GitLab 或企业内部代码平台。 |
+| **Repository** | 由 Forge 和路径共同标识的代码仓；一个 Repository 可以包含多个 Component。 |
+| **Product** | 由多个 Component 组成的业务产品；Product 与 Component 的多对多关系由 registry 维护。 |
+| **Component** | Repository 中可独立构建或发布的稳定组件；不产生运行 workload 的 Component 可以没有 Service。 |
+| **Environment** | 标识运行证据产生位置的具名部署和运行环境。 |
+| **Service** | Component 在某个 Environment 中具名的运行体现。 |
+| **Operation** | Service 对外提供的一项具名能力。 |
+| **HttpOperation** | 通过 HTTP method 和 path 暴露的 Operation；base URL 仍属于 Service。 |
+| **Deployment** | 把 Component 发布到 Environment、从而创建或更新 Service 的一次部署记录。 |
+| **Deployer** | 由 Helm、Docker 等具体机制实现的部署端口。 |
+| **Experiment** | 一份具名、可复现的验证意图；各 Harness 子类增加自己的 Case、Arm、Workload、Metric 或 Policy。 |
+| **ExperimentRun** | Experiment 的一次真实执行，以 `run_id` 和创建时间标识；领域模型可以简称为 `Run`。 |
+| **Execution** | ExperimentRun 内由领域定义的一组工作；E2E 将其具体化为 CaseRun，perf 将其具体化为 Trial。 |
+| **OperationRun** | 对某个 Service 的 Operation 的一次执行，拥有该次调用产生的原始 Outcome。 |
+| **Outcome** | OperationRun 产生的原始领域证据；HTTP、SSE、perf 等协议字段留在领域子类。 |
+| **Reducer** | 把 ExperimentRun 中已记录事实投影为 Artifact 的领域组件；不得再次调用被测 Service。 |
+| **Artifact** | ExperimentRun 的具名、可持久化产物；具体内容和 schema 归领域所有，公共层只记录逻辑名称与相对路径。 |
 | **Case** | 由 `case_id` 标识的稳定、可复用测试输入与判定数据；canonical 格式由 [spec-case](https://github.com/compforge/spec-case) 持有。 |
 | **Observation** | Case 执行后实际发生的事实，例如 outcome、response、性能采样、trace 或 trajectory，并保留来源身份。 |
 | **Unit** | Harness 声明的评估单元，数据来源是 Case 与一个或多个 Observation；Worksheet 一行一个 Unit。 |
@@ -52,8 +79,7 @@ Dataset + Detectors / Evaluators / Measurers / optional Policy
 | **Evaluation** | Judge 或 Evaluator 根据契约对 Unit 作出的质量判断，例如 verdict、score 和 explanation。 |
 | **Measurement** | 从 Unit 提取的 token、耗时、调用量和资源用量等事实，不携带质量 verdict。 |
 | **Worksheet** | 一次 EvaluationRun 基于 Dataset 的行式结果，为每个 Unit 追加 Finding、Evaluation 与 Measurement cell。 |
-| **Run** | 一次真实执行的生命周期和产物边界，携带环境与对齐身份。 |
-| **Report** | Worksheet 面向机器的 JSON 或面向人的 HTML 投影。 |
+| **Report** | 从一个或多个 Artifact 派生的面向人渲染，不会重新执行 Experiment。 |
 | **Verdict** | 人、CI 和 Agent 开发闭环共同消费的机器可读结论。 |
 
 同一 Case 可以从多个角度观察。一次执行已经产生 response、性能采样、trace 或 trajectory 时，应将这些 Observation 固定为可复用 Dataset；选择不同 Detector、Evaluator、Measurer 或 Policy 即可生成新的 EvaluationRun、Worksheet 和报告，不重复执行系统。

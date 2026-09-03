@@ -1,8 +1,10 @@
 service:
   name: widget-server
+  component:
+    repository: { forge: github, path: example/widget }
+    name: widget-server
+  environment: { name: local }
   base_url: ${WIDGET_BASE_URL:-http://localhost:8080}
-
-auth:
   headers:
     Authorization: Bearer ${WIDGET_TOKEN}
 

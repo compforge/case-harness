@@ -1,5 +1,5 @@
 from eval_harness.model.evalset import EvalSet
-from eval_harness.model.experiment import Arm, Experiment, Target
+from eval_harness.model.experiment import Arm, Experiment, Service
 from eval_harness.model.sample import MetricResult
 from eval_harness.tests.eval_cases import make_eval_case
 from eval_harness.worksheet.checkpoint import from_jsonl, to_jsonl
@@ -9,7 +9,7 @@ from eval_harness.worksheet.worksheet import CellState, Worksheet
 def _exp():
     return Experiment(
         name="exp",
-        target=Target(name="chat", config={"tenant_id": "t1"}),
+        service=Service(name="chat", config={"tenant_id": "t1"}),
         evalsets=[
             EvalSet(
                 caseset="rag",
@@ -50,7 +50,7 @@ def test_to_sample_carries_evidence_sources():
     # gold evidence flows case → row → Sample so retrieval-recall metrics can read it
     exp = Experiment(
         name="exp",
-        target=Target(name="chat", config={"tenant_id": "t1"}),
+        service=Service(name="chat", config={"tenant_id": "t1"}),
         evalsets=[
             EvalSet(
                 caseset="rag",
@@ -99,6 +99,7 @@ def test_mutation_and_completion():
 
 def test_checkpoint_roundtrip(tmp_path):
     ws = Worksheet.build(_exp())
+    ws.add_artifact("worksheet", "worksheet.jsonl")
     p0 = next(iter(ws.provisions.values()))
     ws.set_provision_ok(p0.key, subject_id="nb-1")
     row = ws.rows[("model-alpha", "rag", "q1")]
@@ -117,6 +118,8 @@ def test_checkpoint_roundtrip(tmp_path):
 
     assert ws2.experiment == ws.experiment
     assert ws2.experiment_hash == ws.experiment_hash
+    assert ws2.created_at == ws.created_at
+    assert ws2.artifact_paths() == {"worksheet": "worksheet.jsonl"}
     assert len(ws2.rows) == 4
     r2 = ws2.rows[("model-alpha", "rag", "q1")]
     assert r2.solve.state is CellState.OK
@@ -143,7 +146,7 @@ def test_candidate_sources_flows_case_to_row_sample_and_checkpoint(tmp_path):
 
     exp = Experiment(
         name="exp",
-        target=Target(name="chat", config={"tenant_id": "t1"}),
+        service=Service(name="chat", config={"tenant_id": "t1"}),
         evalsets=[
             EvalSet(
                 caseset="rag",

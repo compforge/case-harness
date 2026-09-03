@@ -1,8 +1,8 @@
-"""Orchestration spec: ``Target`` (base SUT config), ``Arm`` (comparison arm),
+"""Orchestration spec: ``Service`` (base SUT config), ``Arm`` (comparison arm),
 ``Experiment`` (the whole thing).
 
 An **Arm** is the unit that varies across the comparison ("变量"): it is the
-base ``target`` config patched by ``overrides``, and it spans two layers —
+base ``service`` config patched by ``overrides``, and it spans two layers —
 
 - **heavy** (provisioned): the provisioned resource + ingested sources a solve queries
   against. Expensive, has a ``prepare()`` / ``clean()`` lifecycle (impl in
@@ -23,6 +23,8 @@ import itertools
 import json
 from typing import Any
 
+from harness_common import Component, Forge, KubernetesEnvironment, Repository
+from harness_common import Experiment as BaseExperiment
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from spec_case.model import Case
 
@@ -55,7 +57,7 @@ class LLMSpec(BaseModel):
     eval_harness only **carries + resolves** this (secrets via ``${ENV}``
     interpolation in the config loader); a consumer's Solver maps it to its SUT's
     per-request model config (e.g. the ``llm`` block), and the SUT
-    decides whether to honor it. Lives on ``Target`` so Arm overrides patch it
+    decides whether to honor it. Lives on ``Service`` so Arm overrides patch it
     (``llm.model`` / ``llm.temperature`` ...); unless an experiment lists it in
     ``heavy_fields`` it is light, so swapping model shares the prepared resource.
     """
@@ -70,20 +72,28 @@ class LLMSpec(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict)  # consumer-specific passthrough
 
 
-class Target(BaseModel):
-    """Base config of the system under test; all Arms derive from it (Arm = target ⊕ overrides).
+class Service(BaseModel):
+    """Base config of the system under test; all Arms derive from it (Arm = service ⊕ overrides).
 
-    SUT-agnostic — the framework only knows three things: ``name`` (a free-form variant
-    label), an open ``config`` bag (the consumer's connection/request shape — host, ids,
-    request params, whatever its Provisioner/Solver read), and ``llm`` (the one typed,
-    common comparison dimension). Dotted overrides patch any path (``config.host.base_url``,
-    ``llm.model``) without schema churn. Which ``config`` paths are *heavy* (change ⇒
-    re-provision) is declared per experiment via ``Experiment.heavy_fields``, not hardcoded.
+    ``component`` and ``environment`` carry the shared runtime identity. The open ``config``
+    bag remains the consumer's request shape (host, ids, and service-specific parameters),
+    while ``llm`` is the one typed comparison dimension. Dotted overrides patch either
+    without schema churn. Which paths are *heavy* (change ⇒ re-provision) is declared per
+    experiment via ``Experiment.heavy_fields``, not hardcoded.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = ""
+    component: Component = Field(
+        default_factory=lambda: Component(
+            repository=Repository(forge=Forge(name=""), path=""),
+            name="",
+        )
+    )
+    environment: KubernetesEnvironment = Field(
+        default_factory=lambda: KubernetesEnvironment(name="")
+    )
     config: dict[str, Any] = Field(default_factory=dict)
     llm: LLMSpec | None = None
 
@@ -94,21 +104,21 @@ class Arm(BaseModel):
     id: str
     overrides: dict[str, Any] = Field(default_factory=dict)
 
-    def resolve(self, target: Target) -> Target:
-        """Apply overrides onto the base target → the concrete config for this Arm."""
-        data = target.model_dump()
+    def resolve(self, service: Service) -> Service:
+        """Apply overrides onto the base service → the concrete config for this Arm."""
+        data = service.model_dump()
         for dotted, val in self.overrides.items():
             _deep_set(data, dotted.split("."), val)
-        return Target.model_validate(data)
+        return Service.model_validate(data)
 
-    def key(self, corpus: str, target: Target, heavy_fields: list[str]) -> str:
+    def key(self, corpus: str, service: Service, heavy_fields: list[str]) -> str:
         """Reuse identity of this Arm's heavy (provisioned) layer.
 
         Hash of (corpus + the heavy-affecting resolved fields, by dotted path). Two Arms
         with the same key share one provisioned resource — so a light-only difference
         (e.g. ``llm.model``) reuses it; an empty ``heavy_fields`` ⇒ corpus alone is the key.
         """
-        dump = self.resolve(target).model_dump()
+        dump = self.resolve(service).model_dump()
         heavy = {p: _deep_get(dump, p.split(".")) for p in heavy_fields}
         blob = json.dumps({"corpus": corpus, "heavy": heavy}, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
@@ -131,7 +141,7 @@ def expand_matrix(matrix: dict[str, list[Any]]) -> list[Arm]:
     return arms
 
 
-class Experiment(BaseModel):
+class Experiment(BaseModel, BaseExperiment):
     model_config = ConfigDict(extra="forbid")
 
     name: str
@@ -139,7 +149,7 @@ class Experiment(BaseModel):
     # CLI output. Cosmetic only — deliberately excluded from experiment_hash, so editing it
     # never invalidates a resumable checkpoint.
     description: str = ""
-    target: Target
+    service: Service
     # An experiment spans one or more CaseSets (each becomes one provisioned corpus): one
     # experiment, one worksheet, one report, with corpus as Eval's report dimension.
     evalsets: list[EvalSet] = Field(min_length=1)
@@ -147,7 +157,7 @@ class Experiment(BaseModel):
     matrix: dict[str, list[Any]] = Field(default_factory=dict)
     metrics: list[str] = Field(default_factory=list)
     weights: dict[str, float] = Field(default_factory=dict)
-    # dotted target paths whose change re-provisions (e.g. "config.tenant_id"); [] ⇒ corpus
+    # dotted service paths whose change re-provisions (e.g. "config.tenant_id"); [] ⇒ corpus
     # alone keys provisioning, so all arms share one resource per corpus.
     heavy_fields: list[str] = Field(default_factory=list)
 

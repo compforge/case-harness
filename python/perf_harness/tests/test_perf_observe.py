@@ -1,4 +1,4 @@
-"""observe: — the one key for per-service resource observation (Subject + downstream).
+"""observe: — the one key for per-service resource observation (Service + downstream).
 
 client (load-gen inflight/sent) is always recorded; there is no top-level probes:.
 """
@@ -11,14 +11,14 @@ import pytest
 from perf_harness.config import load_experiment
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.drive.workload import Workload
-from perf_harness.engine import Engine, Experiment, Subject
+from perf_harness.engine import Engine, Experiment
 from perf_harness.metric import (
     GaugeSummary,
     series_id,
     split_ref,
     split_series,
 )
-from perf_harness.model import K8sRef, Outcome, ResourceProfile, Target
+from perf_harness.model import Environment, Outcome, ResourceProfile, Service
 from perf_harness.observe import (
     FamilySpec,
     KubectlTopProbe,
@@ -29,22 +29,32 @@ from perf_harness.observe import (
     ResourceLimitsProbe,
 )
 
-_SUBJECT = (
+_SERVICE = (
     "name: x\n"
-    "subject: { name: chat, base_url: 'http://x:8001',\n"
-    "  k8s: { kubeconfig: ~/.kube/d, namespace: ns, app_label: app=chat } }\n"
+    "service: { name: chat, base_url: 'http://x:8001',\n"
+    "  environment: { name: dev, kubeconfig: ~/.kube/d },\n"
+    "  namespace: ns, k8s_selector: app=chat }\n"
     "resources: [ {} ]\n"
     "workload: { name: mock }\n"
     "load: { model: closed, levels: [1], ramp_s: 0, steady_s: 0.2 }\n"
 )
 
 
+def _k8s_service(name: str, selector: str) -> Service:
+    return Service(
+        name=name,
+        environment=Environment(name="test", kubeconfig="/kc"),
+        namespace="ns",
+        k8s_selector=selector,
+    )
+
+
 def test_k8s_probe_binds_to_service_as_a_label():
-    ref = K8sRef(kubeconfig="/kc", namespace="ns", app_label="app=planit")
-    p = KubectlTopProbe(k8s=ref, service="planit")
+    service = _k8s_service("planit", "app=planit")
+    p = KubectlTopProbe(target_service=service)
     assert p.name == "top.planit"  # unique store id (one per observed target)
     assert p.family == "top" and p.labels == {"service": "planit"}  # service is a LABEL
-    assert p._k8s is ref
+    assert p._target_service is service
     descs = p.describe()
     # describe() returns the FAMILY (label-free); the concrete series id is built from
     # family + the probe's labels (service lives on the series, not the family)
@@ -54,22 +64,22 @@ def test_k8s_probe_binds_to_service_as_a_label():
         'top.mem_mi{service="planit"}',
     }
     assert all(d.side == "resource" and d.source == "k8s" for d in descs)
-    # unbound probe keeps the bare name and falls back to the Subject's k8s
+    # unbound probe keeps the bare name and falls back to the Service's k8s
     bare = KubectlTopProbe()
-    assert bare.name == "top" and bare._k8s is None
+    assert bare.name == "top" and bare._target_service is None
 
 
 def test_observe_is_the_one_shape_with_client_always_on(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n"
+        _SERVICE + "observe:\n"
         "  - name: chat\n"
         "    probes:\n"
         "      - { name: prometheus, queries: [ { name: requests, promql: 'sum(requests_total)', kind: counter } ] }\n"
         "      - top\n"
         "      - rss\n"
-        "  - { name: planit, k8s: { kubeconfig: ~/.kube/d, namespace: ns, app_label: app=planit }, probes: [top, rss] }\n"
-        "  - { name: executor, k8s: { kubeconfig: ~/.kube/d, namespace: ns, app_label: app=exec }, probes: [top] }\n"
+        "  - { name: planit, namespace: ns, k8s_selector: app=planit, probes: [top, rss] }\n"
+        "  - { name: executor, namespace: ns, k8s_selector: app=exec, probes: [top] }\n"
     )
     exp, _ = load_experiment(str(cfg))
     by_name = {p.name: p for p in exp.probes}
@@ -83,13 +93,13 @@ def test_observe_is_the_one_shape_with_client_always_on(tmp_path):
         "rss.planit",
         "top.executor",
     ]
-    assert by_name["top.chat"]._k8s is None  # Subject entry → falls back at sample time
-    assert by_name["top.planit"]._k8s.app_label == "app=planit"
+    assert by_name["top.chat"]._target_service is exp.service
+    assert by_name["top.planit"]._target_service.k8s_selector == "app=planit"
 
 
 def test_probes_key_is_removed(tmp_path):
     cfg = tmp_path / "c.yaml"
-    cfg.write_text(_SUBJECT + "probes: [client, top]\n")
+    cfg.write_text(_SERVICE + "probes: [client, top]\n")
     try:
         load_experiment(str(cfg))
     except ValueError as e:
@@ -101,9 +111,10 @@ def test_probes_key_is_removed(tmp_path):
 def test_observe_downstream_prometheus_requires_url(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n"
+        _SERVICE + "observe:\n"
         "  - name: planit\n"
-        "    k8s: { kubeconfig: ~/.kube/d, namespace: ns, app_label: app=planit }\n"
+        "    namespace: ns\n"
+        "    k8s_selector: app=planit\n"
         "    probes:\n"
         "      - { name: prometheus, queries: [ { name: requests, promql: 'sum(requests_total)' } ] }\n"
     )
@@ -118,8 +129,8 @@ def test_observe_downstream_prometheus_requires_url(tmp_path):
 def test_observe_rejects_unknown_probe(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n"
-        "  - { name: planit, k8s: { kubeconfig: ~/.kube/d, namespace: ns, app_label: app=planit }, probes: [client] }\n"
+        _SERVICE + "observe:\n"
+        "  - { name: planit, namespace: ns, k8s_selector: app=planit, probes: [client] }\n"
     )
     try:
         load_experiment(str(cfg))
@@ -134,7 +145,7 @@ def test_slo_service_label_only_on_time_sampled(tmp_path):
     request slice. The family-keyed registry no longer fail-fasts these for free, so
     _validate_slo pins the rule down explicitly (else they'd silently go missing or
     crash the resolver)."""
-    base = _SUBJECT + "observe:\n  - { name: chat, probes: [top] }\n"
+    base = _SERVICE + "observe:\n  - { name: chat, probes: [top] }\n"
 
     def cfg(metric: str) -> str:
         c = tmp_path / "c.yaml"
@@ -164,7 +175,8 @@ def test_resource_limits_probe_describes_request_and_limit_gauges():
     # request/limit are just metrics whose series never varies — gauges, k8s-sourced,
     # and (crucially) the SAME units as `top`, so the report overlays them as flat
     # reference lines on the cpu/mem usage charts with no special rendering.
-    p = ResourceLimitsProbe(service="chat")
+    service = _k8s_service("chat", "app=chat")
+    p = ResourceLimitsProbe(target_service=service)
     assert p.family == "limits"
     descs = {d.name: d for d in p.describe()}
     assert set(descs) == {
@@ -174,21 +186,21 @@ def test_resource_limits_probe_describes_request_and_limit_gauges():
         "limits.mem_limit",
     }
     assert all(d.value_kind == "gauge" and d.source == "k8s" for d in descs.values())
-    top = KubectlTopProbe(service="chat").families  # {cpu_m: millicores, mem_mi: MiB}
+    top = KubectlTopProbe(target_service=service).families
     assert descs["limits.cpu_limit"].unit == top["cpu_m"].unit  # millicores → same cpu chart
     assert descs["limits.mem_limit"].unit == top["mem_mi"].unit  # MiB → same mem chart
 
 
 def test_observe_wires_limits_probe(tmp_path):
     cfg = tmp_path / "c.yaml"
-    cfg.write_text(_SUBJECT + "observe:\n  - { name: chat, probes: [top, limits] }\n")
+    cfg.write_text(_SERVICE + "observe:\n  - { name: chat, probes: [top, limits] }\n")
     exp, _ = load_experiment(str(cfg))
     assert "limits.chat" in [p.name for p in exp.probes]  # service-bound limits probe wired
 
 
 def test_observe_wires_pod_count_probe(tmp_path):
     cfg = tmp_path / "c.yaml"
-    cfg.write_text(_SUBJECT + "observe:\n  - { name: chat, probes: [pods] }\n")
+    cfg.write_text(_SERVICE + "observe:\n  - { name: chat, probes: [pods] }\n")
     exp, _ = load_experiment(str(cfg))
     probe = next(p for p in exp.probes if isinstance(p, PodCountProbe))
     assert probe.name == "pods.chat"
@@ -251,9 +263,9 @@ async def test_top_probe_per_pod_emits_labeled_keys(monkeypatch):
         return "chat-abc 850m 1234Mi\nchat-def 150m 766Mi\n"
 
     monkeypatch.setattr("perf_harness.observe.k8s.run_capture", fake_run)
-    ref = K8sRef(kubeconfig="/kc", namespace="ns", app_label="app=chat")
-    p = KubectlTopProbe(k8s=ref, service="chat", per_pod=True)
-    out = await p.sample(SimpleNamespace(target=SimpleNamespace(k8s=None)))
+    service = _k8s_service("chat", "app=chat")
+    p = KubectlTopProbe(target_service=service, per_pod=True)
+    out = await p.sample(SimpleNamespace(service=Service()))
     # one {pod}-labeled key per replica — NOT the summed cpu_m/mem_mi
     assert out == {
         'cpu_m{pod="chat-abc"}': 850.0,
@@ -283,15 +295,15 @@ async def test_limits_probe_per_pod_and_summed_share_one_source(monkeypatch):
         return j
 
     monkeypatch.setattr("perf_harness.observe.k8s.run_capture", fake_run)
-    ref = K8sRef(kubeconfig="/kc", namespace="ns", app_label="app=chat")
-    ctx = SimpleNamespace(target=SimpleNamespace(k8s=None))
-    per_pod = await ResourceLimitsProbe(k8s=ref, service="chat", per_pod=True).sample(ctx)
+    service = _k8s_service("chat", "app=chat")
+    ctx = SimpleNamespace(service=Service())
+    per_pod = await ResourceLimitsProbe(target_service=service, per_pod=True).sample(ctx)
     assert per_pod == {
         'cpu_limit{pod="chat-abc"}': 1000.0,
         'cpu_limit{pod="chat-def"}': 2000.0,
     }
     # summed = sum of the same per-pod parse (the service-level total)
-    summed = await ResourceLimitsProbe(k8s=ref, service="chat").sample(ctx)
+    summed = await ResourceLimitsProbe(target_service=service).sample(ctx)
     assert summed == {"cpu_limit": 3000.0}
 
 
@@ -329,9 +341,9 @@ async def test_limits_probe_refreshes_dynamic_pod_set(monkeypatch):
         return next(responses)
 
     monkeypatch.setattr("perf_harness.observe.k8s.run_capture", fake_run)
-    ref = K8sRef(kubeconfig="/kc", namespace="ns", app_label="app=chat")
-    probe = ResourceLimitsProbe(k8s=ref, service="chat")
-    ctx = SimpleNamespace(target=SimpleNamespace(k8s=None))
+    service = _k8s_service("chat", "app=chat")
+    probe = ResourceLimitsProbe(target_service=service)
+    ctx = SimpleNamespace(service=Service())
     assert await probe.sample(ctx) == {"cpu_limit": 1000.0}
     assert await probe.sample(ctx) == {"cpu_limit": 2000.0}
 
@@ -360,7 +372,7 @@ class _NoopWL(Workload):
 
 async def test_engine_fans_pod_labeled_keys_into_per_pod_series():
     exp = Experiment(
-        subject=Subject("m", Target(base_url="http://127.0.0.1:0")),
+        service=Service("m", base_url="http://127.0.0.1:0"),
         workload=_NoopWL(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],
@@ -388,7 +400,7 @@ def test_slo_service_gate_fails_fast_under_per_pod(tmp_path):
     # gate would silently stop gating). That must be a config-time error, not a skip.
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n  - { name: chat, probes: [top], per_pod: true }\n"
+        _SERVICE + "observe:\n  - { name: chat, probes: [top], per_pod: true }\n"
         "slo: [ { metric: 'top.cpu_m{service=\"chat\"}.peak', lt: 100 } ]\n"
     )
     with pytest.raises(ValueError, match="per_pod"):
@@ -398,7 +410,7 @@ def test_slo_service_gate_fails_fast_under_per_pod(tmp_path):
 def test_observe_per_pod_wires_the_flag(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n  - { name: chat, probes: [top, limits], per_pod: true }\n"
+        _SERVICE + "observe:\n  - { name: chat, probes: [top, limits], per_pod: true }\n"
     )
     exp, _ = load_experiment(str(cfg))
     by_name = {p.name: p for p in exp.probes}
@@ -441,7 +453,7 @@ async def test_prometheus_probe_evaluates_promql_queries():
         "prometheus.sse_errors",
     }
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        ctx = SimpleNamespace(target=Target(base_url="http://x"), probe_client=client, t0=1.0)
+        ctx = SimpleNamespace(service=Service(base_url="http://x"), probe_client=client, t0=1.0)
         out = await p.sample(ctx)
     assert out == {"sse_streams": 100.0, "sse_errors": 10.0}
 
@@ -470,7 +482,7 @@ async def test_prometheus_probe_emits_declared_vector_labels():
         ],
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        ctx = SimpleNamespace(target=Target(base_url="http://x"), probe_client=client, t0=1.0)
+        ctx = SimpleNamespace(service=Service(base_url="http://x"), probe_client=client, t0=1.0)
         out = await p.sample(ctx)
     assert out == {
         'ctl_requests{path="/v1/bots"}': 42.0,
@@ -496,9 +508,9 @@ async def test_downstream_prometheus_does_not_receive_subject_credentials():
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         ctx = SimpleNamespace(
-            target=Target(
+            service=Service(
                 base_url="http://example",
-                headers={"Authorization": "subject-secret"},
+                headers={"Authorization": "service-secret"},
             ),
             probe_client=client,
             t0=1.0,
@@ -511,7 +523,7 @@ async def test_downstream_prometheus_does_not_receive_subject_credentials():
 def test_observe_prometheus_wires_queries_and_slo_labels(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n"
+        _SERVICE + "observe:\n"
         "  - name: chat\n"
         "    probes:\n"
         "      - name: prometheus\n"
@@ -534,7 +546,7 @@ def test_observe_prometheus_wires_queries_and_slo_labels(tmp_path):
 def test_observe_rejects_removed_scrape_surface(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n"
+        _SERVICE + "observe:\n"
         "  - name: chat\n"
         "    probes: [top]\n"
         "    scrape: [ { from: x_total } ]\n"
@@ -555,7 +567,7 @@ async def test_prometheus_http_error_raises_not_empty():
         queries=[PrometheusQuery(name="requests", promql="sum(requests_total)")],
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        ctx = SimpleNamespace(target=Target(base_url="http://x"), probe_client=client, t0=1.0)
+        ctx = SimpleNamespace(service=Service(base_url="http://x"), probe_client=client, t0=1.0)
         with pytest.raises(PrombedError, match="500"):
             await p.sample(ctx)
 
@@ -582,7 +594,7 @@ async def test_probe_errors_flow_to_trial_and_store():
     from perf_harness.metric.store import MetricStore
 
     exp = Experiment(
-        subject=Subject("m", Target(base_url="http://127.0.0.1:0")),
+        service=Service("m", base_url="http://127.0.0.1:0"),
         workload=_NoopWL(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.2))],
@@ -600,7 +612,7 @@ async def test_probe_errors_flow_to_trial_and_store():
 def test_prometheus_query_replaces_derived_metrics(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n"
+        _SERVICE + "observe:\n"
         "  - name: chat\n"
         "    probes:\n"
         "      - name: prometheus\n"
@@ -621,9 +633,10 @@ def test_prometheus_query_replaces_derived_metrics(tmp_path):
 def test_observe_prometheus_downstream_url_config(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n"
+        _SERVICE + "observe:\n"
         "  - name: worker\n"
-        "    k8s: { kubeconfig: ~/.kube/d, namespace: ns, app_label: app=worker }\n"
+        "    namespace: ns\n"
+        "    k8s_selector: app=worker\n"
         "    probes:\n"
         "      - name: prometheus\n"
         "        url: http://worker:8000/metrics\n"
@@ -636,7 +649,7 @@ def test_observe_prometheus_downstream_url_config(tmp_path):
 
 def test_top_level_derived_is_removed(tmp_path):
     cfg = tmp_path / "c.yaml"
-    cfg.write_text(_SUBJECT + "derived: [ { as: bad, ratio: [nope, also_nope] } ]\n")
+    cfg.write_text(_SERVICE + "derived: [ { as: bad, ratio: [nope, also_nope] } ]\n")
     with pytest.raises(ValueError, match="removed.*PromQL"):
         load_experiment(str(cfg))
 
@@ -645,7 +658,7 @@ async def test_up_series_synthesized_per_probe():
     # the Prometheus `up` analogue: health is a SERIES (when did it break), not just
     # the trial census. Healthy probe → all 1s; flaky probe → 0s and mean < 1.
     exp = Experiment(
-        subject=Subject("m", Target(base_url="http://127.0.0.1:0")),
+        service=Service("m", base_url="http://127.0.0.1:0"),
         workload=_NoopWL(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.2))],
@@ -664,7 +677,7 @@ async def test_up_series_synthesized_per_probe():
 def test_prometheus_query_may_not_shadow_up(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n"
+        _SERVICE + "observe:\n"
         "  - name: chat\n"
         "    probes:\n"
         "      - name: prometheus\n"
@@ -678,7 +691,7 @@ def test_up_is_slo_addressable(tmp_path):
     # observation availability can gate — explicitly, like everything observational
     cfg = tmp_path / "c.yaml"
     cfg.write_text(
-        _SUBJECT + "observe:\n  - { name: chat, probes: [top] }\n"
+        _SERVICE + "observe:\n  - { name: chat, probes: [top] }\n"
         "slo: [ { metric: 'top.up{service=\"chat\"}.mean', gte: 0.99 } ]\n"
     )
     exp, _ = load_experiment(str(cfg))

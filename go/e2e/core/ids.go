@@ -16,7 +16,7 @@ var idUnsafe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 //
 // Conversation, tenant, and user IDs are just different prefixes — quota and
 // isolation cases that must not share state across tests pass a per-test base as
-// the prefix (e.g. a fresh tenant per test) rather than reusing the env default.
+// the prefix (e.g. a fresh tenant per test) rather than reusing the config default.
 func UniqueIDFor(prefix, testName string) string {
 	clean := strings.Trim(idUnsafe.ReplaceAllString(testName, "-"), "-")
 	return fmt.Sprintf("%s%s-%d-%d", prefix, clean, os.Getpid(), seq.Add(1))

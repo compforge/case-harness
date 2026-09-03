@@ -16,7 +16,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from e2e_harness.core.env import Env
+from e2e_harness.core.config import E2EConfig
 from e2e_harness.runner.async_base import AsyncBaseRunner
 from e2e_harness.runner.base import Outcome, Request
 from e2e_harness.runner.headers import build_auth_headers
@@ -31,20 +31,20 @@ class AsyncSSERunner(AsyncBaseRunner):
 
     def __init__(
         self,
-        env: Env,
+        config: E2EConfig,
         *,
         client: httpx.AsyncClient | None = None,
         read_timeout_s: float | None = None,
         on_event: OnEvent | None = None,
     ):
-        self._env = env
+        self._env = config
         read_to = (
             read_timeout_s
             if read_timeout_s is not None
-            else float(env.runtime.http_timeout_s)
+            else float(config.runtime.http_timeout_s)
         )
         self._client = client or httpx.AsyncClient(
-            base_url=env.service.base_url,
+            base_url=config.service.base_url,
             timeout=httpx.Timeout(connect=10.0, read=read_to, write=10.0, pool=10.0),
         )
         self._on_event = on_event

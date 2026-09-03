@@ -14,8 +14,8 @@ import httpx
 import pytest
 
 from harness_common.verdict import CaseVerdict, build_run_verdict
-from e2e_harness.cli import _build_env, _summary, build_parser, run_files
-from e2e_harness.core.env import Env
+from e2e_harness.cli import _build_config, _summary, build_parser, run_files
+from e2e_harness.core.config import E2EConfig
 from e2e_harness.runner.json_runner import JSONRunner
 
 _CASES = Path(__file__).parent.parent / "examples" / "note_cases.yaml"
@@ -34,7 +34,7 @@ def _sut(request: httpx.Request) -> httpx.Response:
 
 def _runner() -> JSONRunner:
     return JSONRunner(
-        Env(),
+        E2EConfig(),
         client=httpx.Client(transport=httpx.MockTransport(_sut), base_url="http://sut"),
     )
 
@@ -66,10 +66,10 @@ def test_run_files_reports_fail_for_a_wrong_contract(tmp_path):
     assert rv.status == "fail"  # SUT returns 201, contract expects 500 → CI gate trips
 
 
-def test_build_env_requires_base_url_and_strips_slash():
+def test_build_config_requires_base_url_and_strips_slash():
     with pytest.raises(SystemExit):
-        _build_env(None, None)  # no config and no --base-url → fail fast
-    assert _build_env(None, "http://x/").service.base_url == "http://x"
+        _build_config(None, None)  # no config and no --base-url → fail fast
+    assert _build_config(None, "http://x/").service.base_url == "http://x"
 
 
 def test_summary_surfaces_failing_cases():

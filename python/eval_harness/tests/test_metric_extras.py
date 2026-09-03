@@ -11,7 +11,7 @@ from eval_harness.llm import ChatResult
 from eval_harness.metric.base import BaseMetric
 from eval_harness.metric.llm_judge import LLMJudge
 from eval_harness.model.evalset import EvalSet
-from eval_harness.model.experiment import Experiment, Target
+from eval_harness.model.experiment import Experiment, Service
 from eval_harness.model.sample import Sample
 from eval_harness.tests.eval_cases import make_eval_case
 
@@ -34,7 +34,7 @@ class _Diag(BaseMetric):
 def _exp(weights=None):
     return Experiment(
         name="e",
-        target=Target(name="chat"),
+        service=Service(name="chat"),
         evalsets=[EvalSet(caseset="c", cases=[make_eval_case(id="q", query="q")])],
         metrics=["correctness", "faith"],
         weights=weights or {},

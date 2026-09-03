@@ -14,15 +14,51 @@ export interface ResourceProfile {
   extra?: Record<string, string>;
 }
 
-export interface Target {
-  base_url?: string;
-  headers?: Record<string, string>;
-  [name: string]: unknown;
+export interface Forge {
+  name: string;
 }
 
-export interface Subject {
+export interface Repository {
+  forge: Forge;
+  path: string;
+}
+
+export interface Product {
   name: string;
-  target: Target;
+}
+
+export interface Component {
+  repository: Repository;
+  name: string;
+}
+
+export interface Environment {
+  name: string;
+}
+
+export interface KubernetesEnvironment extends Environment {
+  kubeconfig: string;
+  context?: string;
+}
+
+export interface Service {
+  name: string;
+  component?: Component;
+  environment?: KubernetesEnvironment;
+  base_url?: string;
+  headers?: Record<string, string>;
+  namespace?: string;
+  k8s_selector?: string;
+  container?: string;
+}
+
+export interface Operation {
+  name: string;
+}
+
+export interface HttpOperation extends Operation {
+  method: string;
+  path: string;
 }
 
 export interface Arm {
@@ -122,7 +158,7 @@ export interface TimedOutcome {
 
 export interface TrialRecord {
   id: string;
-  subject: string;
+  service: string;
   arm: Arm;
   started_at: string;
   finished_at: string;
@@ -136,11 +172,11 @@ export interface TrialRecord {
 }
 
 export interface Run {
-  schema: 3;
+  schema: 4;
   run_id: string;
   experiment: string;
   created_at: string;
-  subject: string;
+  service: string;
   passed: boolean;
   n_trials: number;
   trials: TrialRecord[];

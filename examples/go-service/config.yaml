@@ -1,8 +1,10 @@
 service:
   name: sandbox-server
+  component:
+    repository: { forge: github, path: example/sandbox }
+    name: sandbox-server
+  environment: { name: local }
   base_url: ${EXAMPLE_BASE_URL:-http://localhost:8090}
-
-auth:
   headers:
     Authorization: Bearer ${EXAMPLE_TOKEN}
 

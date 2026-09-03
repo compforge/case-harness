@@ -17,6 +17,23 @@ e2e、eval、perf、trace 和 trajectory 可以拥有不同执行模型，但共
 
 | 概念 | 语义 |
 |---|---|
+| **Forge** | 托管代码 Repository 的系统，例如 GitHub、GitLab 或企业内部代码平台。 |
+| **Repository** | Forge 下的一份代码仓，以 Forge 与仓内路径共同确定；可以包含一个或多个 Component。 |
+| **Product** | 面向业务的产品身份；可以由多个 Component 组成，公共 Component 也可以服务多个 Product，归属关系由 registry 维护。 |
+| **Component** | 代码 Repository 内一个可独立构建或发布的稳定组件；一个 Repository 可以包含一个或多个 Component，不会运行为 Workload 的 Component 不产生 Service。 |
+| **Environment** | 一组部署与运行所共享的命名环境；它识别证据产生在哪里，具体访问方式、凭据和发布策略仍归部署领域。 |
+| **Service** | 一个 Component 在某个 Environment 中具名的运行体现；由 service name、Component 与 Environment 共同确定，不等同于代码 Repository 或具体平台 Workload。 |
+| **Operation** | Service 对外提供的一项具名能力，也是 Case 所绑定的服务能力；不包含特定传输协议的访问细节。 |
+| **HttpOperation** | `Operation` 的 HTTP 子类，以 method 与 path 表达协议契约；base URL 仍属于运行态 Service。 |
+| **Deployment** | 把某个 Component 发布到 Environment、从而创建或更新 Service 的一次部署记录；同一 Service 可以经历多次 Deployment。 |
+| **Deployer** | 执行 Deployment 的协议无关端口；Helm、Docker 等是具体实现。 |
+| **Experiment** | 一份具名、可复现的验证意图；公共层只拥有稳定名称，各 Harness 子类增加 Case、Arm、Workload、Metric 或 Policy 等领域配置。 |
+| **ExperimentRun** | Experiment 的一次真实执行，以 experiment name、`run_id` 和创建时间标识；领域实现可以简称为 `Run`。 |
+| **Execution** | ExperimentRun 内由领域定义的组织单元；E2E 的 CaseRun 与 perf 的 Trial 都是 Execution。公共层不规定调度器或 runner 的调用协议。 |
+| **OperationRun** | 对某个 Service 的 Operation 的一次真实调用；直接拥有这次调用产生的 Outcome。 |
+| **Outcome** | OperationRun 产生的原始领域证据。公共层只统一语义角色，具体字段由领域子类定义。 |
+| **Reducer** | 只读取 ExperimentRun 已记录事实并产出 Artifact 的领域归约器；不得再次调用被测 Service。 |
+| **Artifact** | ExperimentRun 产生的一份具名、可持久化产物；内容和 schema 归领域所有，公共层只记录逻辑名称与 run 目录内相对路径。 |
 | **Case** | 可重用的结构化测试意图，具有稳定 `case_id`；canonical 资产由 spec-case 持有，可被多个 Harness 消费。 |
 | **Observation** | 执行或采集后实际观察到的领域事实；必须保留来源 identity 与 provenance，不包含质量判断。 |
 | **Unit** | Harness 声明的评估单元，也是 Worksheet 一行所代表的基本粒度；其数据来源是对齐后的 Case 与一个或多个 Observation。Unit 拥有自己的稳定 key，唯一确定一行；Observation 尚未产生或失败时，该行可以保留 pending / failed 状态。 |
@@ -27,11 +44,27 @@ e2e、eval、perf、trace 和 trajectory 可以拥有不同执行模型，但共
 | **Evaluation** | Judge / Evaluator 根据契约对 Unit 作出的质量判断，包括状态、verdict、score 和 explanation；使用确定性规则还是 LLM 是实现方式，不改变其语义。 |
 | **Measurement** | 从 Unit 直接提取的 token、耗时、调用量和资源用量等中性事实，不携带质量 verdict。 |
 | **Worksheet** | 一个 EvaluationRun 的行式工作模型：以 Dataset Unit 为行，保存 seed 事实以及本次追加的 Finding、Evaluation、Measurement 和 cell state。它是生成报告和聚合指标的事实输入，不等于某一种物理文件格式。 |
-| **Run** | 一次真实执行的生命周期和产物边界，记录输入版本、环境、输出、证据和对齐 identity。 |
-| **Report** | Worksheet 的下游投影；JSON 面向机器，HTML 面向人，不重新执行或评估源数据。 |
+| **Report** | 一个或多个 Artifact 的面向人渲染，不重新执行 Experiment，也不重新生成源事实。 |
 | **Verdict** | 对一次 Run 的可机器消费判定。人、CI 和 agent 开发循环都通过它判断是否通过、为何失败，以及下一步应读哪些证据。 |
 
-这些名字定义共同语义，不要求不同语言或 Harness 共享同一组公开 class、schema 或 API。
+这些名字定义共同语义。Python Harness 共享 `harness_common` 中的身份基类；不同语言保持惯用 API，
+但遵守相同关系和落盘契约。
+
+### Experiment 执行骨架
+
+```text
+ExperimentRun
+  └─ Execution × N
+       └─ OperationRun × N
+            └─ Outcome
+
+Reducer.reduce(ExperimentRun) → Artifact × N → Report / Verdict
+```
+
+公共层统一的是执行后的事实，不统一执行机制：领域 Engine 可以使用 runner、scheduler、队列或其它方式
+组织 OperationRun。因而 common 不提供 `Driver.run` / `DriverRun`。Outcome 与 Artifact 也不是一一对应：
+一个 Artifact 可以汇总大量 Outcome，同一批 Outcome 也可被多个 Reducer 投影成不同 Artifact。公共 Artifact
+不枚举 Outcome ID；需要精确 provenance 时，由领域使用 Execution identity、selector 或时间窗口表达。
 
 ## 3. 共同数据闭环
 

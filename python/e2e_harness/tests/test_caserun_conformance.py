@@ -7,7 +7,7 @@ import yaml
 from e2e_harness.caserun import (
     Budgets,
     CaseRef,
-    CaseRun,
+    CasePlan,
     Fail,
     Skip,
     run_lifecycle,
@@ -48,7 +48,7 @@ def test_lifecycle_matches_cross_language_conformance() -> None:
         result = run_lifecycle(
             CaseRef("e2e-conformance", item["id"]),
             {},
-            CaseRun(
+            CasePlan(
                 prepare=_step(steps.get("prepare")),
                 execute=_step(steps.get("execute")),
                 judge=_step(steps.get("judge")),

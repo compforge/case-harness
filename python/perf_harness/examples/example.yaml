@@ -7,22 +7,25 @@
 name: example-sizing              # experiment name → runs/<name>/<run_id>/ (runs accumulate)
 # extensions: [my_project.perf]   # imports register_workload/register_probe side effects
 
-subject:                          # 压谁 + 怎么到达；不写 provisioner = 直连已部署服务
+service:                          # 压谁 + 怎么到达
   name: example
+  component:
+    repository: { forge: github, path: example/product }
+    name: api
+  environment: { name: dev, kubeconfig: ~/.kube/config }
   base_url: http://example.default.svc:8000
   headers: {}
-  k8s:                            # enables top/rss/restart/limits/pods probes
-    kubeconfig: ~/.kube/config
-    namespace: default
-    app_label: app.kubernetes.io/name=example
-  # --- 让 harness 自己扫资源档时才配（resources 条目会被真实施加）---
-  # provisioner:
-  #   type: helm
-  #   release: example
-  #   chart_path: ./manifests/example
-  #   base_values: ./manifests/example/values.yaml
+  namespace: default
+  k8s_selector: app.kubernetes.io/name=example  # enables k8s resource probes
 
-resources:                        # 资源档（网格第一轴）；无 provisioner 时仅标注 trial
+# 让 harness 自己扫资源档时才配（resources 条目会被真实施加）；省略即直连已部署服务。
+# deployer:
+#   type: helm
+#   release: example
+#   chart_path: ./manifests/example
+#   base_values: ./manifests/example/values.yaml
+
+resources:                        # 资源档（网格第一轴）；无 deployer 时仅标注 trial
   - { workers: 2, memory: 2Gi }
   - { workers: 4, memory: 2Gi }
 
@@ -54,10 +57,10 @@ load:                             # 负载档（网格第二轴）
   #   - { ramp_to: 10, over_s: 30 }
   #   - { hold: 10, for_s: 120 }
 
-observe:                          # 资源观测：self + 下游同一形状；省 k8s 的条目 = subject
+observe:                          # 资源观测：Service 自身 + 下游 Service
   - name: example
     probes:
-      - name: prometheus          # 默认抓 subject.base_url + /metrics
+      - name: prometheus          # 默认抓 service.base_url + /metrics
         queries:
           - { name: request_rate, promql: "sum(rate(http_requests_total[1m]))", unit: req/s }
           - name: latency_p95_s
@@ -71,9 +74,13 @@ observe:                          # 资源观测：self + 下游同一形状；�
       - restart
       - limits
       - pods
-  # 下游服务显式给 Prometheus URL；其 k8s 资源探针仍可并列。
+  # 下游 Service 继承 Environment，可覆盖；namespace/selector 属于 Service。
   # - name: worker
-  #   k8s: { kubeconfig: ~/.kube/config, namespace: default, app_label: app=worker }
+  #   component:
+  #     repository: { forge: github, path: example/product }
+  #     name: worker
+  #   namespace: default
+  #   k8s_selector: app=worker
   #   probes:
   #     - { name: prometheus, url: "http://worker.default.svc:8000/metrics",
   #         queries: [ { name: tasks, promql: "sum(tasks)" } ] }

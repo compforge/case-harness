@@ -9,23 +9,23 @@ from __future__ import annotations
 
 import pytest
 
-from e2e_harness.core.env import Env
+from e2e_harness.core.config import E2EConfig
 
 
-def require_profile(env: Env, *profiles: str) -> None:
-    """Skip the current test if env.profile is not in the allowed set."""
-    if env.profile not in profiles:
+def require_profile(config: E2EConfig, *profiles: str) -> None:
+    """Skip the current test if config.profile is not in the allowed set."""
+    if config.profile not in profiles:
         pytest.skip(
-            f"profile={env.profile!r} not in {profiles}; "
+            f"profile={config.profile!r} not in {profiles}; "
             f"set E2E_PROFILE={profiles[0]} to run"
         )
 
 
-def require_capability(env: Env, key: str) -> None:
+def require_capability(config: E2EConfig, key: str) -> None:
     """Skip if the server did not report the named capability."""
-    if not env.capabilities.known:
+    if not config.capabilities.known:
         pytest.skip(
             f"capabilities unknown (server /healthz not reachable); cannot confirm {key!r}"
         )
-    if not env.capabilities.data.get(key):
+    if not config.capabilities.data.get(key):
         pytest.skip(f"capability {key!r} not available on this server")

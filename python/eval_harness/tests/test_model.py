@@ -3,7 +3,7 @@ from pydantic import ValidationError
 from spec_case.model import Case
 
 from eval_harness.model.evalset import EvalSet, FacetSchema, FacetSpec, eval_view
-from eval_harness.model.experiment import Arm, Experiment, Target, expand_matrix
+from eval_harness.model.experiment import Arm, Experiment, Service, expand_matrix
 from eval_harness.model.sample import MetricResult
 from eval_harness.tests.eval_cases import make_eval_case
 
@@ -57,7 +57,7 @@ def test_facet_spec_requires_values_or_open():
 
 
 def _target(tenant="t1"):
-    return Target(name="chat", config={"tenant_id": tenant, "host": {"base_url": "http://x"}})
+    return Service(name="chat", config={"tenant_id": tenant, "host": {"base_url": "http://x"}})
 
 
 # which config paths re-provision (the consumer declares these per experiment)
@@ -98,7 +98,7 @@ def test_expand_matrix():
 def _exp(arms=None, matrix=None):
     return Experiment(
         name="exp",
-        target=_target(),
+        service=_target(),
         evalsets=[
             EvalSet(
                 caseset="rag",

@@ -1,21 +1,23 @@
 import json
 
 import yaml
+from harness_common import Experiment as BaseExperiment
+from harness_common import ExperimentRun
 
 from perf_harness.drive.load import LoadProfile, Schedule
 from perf_harness.drive.workload import MockWorkload, Workload
-from perf_harness.engine import Engine, Experiment, Subject
+from perf_harness.engine import Engine, Experiment
 from perf_harness.model import (
     Outcome,
     ResourceProfile,
-    Target,
+    Service,
     make_run_id,
 )
 from perf_harness.report import write_run
 
 
-def _subject() -> Subject:
-    return Subject("chat", Target(base_url="http://127.0.0.1:0"))
+def _subject() -> Service:
+    return Service("chat", base_url="http://127.0.0.1:0")
 
 
 def test_make_run_id_format():
@@ -25,7 +27,7 @@ def test_make_run_id_format():
 
 async def test_write_run_lays_out_experiment_dir(tmp_path):
     experiment = Experiment(
-        subject=_subject(),
+        service=_subject(),
         workload=MockWorkload(base_ms=2),
         resources=[ResourceProfile(workers=2)],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(2, 0.0, 0.2))],
@@ -33,6 +35,8 @@ async def test_write_run_lays_out_experiment_dir(tmp_path):
     )
     engine = Engine(experiment, run_id="20260101-000000")
     run = await engine.run()
+    assert isinstance(experiment, BaseExperiment)
+    assert isinstance(run, ExperimentRun)
     assert run.experiment == "chat-sizing" and run.run_id == "20260101-000000"
     config_dir = tmp_path / "source"
     config_dir.mkdir()
@@ -40,6 +44,11 @@ async def test_write_run_lays_out_experiment_dir(tmp_path):
     config = config_dir / "experiment.yaml"
     config.write_text("caseset: ./cases.yaml\n")
     write_run(run, str(tmp_path), config_path=str(config))
+    assert run.artifact_paths() == {
+        "model": "run.json",
+        "outcomes": "outcomes.jsonl",
+        "timeseries": "timeseries.csv",
+    }
 
     run_dir = tmp_path / "chat-sizing" / "20260101-000000"
     assert run_dir.is_dir()
@@ -72,7 +81,7 @@ async def test_run_id_reaches_fire(tmp_path):
             return Outcome(ok=True, status=200, duration_ms=1.0)
 
     experiment = Experiment(
-        subject=_subject(),
+        service=_subject(),
         workload=RecordingWorkload(),
         resources=[ResourceProfile()],
         loads=[LoadProfile(model="closed", schedule=Schedule.ramp_hold(1, 0.0, 0.1))],

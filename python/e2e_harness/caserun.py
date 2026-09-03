@@ -1,6 +1,6 @@
 """One canonical case execution with explicit lifecycle and phase evidence.
 
-``Case`` stays stable input/judgment data. ``CaseRun`` owns the operational
+``Case`` stays stable input/judgment data. ``CasePlan`` owns the operational
 lifecycle needed by real e2e cases: prepare resources, execute the stimulus,
 judge eventual behavior, and always clean up.  The Python and Go SDKs share
 these phase/status semantics while keeping language-idiomatic APIs.
@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
+from harness_common import Execution, OperationRun
 from harness_common.verdict import CaseVerdict, Status
 from e2e_harness.matrix import Variant
 
@@ -61,7 +62,9 @@ Step = Callable[[PhaseContext, S], None]
 
 
 @dataclass(frozen=True)
-class CaseRun(Generic[S]):
+class CasePlan(Generic[S]):
+    """Lifecycle steps used by the e2e engine to produce a CaseRun."""
+
     execute: Step[S]
     budgets: Budgets
     prepare: Step[S] | None = None
@@ -78,8 +81,10 @@ class PhaseResult:
     reason: str | None = None
 
 
-@dataclass(frozen=True)
-class CaseRunResult:
+@dataclass
+class CaseRun(Execution):
+    """One executed e2e Case and its lifecycle and Operation evidence."""
+
     ref: CaseRef
     variant: Variant
     status: Status
@@ -116,16 +121,24 @@ class Fail(Exception):
 def run_lifecycle(
     ref: CaseRef,
     state: S,
-    definition: CaseRun[S],
+    definition: CasePlan[S],
     *,
     variant: Variant | None = None,
-) -> CaseRunResult:
+    operation_runs: list[OperationRun] | None = None,
+) -> CaseRun:
     """Run ``prepare → execute → judge → cleanup`` and retain phase evidence."""
     variant = variant or Variant()
     facets = {**definition.facets, **variant.values}
     if not ref.caseset or not ref.id:
-        return CaseRunResult(
-            ref, variant, "error", (), facets, "case ref requires caseset and id"
+        return CaseRun(
+            id=ref.id,
+            operation_runs=operation_runs or [],
+            ref=ref,
+            variant=variant,
+            status="error",
+            phases=(),
+            facets=facets,
+            reason="case ref requires caseset and id",
         )
 
     phases: list[PhaseResult] = []
@@ -183,7 +196,16 @@ def run_lifecycle(
         phases.append(phase)
         apply(phase)
 
-    return CaseRunResult(ref, variant, status, tuple(phases), facets, reason)
+    return CaseRun(
+        id=ref.id,
+        operation_runs=operation_runs or [],
+        ref=ref,
+        variant=variant,
+        status=status,
+        phases=tuple(phases),
+        facets=facets,
+        reason=reason,
+    )
 
 
 def _run_phase(name: str, budget_s: float, state: S, step: Step[S]) -> PhaseResult:
