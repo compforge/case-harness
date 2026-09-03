@@ -51,7 +51,7 @@ class TrajectoryAnnotation:
 
 @dataclass(frozen=True, slots=True)
 class TrajectoryDataset:
-    """A fixed, versioned input to trajectory evaluation."""
+    """A fixed, versioned input to trajectory analysis."""
 
     dataset_id: str
     version: str

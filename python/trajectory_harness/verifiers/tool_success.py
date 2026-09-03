@@ -1,40 +1,46 @@
-"""Evaluate tool execution success across a trajectory."""
+"""Verify tool execution success across a trajectory."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from trajectory_harness.evaluate import EvaluationResult, EvaluatorSpec
 from trajectory_harness.model import Trajectory
+from trajectory_harness.measure import Measurements
+from trajectory_harness.verify import VerificationResult, VerifierSpec
 
 
 @dataclass(frozen=True, slots=True)
-class ToolSuccessEvaluator:
-    spec: EvaluatorSpec = EvaluatorSpec(
-        evaluator_id="tool_success",
+class ToolSuccessVerifier:
+    spec: VerifierSpec = VerifierSpec(
+        verifier_id="tool_success",
         title="Tool success",
-        description="Judge whether tool executions in the trajectory succeeded.",
+        description="Check whether tool executions in the trajectory succeeded.",
+        category="effect",
         kind="common",
         owner="trajectory_harness",
     )
 
-    def evaluate(
-        self, trajectory: Trajectory, reference: Trajectory | None = None
-    ) -> EvaluationResult:
-        del reference
+    def verify(
+        self,
+        trajectory: Trajectory,
+        *,
+        measurements: Measurements = (),
+        reference: Trajectory | None = None,
+    ) -> VerificationResult:
+        del measurements, reference
         calls = [step for step in trajectory.steps if step.operation == "execute_tool"]
         if not calls:
-            return EvaluationResult(
-                evaluator_id=self.spec.evaluator_id,
+            return VerificationResult(
+                verifier_id=self.spec.verifier_id,
                 status="not_applicable",
                 explanation="Trajectory contains no executed tool calls.",
             )
 
         failed = [step for step in calls if step.failure or step.status == "error"]
         success_rate = round((len(calls) - len(failed)) / len(calls), 3)
-        return EvaluationResult(
-            evaluator_id=self.spec.evaluator_id,
-            status="evaluated",
+        return VerificationResult(
+            verifier_id=self.spec.verifier_id,
+            status="verified",
             verdict="pass" if not failed else "fail",
             score=success_rate,
             explanation=(

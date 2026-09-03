@@ -148,8 +148,9 @@ Finding、Evaluation 与 Measurement。实现可以融合执行、填表和 chec
 - **perf（压力测试）**: `Engine` 把资源档 × 负载档解析为 Arm，逐 Trial 采样并按 Window 聚合，出容量与资源画像。
 - **trace（链路分析）**: raw span 经 assemble 形成 Node Observation / Unit Dataset，detector profile
   通过 detect 追加 Finding，再按 node、trace 或 cohort grain 生成 Worksheet 与报告。
-- **trajectory（轨迹评估）**: Dataset Builder 将 Case、Trajectory Observation 与 annotation 固化为
-  版本化 Unit Dataset；不同 Detector / Evaluator / Measurer / Policy 组合生成各自 EvaluationRun、Worksheet、Metric 与报告。
+- **trajectory（轨迹分析）**: Dataset Builder 将 Case、Trajectory Observation 与 annotation 固化为
+  版本化 Unit Dataset；Measurements 从 Trajectory 确定性派生，二者共同输入 Detector / Verifier。
+  Detector 与 Verifier 均可面向 cost / effect，也均可使用 hard / soft 规则，并生成各自 AnalysisRun、Worksheet、Metric 与报告。
 
 五者**互不 import、不抽领域公共依赖**（耦合成本 > 省下的重复）：e2e/eval 各自复制一小撮 L2 原语
 （Outcome 形状 / runner / SSEParser / build_headers），perf 自带 httpx 发压栈。唯一例外是

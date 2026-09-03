@@ -9,7 +9,7 @@ from trajectory_harness import (
     MeasurerSpec,
     Step,
     Trajectory,
-    TrajectoryEvaluationRun,
+    TrajectoryAnalysisRun,
     aggregate_metrics,
     measure,
     render_report_html,
@@ -136,7 +136,7 @@ def test_model_usage_measurements_aggregate_dataset_sum_and_distribution():
             steps=(_model_step("s2", prompt_tokens=300, completion_tokens=30),),
         ),
     )
-    run = TrajectoryEvaluationRun(
+    run = TrajectoryAnalysisRun(
         run_id="weekly",
         created_at=datetime(2026, 8, 23, tzinfo=timezone.utc),
         dataset_id="reviews",
@@ -164,6 +164,7 @@ def test_measurer_exception_is_health_data_not_zero_cost():
             measurer_id="broken",
             title="Broken",
             description="Test measurer failure.",
+            category="cost",
         )
 
         def measure(self, trajectory):
@@ -183,13 +184,13 @@ def test_measurer_exception_is_health_data_not_zero_cost():
     )
 
 
-def test_report_lists_measurer_separately_from_evaluators():
+def test_report_lists_measurements_separately_from_verifiers():
     measurer = ModelUsageMeasurer()
     trajectory = Trajectory(
         trajectory_id="t1",
         steps=(_model_step("s1", prompt_tokens=100),),
     )
-    run = TrajectoryEvaluationRun(
+    run = TrajectoryAnalysisRun(
         run_id="weekly",
         created_at=datetime(2026, 8, 23, tzinfo=timezone.utc),
         dataset_id="reviews",

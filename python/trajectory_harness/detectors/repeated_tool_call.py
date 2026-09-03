@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from trajectory_harness._tool_calls import tool_calls
 from trajectory_harness.detect import DetectionResult, DetectorSpec, Finding
+from trajectory_harness.measure import Measurements
 from trajectory_harness.model import Trajectory
 
 
@@ -15,11 +16,15 @@ class RepeatedToolCallDetector:
         detector_id="repeated_tool_call",
         title="Repeated tool calls",
         description="Detect exact repeats of an earlier tool name and arguments.",
+        category="cost",
         kind="common",
         owner="trajectory_harness",
     )
 
-    def detect(self, trajectory: Trajectory) -> DetectionResult:
+    def detect(
+        self, trajectory: Trajectory, *, measurements: Measurements = ()
+    ) -> DetectionResult:
+        del measurements
         calls = tool_calls(trajectory.steps)
         if not calls:
             return DetectionResult(

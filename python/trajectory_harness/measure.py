@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from trajectory_harness.model import Trajectory
+from trajectory_harness.model import AnalysisCategory, Trajectory
 
 MeasurementStatus = Literal["measured", "not_applicable", "error"]
 MetricDirection = Literal["higher_is_better", "lower_is_better", "neutral"]
@@ -50,9 +50,13 @@ class MeasurerSpec:
     measurer_id: str
     title: str
     description: str
+    category: AnalysisCategory
     owner: str = ""
-    category: str = "cost"
     measurements: tuple[MeasurementSpec, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.category not in ("cost", "effect"):
+            raise ValueError("measurer category must be 'cost' or 'effect'")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -70,8 +74,8 @@ class MeasurerSpec:
             measurer_id=str(value["measurer_id"]),
             title=str(value["title"]),
             description=str(value.get("description") or ""),
+            category=value["category"],
             owner=str(value.get("owner") or ""),
-            category=str(value.get("category") or "cost"),
             measurements=tuple(
                 MeasurementSpec.from_dict(item)
                 for item in value.get("measurements", ())
@@ -109,6 +113,12 @@ class MeasurementResult:
         )
 
 
+# The deterministic derived data made available alongside a Trajectory to
+# Detectors and Verifiers. Each result retains its measurer provenance and
+# health status instead of flattening potentially colliding measurement names.
+Measurements = tuple[MeasurementResult, ...]
+
+
 @runtime_checkable
 class Measurer(Protocol):
     """Observe one trajectory without judging its quality."""
@@ -125,7 +135,11 @@ class TrajectoryMeasurement:
     trajectory: Trajectory
     results: tuple[MeasurementResult, ...]
     target: str = ""
-    category: str = "cost"
+    category: AnalysisCategory = "cost"
+
+    def __post_init__(self) -> None:
+        if self.category not in ("cost", "effect"):
+            raise ValueError("measurement category must be 'cost' or 'effect'")
 
     def to_dict(self) -> dict:
         return {
@@ -142,7 +156,7 @@ class TrajectoryMeasurement:
         return cls(
             trajectory=trajectory,
             target=str(value.get("target") or ""),
-            category=str(value.get("category") or "cost"),
+            category=value.get("category", "cost"),
             results=tuple(
                 MeasurementResult.from_dict(item) for item in value.get("results", ())
             ),
@@ -154,7 +168,7 @@ def measure(
     measurers: list[Measurer] | tuple[Measurer, ...],
     *,
     target: str = "",
-    category: str = "cost",
+    category: AnalysisCategory = "cost",
 ) -> TrajectoryMeasurement:
     """Run measurers; plugin failures remain health data, never measurements."""
 

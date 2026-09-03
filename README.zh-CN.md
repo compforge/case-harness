@@ -142,7 +142,7 @@ go test -tags=e2e -v ./...
 | `python/eval_harness` | Agent 评测与对照实验 |
 | `python/perf_harness` / `typescript/perf-harness` | 发压、SLO 与容量证据 |
 | `python/trace_harness` / `typescript/trace-harness` | Trace 归一、归因与 Finding |
-| `python/trajectory_harness` | Agent 轨迹归一与评估 |
+| `python/trajectory_harness` | Agent 轨迹归一、派生测量、发现与验证 |
 | `go/toolbox/kube` / `python/harness_toolbox/kube` | e2e / perf 共用的 Kubernetes 控制与观测 |
 
 ## 仓库开发

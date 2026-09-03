@@ -7,11 +7,11 @@ from collections import defaultdict
 from typing import Sequence
 
 from harness_common.report_kit import Section, Table
-from trajectory_harness.metrics import TrajectoryEvaluationRun
+from trajectory_harness.metrics import TrajectoryAnalysisRun
 
 
 def generation_provenance_section(
-    runs: Sequence[TrajectoryEvaluationRun],
+    runs: Sequence[TrajectoryAnalysisRun],
 ) -> Section:
     rows = []
     for run in runs:
@@ -67,10 +67,10 @@ def generation_provenance_section(
     )
 
 
-def _run_trajectories(run: TrajectoryEvaluationRun) -> dict:
+def _run_trajectories(run: TrajectoryAnalysisRun) -> dict:
     return {
         item.trajectory.trajectory_id: item.trajectory
-        for item in (*run.detections, *run.evaluations, *run.measurements)
+        for item in (*run.detections, *run.verifications, *run.measurements)
     }
 
 

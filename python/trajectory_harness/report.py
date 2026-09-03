@@ -21,7 +21,7 @@ from harness_common.report_kit import (
 from trajectory_harness.build import DatasetBuildSummary
 from trajectory_harness.metrics import (
     Metric,
-    TrajectoryEvaluationRun,
+    TrajectoryAnalysisRun,
     aggregate_metrics,
 )
 from trajectory_harness.report_comparison import ParetoSpec, pareto_section
@@ -39,7 +39,7 @@ REPORT_FILE = "report.html"
 class _RunView:
     """Presentation view over one persisted Worksheet run."""
 
-    run: TrajectoryEvaluationRun
+    run: TrajectoryAnalysisRun
 
     @property
     def run_id(self) -> str:
@@ -66,16 +66,16 @@ class _RunView:
         return self.run.detections
 
     @property
-    def evaluations(self):
-        return self.run.evaluations
+    def verifications(self):
+        return self.run.verifications
 
     @property
     def measurements(self):
         return self.run.measurements
 
     @property
-    def evaluator_specs(self):
-        return self.run.evaluator_specs
+    def verifier_specs(self):
+        return self.run.verifier_specs
 
     @property
     def measurer_specs(self):
@@ -85,7 +85,7 @@ class _RunView:
 class TrajectoryReportBuilder:
     """Pure run-artifact-to-report stage; domains may add presentation sections."""
 
-    report_title = "Trajectory evaluation"
+    report_title = "Trajectory analysis"
     pareto: ParetoSpec | None = None
 
     def extra_sections(
@@ -132,7 +132,7 @@ class TrajectoryReportBuilder:
         *,
         history_dirs: Sequence[str | Path] = (),
     ) -> Path:
-        """Re-render solely from persisted artifacts, without collection/evaluation."""
+        """Re-render solely from persisted artifacts, without collection or analysis."""
 
         current = load_run_artifact(run_dir)
         history = tuple(load_run_artifact(path) for path in history_dirs)
@@ -185,14 +185,14 @@ def _collection_section(summary: DatasetBuildSummary) -> Section:
 
 
 def build_report(
-    runs: Sequence[TrajectoryEvaluationRun],
+    runs: Sequence[TrajectoryAnalysisRun],
     *,
-    title: str = "Trajectory evaluation",
+    title: str = "Trajectory analysis",
     metrics: Sequence[Metric] | None = None,
     pareto: ParetoSpec | None = None,
     extra_sections: Iterable[Section] = (),
 ) -> Report:
-    """Build the canonical trajectory report from one or more evaluation runs."""
+    """Build the canonical trajectory report from one or more analysis runs."""
 
     ordered = sorted(runs, key=lambda run: (run.created_at, run.run_id))
     views = tuple(_RunView(run) for run in ordered)
@@ -207,11 +207,11 @@ def build_report(
         generation_provenance_section(ordered),
         _execution_section(tuple(latest_by_dataset.values())),
         detector_catalog_section(ordered),
-        _evaluators_section(views),
+        _verifiers_section(views),
         _measurers_section(views),
         _metrics_section(tuple(latest_by_dataset.values())),
         detection_evidence_section(tuple(run.run for run in latest_runs)),
-        _evaluation_evidence_section(latest_runs),
+        _verification_evidence_section(latest_runs),
         _measurement_evidence_section(latest_runs),
         _trends_section(run_metrics),
     ]
@@ -236,14 +236,14 @@ def build_report(
 
 
 def render_report_html(
-    runs: Sequence[TrajectoryEvaluationRun],
+    runs: Sequence[TrajectoryAnalysisRun],
     *,
-    title: str = "Trajectory evaluation",
+    title: str = "Trajectory analysis",
     metrics: Sequence[Metric] | None = None,
     pareto: ParetoSpec | None = None,
     extra_sections: Iterable[Section] = (),
 ) -> str:
-    """Render trajectory evaluation runs as a standalone HTML document."""
+    """Render trajectory analysis runs as a standalone HTML document."""
 
     return render_html(
         build_report(
@@ -258,9 +258,9 @@ def render_report_html(
 
 def write_report_html(
     path: str | Path,
-    runs: Sequence[TrajectoryEvaluationRun],
+    runs: Sequence[TrajectoryAnalysisRun],
     *,
-    title: str = "Trajectory evaluation",
+    title: str = "Trajectory analysis",
     metrics: Sequence[Metric] | None = None,
     pareto: ParetoSpec | None = None,
     extra_sections: Iterable[Section] = (),
@@ -320,7 +320,7 @@ def _run_metrics(
 
 def _runs_section(runs: Sequence[_RunView]) -> Section:
     return Section(
-        heading="Evaluation runs and datasets",
+        heading="Analysis runs and datasets",
         blocks=[
             Table(
                 columns=[
@@ -329,7 +329,7 @@ def _runs_section(runs: Sequence[_RunView]) -> Section:
                     "Dataset",
                     "Version",
                     "Detection cells",
-                    "Evaluation cells",
+                    "Verification cells",
                     "Measurement cells",
                     "Annotations",
                 ],
@@ -340,7 +340,7 @@ def _runs_section(runs: Sequence[_RunView]) -> Section:
                         run.label,
                         run.dataset_version or "—",
                         str(len(run.detections)),
-                        str(len(run.evaluations)),
+                        str(len(run.verifications)),
                         str(len(run.measurements)),
                         (
                             str(run.run.annotation_count)
@@ -426,7 +426,7 @@ def _failure_rows(run: _RunView) -> list[list[str]]:
     rows = []
     trajectories = {
         item.trajectory.trajectory_id: item.trajectory
-        for item in (*run.detections, *run.evaluations, *run.measurements)
+        for item in (*run.detections, *run.verifications, *run.measurements)
     }
     for trajectory in trajectories.values():
         for step in trajectory.steps:
@@ -456,26 +456,34 @@ def _failure_rows(run: _RunView) -> list[list[str]]:
     return rows
 
 
-def _evaluators_section(runs: Sequence[_RunView]) -> Section:
+def _verifiers_section(runs: Sequence[_RunView]) -> Section:
     specs = {}
     for run in runs:
-        for spec in run.evaluator_specs:
-            specs[spec.evaluator_id] = spec
+        for spec in run.verifier_specs:
+            specs[spec.verifier_id] = spec
     return Section(
-        heading="Evaluator catalog",
+        heading="Verifier catalog",
         blocks=[
             Table(
-                columns=["Evaluator", "Category", "Kind", "Owner", "Description"],
+                columns=[
+                    "Verifier",
+                    "Category",
+                    "Rule type",
+                    "Kind",
+                    "Owner",
+                    "Description",
+                ],
                 rows=[
                     [
-                        spec.evaluator_id,
+                        spec.verifier_id,
                         spec.category,
+                        spec.rule_type,
                         spec.kind,
                         spec.owner or "—",
                         spec.description,
                     ]
                     for spec in sorted(
-                        specs.values(), key=lambda item: item.evaluator_id
+                        specs.values(), key=lambda item: item.verifier_id
                     )
                 ],
             )
@@ -542,10 +550,10 @@ def _metrics_section(
     )
 
 
-def _evaluation_evidence_section(runs: Sequence[_RunView]) -> Section:
+def _verification_evidence_section(runs: Sequence[_RunView]) -> Section:
     rows = []
     for run in sorted(runs, key=lambda item: item.label):
-        for item in run.evaluations:
+        for item in run.verifications:
             for result in item.results:
                 rows.append(
                     [
@@ -555,7 +563,7 @@ def _evaluation_evidence_section(runs: Sequence[_RunView]) -> Section:
                         item.trajectory.source or "—",
                         item.target or "—",
                         item.category,
-                        result.evaluator_id,
+                        result.verifier_id,
                         result.status,
                         result.verdict or "—",
                         (
@@ -568,7 +576,7 @@ def _evaluation_evidence_section(runs: Sequence[_RunView]) -> Section:
                     ]
                 )
     return Section(
-        heading="Evaluation evidence",
+        heading="Verification evidence",
         blocks=[
             Table(
                 columns=[
@@ -578,7 +586,7 @@ def _evaluation_evidence_section(runs: Sequence[_RunView]) -> Section:
                     "Source",
                     "Target",
                     "Category",
-                    "Evaluator",
+                    "Verifier",
                     "Status",
                     "Verdict",
                     "Score",

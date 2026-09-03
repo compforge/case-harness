@@ -133,6 +133,9 @@ Quality Harness 驱动已有能力执行，消费各 harness 的原生 Run、Ver
 Observation 生成新的 EvaluationRun、Worksheet 与 Report；它不复制各 Harness 的 Unit 模型，也不另建一张抹平 e2e、eval、perf、
 trace 和 trajectory 语义的总 Worksheet。
 
+其中 trajectory_harness 的领域接口专门化为 Trajectory、派生 Measurements、Detector 与 Verifier；
+成本/效果和硬/软规则分别是 Detector / Verifier 的两个正交维度。
+
 ### 4.5 输出结论
 
 评估结果是对已有执行产物的项目级解释和汇总，至少回答：

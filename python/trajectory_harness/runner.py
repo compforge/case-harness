@@ -1,4 +1,4 @@
-"""Evaluate and measure one fixed trajectory dataset."""
+"""Detect, verify, and measure one fixed trajectory dataset."""
 
 from __future__ import annotations
 
@@ -8,24 +8,24 @@ from typing import Any, Mapping, Sequence
 
 from trajectory_harness.dataset import TrajectoryDataset
 from trajectory_harness.detect import Detector, DetectorSpec, detect
-from trajectory_harness.evaluate import Evaluator, EvaluatorSpec, evaluate
+from trajectory_harness.verify import Verifier, VerifierSpec, verify
 from trajectory_harness.measure import Measurer, MeasurerSpec, measure
-from trajectory_harness.metrics import TrajectoryEvaluationRun, aggregate_metrics
-from trajectory_harness.model import Trajectory
+from trajectory_harness.metrics import TrajectoryAnalysisRun, aggregate_metrics
+from trajectory_harness.model import AnalysisCategory, Trajectory
 
 
-class TrajectoryEvaluationRunner:
+class TrajectoryAnalysisRunner:
     """Dataset-to-run stage, independent of source collection and report rendering."""
 
     def __init__(
         self,
         *,
         detectors: Sequence[Detector] = (),
-        evaluators: Sequence[Evaluator] = (),
+        verifiers: Sequence[Verifier] = (),
         measurers: Sequence[Measurer] = (),
     ) -> None:
         self.detectors = tuple(detectors)
-        self.evaluators = tuple(evaluators)
+        self.verifiers = tuple(verifiers)
         self.measurers = tuple(measurers)
 
     def target_for(self, trajectory: Trajectory, dataset: TrajectoryDataset) -> str:
@@ -38,10 +38,10 @@ class TrajectoryEvaluationRunner:
     ) -> Sequence[Detector]:
         return self.detectors
 
-    def evaluators_for(
+    def verifiers_for(
         self, target: str, dataset: TrajectoryDataset
-    ) -> Sequence[Evaluator]:
-        return self.evaluators
+    ) -> Sequence[Verifier]:
+        return self.verifiers
 
     def measurers_for(
         self, target: str, dataset: TrajectoryDataset
@@ -57,7 +57,7 @@ class TrajectoryEvaluationRunner:
         *,
         run_id: str,
         created_at: datetime | None = None,
-    ) -> TrajectoryEvaluationRun:
+    ) -> TrajectoryAnalysisRun:
         timestamp = created_at or datetime.now(timezone.utc)
         targets = tuple(
             (
@@ -67,38 +67,21 @@ class TrajectoryEvaluationRunner:
             for trajectory in dataset.trajectories
         )
         detections = []
-        evaluations = []
+        verifications = []
         measurements = []
         selected_detectors = []
-        selected_evaluators = []
+        selected_verifiers = []
         selected_measurers = []
         for trajectory, (_, target) in zip(dataset.trajectories, targets):
             detectors = tuple(self.detectors_for(target, dataset))
-            evaluators = tuple(self.evaluators_for(target, dataset))
+            verifiers = tuple(self.verifiers_for(target, dataset))
             measurers = tuple(self.measurers_for(target, dataset))
             selected_detectors.extend(detectors)
-            selected_evaluators.extend(evaluators)
+            selected_verifiers.extend(verifiers)
             selected_measurers.extend(measurers)
-            for category, items in _detectors_by_category(detectors):
-                detections.append(
-                    detect(
-                        trajectory,
-                        items,
-                        target=target,
-                        category=category,
-                    )
-                )
-            for category, items in _evaluators_by_category(evaluators):
-                evaluations.append(
-                    evaluate(
-                        trajectory,
-                        items,
-                        target=target,
-                        category=category,
-                    )
-                )
+            trajectory_measurements = []
             for category, items in _measurers_by_category(measurers):
-                measurements.append(
+                trajectory_measurements.append(
                     measure(
                         trajectory,
                         items,
@@ -106,8 +89,31 @@ class TrajectoryEvaluationRunner:
                         category=category,
                     )
                 )
-
-        run = TrajectoryEvaluationRun(
+            measurements.extend(trajectory_measurements)
+            measurement_input = tuple(
+                result for item in trajectory_measurements for result in item.results
+            )
+            for category, items in _detectors_by_category(detectors):
+                detections.append(
+                    detect(
+                        trajectory,
+                        items,
+                        measurements=measurement_input,
+                        target=target,
+                        category=category,
+                    )
+                )
+            for category, items in _verifiers_by_category(verifiers):
+                verifications.append(
+                    verify(
+                        trajectory,
+                        items,
+                        measurements=measurement_input,
+                        target=target,
+                        category=category,
+                    )
+                )
+        run = TrajectoryAnalysisRun(
             run_id=run_id,
             created_at=timestamp,
             dataset_id=dataset.dataset_id,
@@ -116,8 +122,8 @@ class TrajectoryEvaluationRunner:
             trajectory_targets=targets,
             detections=tuple(detections),
             detector_specs=_detector_specs(selected_detectors),
-            evaluations=tuple(evaluations),
-            evaluator_specs=_evaluator_specs(selected_evaluators),
+            verifications=tuple(verifications),
+            verifier_specs=_verifier_specs(selected_verifiers),
             measurements=tuple(measurements),
             measurer_specs=_measurer_specs(selected_measurers),
             annotation_count=_annotation_count(dataset, dataset.trajectories),
@@ -141,8 +147,8 @@ def _annotation_count(
     )
 
 
-def _evaluator_specs(evaluators: Sequence[Evaluator]) -> tuple[EvaluatorSpec, ...]:
-    return tuple({item.spec.evaluator_id: item.spec for item in evaluators}.values())
+def _verifier_specs(verifiers: Sequence[Verifier]) -> tuple[VerifierSpec, ...]:
+    return tuple({item.spec.verifier_id: item.spec for item in verifiers}.values())
 
 
 def _detector_specs(detectors: Sequence[Detector]) -> tuple[DetectorSpec, ...]:
@@ -155,8 +161,8 @@ def _measurer_specs(measurers: Sequence[Measurer]) -> tuple[MeasurerSpec, ...]:
 
 def _detectors_by_category(
     detectors: Sequence[Detector],
-) -> tuple[tuple[str, tuple[Detector, ...]], ...]:
-    categories: dict[str, list[Detector]] = {}
+) -> tuple[tuple[AnalysisCategory, tuple[Detector, ...]], ...]:
+    categories: dict[AnalysisCategory, list[Detector]] = {}
     for detector in detectors:
         categories.setdefault(detector.spec.category, []).append(detector)
     return tuple(
@@ -164,12 +170,12 @@ def _detectors_by_category(
     )
 
 
-def _evaluators_by_category(
-    evaluators: Sequence[Evaluator],
-) -> tuple[tuple[str, tuple[Evaluator, ...]], ...]:
-    categories: dict[str, list[Evaluator]] = {}
-    for evaluator in evaluators:
-        categories.setdefault(evaluator.spec.category, []).append(evaluator)
+def _verifiers_by_category(
+    verifiers: Sequence[Verifier],
+) -> tuple[tuple[AnalysisCategory, tuple[Verifier, ...]], ...]:
+    categories: dict[AnalysisCategory, list[Verifier]] = {}
+    for verifier in verifiers:
+        categories.setdefault(verifier.spec.category, []).append(verifier)
     return tuple(
         (category, tuple(items)) for category, items in sorted(categories.items())
     )
@@ -177,8 +183,8 @@ def _evaluators_by_category(
 
 def _measurers_by_category(
     measurers: Sequence[Measurer],
-) -> tuple[tuple[str, tuple[Measurer, ...]], ...]:
-    categories: dict[str, list[Measurer]] = {}
+) -> tuple[tuple[AnalysisCategory, tuple[Measurer, ...]], ...]:
+    categories: dict[AnalysisCategory, list[Measurer]] = {}
     for measurer in measurers:
         categories.setdefault(measurer.spec.category, []).append(measurer)
     return tuple(

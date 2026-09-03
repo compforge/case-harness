@@ -20,7 +20,7 @@ from trajectory_harness.runio import TrajectoryRunArtifact
 class TrajectoryVerdictPolicy(Protocol):
     """Domain-owned aggregate gates; findings alone never become verdict checks."""
 
-    def evaluate(self, artifact: TrajectoryRunArtifact) -> Sequence[CheckVerdict]: ...
+    def verify(self, artifact: TrajectoryRunArtifact) -> Sequence[CheckVerdict]: ...
 
 
 def build_trajectory_verdict(
@@ -44,7 +44,7 @@ def build_trajectory_verdict(
         checks = []
     else:
         try:
-            checks = list(policy.evaluate(artifact))
+            checks = list(policy.verify(artifact))
             invalid = next(
                 (item for item in checks if item.status not in PRECEDENCE), None
             )
@@ -99,9 +99,9 @@ def _health_errors(artifact: TrajectoryRunArtifact) -> list[str]:
             for result in item.results
             if result.status == "error"
         )
-    for item in artifact.run.evaluations:
+    for item in artifact.run.verifications:
         errors.extend(
-            f"evaluator {result.evaluator_id} failed: {result.explanation}"
+            f"verifier {result.verifier_id} failed: {result.explanation}"
             for result in item.results
             if result.status == "error"
         )

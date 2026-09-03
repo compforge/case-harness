@@ -9,7 +9,7 @@ from harness_common.report_kit import Section, Table
 from trajectory_harness.metrics import (
     Metric,
     MetricAggregation,
-    TrajectoryEvaluationRun,
+    TrajectoryAnalysisRun,
 )
 
 Objective = Literal["maximize", "minimize"]
@@ -42,7 +42,7 @@ class ParetoSpec:
 
 
 def pareto_section(
-    run_metrics: Sequence[tuple[TrajectoryEvaluationRun, tuple[Metric, ...]]],
+    run_metrics: Sequence[tuple[TrajectoryAnalysisRun, tuple[Metric, ...]]],
     spec: ParetoSpec,
 ) -> Section:
     rows = []
@@ -150,8 +150,8 @@ def _at_least_as_good(candidate: float, current: float, objective: Objective) ->
 
 
 def _summary_metric(
-    run_metrics: Sequence[tuple[TrajectoryEvaluationRun, tuple[Metric, ...]]],
-    selected_run: TrajectoryEvaluationRun,
+    run_metrics: Sequence[tuple[TrajectoryAnalysisRun, tuple[Metric, ...]]],
+    selected_run: TrajectoryAnalysisRun,
     name: str,
     aggregation: MetricAggregation,
     dimensions: tuple[tuple[str, str], ...],
