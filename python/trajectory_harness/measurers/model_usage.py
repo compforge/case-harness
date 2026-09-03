@@ -64,6 +64,41 @@ class ModelUsageMeasurer:
                 _DISTRIBUTION_AGGREGATIONS,
             ),
             MeasurementSpec(
+                "output_reported_call_count",
+                "count",
+                "Model calls reporting output tokens.",
+                "neutral",
+                _DISTRIBUTION_AGGREGATIONS,
+            ),
+            MeasurementSpec(
+                "average_output_tokens_per_call",
+                "token",
+                "Mean output tokens across calls that expose output usage.",
+                "neutral",
+                ("mean", "p50", "p95"),
+            ),
+            MeasurementSpec(
+                "peak_output_tokens_per_call",
+                "token",
+                "Largest reported output token count for one model call.",
+                "neutral",
+                ("mean", "p50", "p95"),
+            ),
+            MeasurementSpec(
+                "output_under_500_tokens_call_count",
+                "count",
+                "Model calls reporting fewer than 500 output tokens.",
+                "neutral",
+                _DISTRIBUTION_AGGREGATIONS,
+            ),
+            MeasurementSpec(
+                "output_under_500_tokens_ratio",
+                "ratio",
+                "Covered model calls under 500 output tokens divided by covered calls.",
+                "neutral",
+                ("mean", "p50", "p95"),
+            ),
+            MeasurementSpec(
                 "total_tokens",
                 "token",
                 "Sum of reported input and output tokens.",
@@ -129,6 +164,7 @@ class ModelUsageMeasurer:
         cached_reported = False
         usage_reported_calls = 0
         reported_call_inputs: list[int] = []
+        reported_call_outputs: list[int] = []
 
         for call in calls:
             call_input = token_count(call, INPUT_TOKEN_ATTRIBUTES)
@@ -145,6 +181,7 @@ class ModelUsageMeasurer:
             if call_output is not None:
                 output_reported = True
                 output_tokens += call_output
+                reported_call_outputs.append(call_output)
             if call_cached is not None:
                 cached_reported = True
                 cached_input_tokens += call_cached
@@ -169,6 +206,16 @@ class ModelUsageMeasurer:
             measurements["peak_input_tokens_per_call"] = max(reported_call_inputs)
         if output_reported:
             measurements["output_tokens"] = output_tokens
+            measurements["output_reported_call_count"] = len(reported_call_outputs)
+            measurements["average_output_tokens_per_call"] = round(
+                output_tokens / len(reported_call_outputs), 6
+            )
+            measurements["peak_output_tokens_per_call"] = max(reported_call_outputs)
+            under_500 = sum(value < 500 for value in reported_call_outputs)
+            measurements["output_under_500_tokens_call_count"] = under_500
+            measurements["output_under_500_tokens_ratio"] = round(
+                under_500 / len(reported_call_outputs), 6
+            )
         if input_reported or output_reported:
             measurements["total_tokens"] = input_tokens + output_tokens
         if cached_reported:
@@ -188,5 +235,10 @@ class ModelUsageMeasurer:
             explanation=(
                 f"Observed {len(calls)} model calls; "
                 f"{usage_reported_calls} reported token usage."
+            ),
+            step_ids=tuple(
+                call.step_id
+                for call in calls
+                if token_count(call, OUTPUT_TOKEN_ATTRIBUTES) is not None
             ),
         )

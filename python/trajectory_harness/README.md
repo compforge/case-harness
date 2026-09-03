@@ -12,15 +12,21 @@ dimensions: `category="cost" | "effect"` and `rule_type="hard" | "soft"`.
 from datetime import datetime, timezone
 
 from trajectory_harness import (
+    CacheRetentionBloatDetector,
     ContextUsageMeasurer,
     ExecutionSuccessVerifier,
+    MeasurementThresholdVerifier,
     ModelUsageMeasurer,
     OTelJsonLoader,
+    OversizedToolObservationDetector,
     PostCompactRefetchDetector,
     RepeatedToolCallDetector,
+    RetryUsageMeasurer,
     RetryLoopDetector,
+    ShortDecisionChurnDetector,
     ToolUsageMeasurer,
     TrajectoryAnalysisRun,
+    UnchangedToolRetryDetector,
     aggregate_metrics,
     detect,
     verify,
@@ -32,9 +38,28 @@ detectors = (
     RepeatedToolCallDetector(),
     RetryLoopDetector(),
     PostCompactRefetchDetector(),
+    UnchangedToolRetryDetector(),
+    OversizedToolObservationDetector(),
+    ShortDecisionChurnDetector(),
+    CacheRetentionBloatDetector(),
 )
-verifiers = (ExecutionSuccessVerifier(),)
-measurers = (ModelUsageMeasurer(), ToolUsageMeasurer(), ContextUsageMeasurer())
+verifiers = (
+    ExecutionSuccessVerifier(),
+    MeasurementThresholdVerifier(
+        verifier_id="review_model_token_budget_v1",
+        title="Review model token budget",
+        measurer_id="model_usage",
+        measurement="total_tokens",
+        threshold=100_000,
+        owner="review-agent",
+    ),
+)
+measurers = (
+    ModelUsageMeasurer(),
+    ToolUsageMeasurer(),
+    ContextUsageMeasurer(),
+    RetryUsageMeasurer(),
+)
 trajectories = OTelJsonLoader().load("trace.json")
 measurement_cells = tuple(measure(item, measurers) for item in trajectories)
 measurement_inputs = tuple(cell.results for cell in measurement_cells)
@@ -174,18 +199,23 @@ execution facts, failures, detections, verifications, and
 measurements into dataset-level metrics. It does
 not manufacture a weighted overall score.
 
-`ModelUsageMeasurer` reports model-call count, usage coverage, input/output/cache tokens, and
-per-call input-token average and peak. `ToolUsageMeasurer` reports executed calls, failures,
-duration, result bytes and coverage, and observed concurrency. `ContextUsageMeasurer` reports
-input-token growth and compact-boundary deltas. Higher usage may be necessary for a harder task or
-may be waste; the Harness does not judge that without an effect contract. Dataset aggregations
-retain both totals and normalized `mean`/`p50`/`p95` values.
+`ModelUsageMeasurer` reports model-call count, usage coverage, input/output/cache tokens, per-call
+input/output-token distributions, and the share of covered calls below 500 output tokens.
+`ToolUsageMeasurer` reports executed calls, failures, duration, result-byte total/average/peak and
+coverage, and observed concurrency. `ContextUsageMeasurer` reports input-token growth ratio and
+compact-boundary deltas. `RetryUsageMeasurer` reports failed calls, same-tool retry coverage,
+argument changes, and recovery. Higher usage may be necessary for a harder task or may be waste;
+the Harness does not judge that without an effect contract. Dataset aggregations retain both totals
+and normalized `mean`/`p50`/`p95` values.
 Optimization patterns are findings, not execution failures, verifier verdicts, or raw
-measurements. For example, exact repeated tool calls produce a `Finding`. The finding records an interpreted
-problem pattern and evidence separately from hypotheses such as missing batching, unclear tool
-guidance, or an ineffective repeat-call stopping strategy. Retry loops and exact post-compact
-refetches are also common Findings; whether a retry or refresh was necessary remains a domain or
-experiment question.
+measurements. For example, exact repeated tool calls produce a `Finding`. The finding records an
+interpreted problem pattern and evidence separately from hypotheses such as missing batching,
+unclear tool guidance, or an ineffective repeat-call stopping strategy. Retry loops, unchanged
+same-tool retries, exact post-compact refetches, oversized tool observations, short-decision churn,
+and large growing contexts are also common Findings. `cache_retention_bloat` requires high cache
+reuse together with large and growing context: the goal is reasonable cache behavior, not the
+highest possible cache-hit ratio. Whether any retry, refresh, output, or retained context was
+necessary remains a domain or experiment question.
 Detector findings and Verifier verdicts remain separate from runtime `Failure`: a domain rule may return
 `verdict="fail"`, while `status="error"` is reserved for a verifier that could not run.
 
@@ -196,6 +226,15 @@ while business-specific contracts and cross-loop pipeline judgments remain domai
 The HTML report keeps low-cardinality failure metrics and lists the affected trajectory IDs,
 so consumers can correlate failures with case attributes without turning case IDs into metric
 dimensions.
+
+The Harness owns common formats, derived measurements, reusable structural rules, and execution
+flow. A consuming project owns business data and semantics. Its trajectory workflow should add a
+project `Measurer` when a business value can be deterministically derived, a `Detector` when a
+repeated domain pattern should become a Finding, and a `Verifier` when the business supplies an
+explicit threshold, reference, or rubric. Register those subclasses in the project runner; do not
+move business tool names, task taxonomies, thresholds, or owners into this package. Attribution and
+the resulting business change are the trajectory skill's last mile, including distinguishing
+individual usage from agent, integration/infrastructure, and knowledge/organizational gaps.
 
 `trajectory_harness` owns the trajectory-specific report sections and HTML entry point.
 Report functions can aggregate full runs or accept persisted `Metric` values for historical

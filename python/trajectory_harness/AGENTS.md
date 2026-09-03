@@ -69,6 +69,10 @@ trajectory_harness/
   `hypotheses` 记录可能原因；可直接计数、求和的 token、调用次数和耗时仍是 Measurement。
 - **通用 Detector 沉淀 Finding**：围绕 system prompt、tool set 和 loop mechanism 积累可复用
   的行为发现，但不把发现直接归因到某一组成；业务契约和跨 loop 编排由 domain Verifier 负责。
+- **Harness 与 trajectory skill 分工**：本包沉淀跨项目稳定的格式、Measurements、通用规则和
+  执行流程，不承担业务归因与改造。trajectory skill 驱动消费项目取数、结合业务上下文判断问题
+  源于个体使用、agent、集成/基础设施还是知识/组织缺口，并推动项目实现和注册业务专属的
+  Measurer / Detector / Verifier 子类，完成最后一跳。
 - **Metric 只表示批量聚合**：单轨迹的派生值叫 Measurement；Metric 从某个 AnalysisRun 的
   Worksheet 聚合，并携带 Dataset version、组件 spec、run、target、category 等比较维度。
 - **HTML 由 trajectory_harness 对外提供**：本包决定 Dataset、Failure、Verifier、Metric

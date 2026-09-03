@@ -23,6 +23,22 @@ class ToolCall:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ToolRetryTransition:
+    """A failed tool call and the next call to the same tool."""
+
+    failed: ToolCall
+    retry: ToolCall
+
+    @property
+    def arguments_changed(self) -> bool:
+        return self.failed.signature != self.retry.signature
+
+    @property
+    def recovered(self) -> bool:
+        return self.retry.step.failure is None and self.retry.step.status != "error"
+
+
 def tool_calls(steps: tuple[Step, ...]) -> tuple[ToolCall, ...]:
     """Return executed calls when available, otherwise model-requested calls."""
 
@@ -40,6 +56,39 @@ def tool_calls(steps: tuple[Step, ...]) -> tuple[ToolCall, ...]:
 
 def tool_names(step: Step) -> tuple[str, ...]:
     return tuple(call.name for call in _calls_in_step(step, prefer_input=True))
+
+
+def tool_retry_transitions(steps: tuple[Step, ...]) -> tuple[ToolRetryTransition, ...]:
+    """Pair each failed tool call with the next call to the same tool, if any."""
+
+    calls = tool_calls(steps)
+    transitions = []
+    for index, failed in enumerate(calls):
+        if failed.step.failure is None and failed.step.status != "error":
+            continue
+        retry = next(
+            (
+                candidate
+                for candidate in calls[index + 1 :]
+                if candidate.name == failed.name
+            ),
+            None,
+        )
+        if retry is not None:
+            transitions.append(ToolRetryTransition(failed=failed, retry=retry))
+    return tuple(transitions)
+
+
+def tool_output_bytes(step: Step) -> int:
+    """Return the stable UTF-8 JSON size of one step's reported tool output."""
+
+    payload = json.dumps(
+        list(step.output_messages),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return len(payload.encode("utf-8"))
 
 
 def _calls_in_step(step: Step, *, prefer_input: bool) -> tuple[ToolCall, ...]:

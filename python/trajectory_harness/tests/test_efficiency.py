@@ -137,6 +137,8 @@ def test_tool_usage_measures_failure_result_coverage_and_concurrency():
     assert result.measurements["result_reported_call_count"] == 1
     assert result.measurements["result_coverage_ratio"] == 0.5
     assert result.measurements["result_bytes"] > 0
+    assert result.measurements["average_result_bytes_per_call"] > 0
+    assert result.measurements["peak_result_bytes_per_call"] > 0
     assert result.measurements["max_concurrent_tool_calls"] == 2
     assert result.step_ids == ("read-1", "read-2")
 
@@ -171,6 +173,7 @@ def test_context_usage_measures_growth_and_compact_reduction():
         "last_input_tokens": 40,
         "peak_input_tokens": 100,
         "input_token_delta": -60,
+        "input_growth_ratio": 0.4,
         "post_compact_observed_count": 1,
         "post_compact_input_delta_tokens": -60,
     }

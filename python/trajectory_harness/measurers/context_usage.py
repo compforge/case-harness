@@ -79,6 +79,13 @@ class ContextUsageMeasurer:
                 ("mean", "p50", "p95"),
             ),
             MeasurementSpec(
+                "input_growth_ratio",
+                "ratio",
+                "Last divided by first reported input tokens when the first is non-zero.",
+                "neutral",
+                ("mean", "p50", "p95"),
+            ),
+            MeasurementSpec(
                 "compact_count",
                 "count",
                 "Observed context-compaction steps.",
@@ -145,6 +152,8 @@ class ContextUsageMeasurer:
                     "input_token_delta": counts[-1] - counts[0],
                 }
             )
+            if counts[0] > 0:
+                measurements["input_growth_ratio"] = round(counts[-1] / counts[0], 6)
 
         compact_observations = _compact_reductions(ordered, covered, compacts)
         measurements["post_compact_observed_count"] = len(compact_observations)

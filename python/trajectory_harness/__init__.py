@@ -19,11 +19,26 @@ from trajectory_harness.detect import detect as detect
 from trajectory_harness.detectors.post_compact_refetch import (
     PostCompactRefetchDetector as PostCompactRefetchDetector,
 )
+from trajectory_harness.detectors.cache_retention_bloat import (
+    CacheRetentionBloatDetector as CacheRetentionBloatDetector,
+)
+from trajectory_harness.detectors.context_bloat import (
+    ContextBloatWithoutCompactDetector as ContextBloatWithoutCompactDetector,
+)
+from trajectory_harness.detectors.oversized_tool_observation import (
+    OversizedToolObservationDetector as OversizedToolObservationDetector,
+)
 from trajectory_harness.detectors.repeated_tool_call import (
     RepeatedToolCallDetector as RepeatedToolCallDetector,
 )
 from trajectory_harness.detectors.retry_loop import (
     RetryLoopDetector as RetryLoopDetector,
+)
+from trajectory_harness.detectors.short_decision_churn import (
+    ShortDecisionChurnDetector as ShortDecisionChurnDetector,
+)
+from trajectory_harness.detectors.unchanged_tool_retry import (
+    UnchangedToolRetryDetector as UnchangedToolRetryDetector,
 )
 from trajectory_harness.verify import VerificationResult as VerificationResult
 from trajectory_harness.verify import Verifier as Verifier
@@ -32,6 +47,9 @@ from trajectory_harness.verify import TrajectoryVerification as TrajectoryVerifi
 from trajectory_harness.verify import verify as verify
 from trajectory_harness.verifiers.execution_success import (
     ExecutionSuccessVerifier as ExecutionSuccessVerifier,
+)
+from trajectory_harness.verifiers.measurement_threshold import (
+    MeasurementThresholdVerifier as MeasurementThresholdVerifier,
 )
 from trajectory_harness.verifiers.tool_success import (
     ToolSuccessVerifier as ToolSuccessVerifier,
@@ -52,6 +70,9 @@ from trajectory_harness.measure import TrajectoryMeasurement as TrajectoryMeasur
 from trajectory_harness.measure import measure as measure
 from trajectory_harness.measurers.model_usage import (
     ModelUsageMeasurer as ModelUsageMeasurer,
+)
+from trajectory_harness.measurers.retry_usage import (
+    RetryUsageMeasurer as RetryUsageMeasurer,
 )
 from trajectory_harness.measurers.context_usage import (
     ContextUsageMeasurer as ContextUsageMeasurer,
