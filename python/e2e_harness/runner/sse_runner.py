@@ -31,7 +31,7 @@ import httpx
 
 from e2e_harness.core.config import E2EConfig
 from e2e_harness.runner.base import BaseRunner, Outcome, Request
-from e2e_harness.runner.headers import build_auth_headers
+from e2e_harness.runner.headers import build_headers
 from e2e_harness.runner.line_buffer import LineBuffer
 from e2e_harness.runner.sse_parser import SSEEvent, SSEParser
 
@@ -62,7 +62,7 @@ class SSERunner(BaseRunner):
         self._on_event = on_event
 
     def trigger(self, request: Request) -> Outcome:
-        headers = build_auth_headers(
+        headers = build_headers(
             self._env, extra=request.headers, exclude=request.exclude_headers
         )
         headers.setdefault("Accept", "text/event-stream")

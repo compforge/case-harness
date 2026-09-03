@@ -2,11 +2,13 @@
 # 每个服务的 tests/e2e/config.yaml 遵循此结构
 
 type: object
+additionalProperties: false
 required: [service]
 properties:
 
   service:
     type: object
+    additionalProperties: false
     required: [base_url]
     properties:
       name:
@@ -14,15 +16,18 @@ properties:
         description: 服务标识
       component:
         type: object
+        additionalProperties: false
         properties:
           repository:
             type: object
+            additionalProperties: false
             properties:
               forge: {type: string}
               path: {type: string}
           name: {type: string}
       environment:
         type: object
+        additionalProperties: false
         properties:
           name: {type: string}
           kubeconfig:
@@ -42,6 +47,7 @@ properties:
 
   runtime:
     type: object
+    additionalProperties: false
     properties:
       http_timeout_s:
         type: integer
@@ -72,9 +78,18 @@ properties:
       type: string
     description: 服务自定义配置区，框架透传不解析
 
+  discover:
+    type: object
+    additionalProperties: false
+    description: Python casegen 的可选源码与测试目录配置
+    properties:
+      source_root: {type: string}
+      test_root: {type: string}
+
   # Agent Tier 扩展（Phase 5）
   judge:
     type: object
+    additionalProperties: false
     properties:
       llm_endpoint:
         type: string

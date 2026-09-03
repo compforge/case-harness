@@ -149,7 +149,7 @@ class TestSSERunner:
         assert events[1]["data"] == {"op": "delta", "t": "hello"}
         assert events[2]["data"] == {"op": "done"}
 
-    def test_auth_headers_injected(self):
+    def test_service_headers_injected(self):
         with _serve(b"data: {}\n\n") as base_url:
             with SSERunner(_env(base_url)) as r:
                 r.trigger(Request(method="POST", path="/chat", body={}))

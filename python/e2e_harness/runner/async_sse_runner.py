@@ -19,7 +19,7 @@ import httpx
 from e2e_harness.core.config import E2EConfig
 from e2e_harness.runner.async_base import AsyncBaseRunner
 from e2e_harness.runner.base import Outcome, Request
-from e2e_harness.runner.headers import build_auth_headers
+from e2e_harness.runner.headers import build_headers
 from e2e_harness.runner.line_buffer import LineBuffer
 from e2e_harness.runner.sse_parser import SSEEvent, SSEParser
 
@@ -50,7 +50,7 @@ class AsyncSSERunner(AsyncBaseRunner):
         self._on_event = on_event
 
     async def trigger(self, request: Request) -> Outcome:
-        headers = build_auth_headers(
+        headers = build_headers(
             self._env,
             extra=request.headers,
             exclude=request.exclude_headers,

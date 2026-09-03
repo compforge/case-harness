@@ -153,7 +153,7 @@ class TestAsyncJSONRunner:
         assert outcome.duration_ms >= 0
         assert outcome.raw == b'{"id": "abc-123"}'
 
-    def test_auth_headers_injected(self):
+    def test_service_headers_injected(self):
         _JSONHandler.response_body = b"{}"
 
         async def go():

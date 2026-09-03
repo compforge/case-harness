@@ -152,7 +152,7 @@ Finding、Evaluation 与 Measurement。实现可以融合执行、填表和 chec
   版本化 Unit Dataset；不同 Detector / Evaluator / Measurer / Policy 组合生成各自 EvaluationRun、Worksheet、Metric 与报告。
 
 五者**互不 import、不抽领域公共依赖**（耦合成本 > 省下的重复）：e2e/eval 各自复制一小撮 L2 原语
-（Outcome 形状 / runner / SSEParser / build_auth_headers），perf 自带 httpx 发压栈。唯一例外是
+（Outcome 形状 / runner / SSEParser / build_headers），perf 自带 httpx 发压栈。唯一例外是
 业务无关的 `common` / `report_kit`。一致性落在 Kernel 语义、`spec/` 数据格式与 conformance，
 不落在共享领域代码。
 

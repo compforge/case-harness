@@ -85,7 +85,7 @@ class TestLoadConfig:
 
     def test_load_from_env_vars(self, tmp_path, monkeypatch):
         monkeypatch.setenv("E2E_BASE_URL", "http://fallback:9090")
-        monkeypatch.setenv("E2E_AUTH_HEADERS", '{"Authorization":"Bearer fallback"}')
+        monkeypatch.setenv("E2E_SERVICE_HEADERS", '{"Authorization":"Bearer fallback"}')
         monkeypatch.setenv("E2E_PROFILE", "full")
 
         config = load_config(tmp_path / "nonexistent.yaml")
@@ -93,7 +93,7 @@ class TestLoadConfig:
         assert config.service.headers == {"Authorization": "Bearer fallback"}
         assert config.profile == "full"
 
-    def test_load_auth_headers_mapping(self, tmp_path, monkeypatch):
+    def test_load_service_headers_mapping(self, tmp_path, monkeypatch):
         config = tmp_path / "config.yaml"
         config.write_text(
             dedent("""\
@@ -111,55 +111,82 @@ class TestLoadConfig:
             "X-Top-User-Id": "u1",
         }
 
+    @pytest.mark.parametrize(
+        ("content", "field"),
+        [
+            ("auth:\n  headers: {}\n", "auth"),
+            ("service:\n  base_url: http://localhost\n  typo: true\n", "typo"),
+        ],
+    )
+    def test_rejects_unknown_fields(self, tmp_path, content, field):
+        config = tmp_path / "config.yaml"
+        config.write_text(content)
 
-class TestBuildAuthHeaders:
-    def _config(self, **auth_kwargs):
+        with pytest.raises(ValueError, match=rf"unknown field.*{field}"):
+            load_config(config)
+
+    def test_rejects_non_mapping_service_headers(self, tmp_path):
+        config = tmp_path / "config.yaml"
+        config.write_text("service:\n  headers: bearer-token\n")
+
+        with pytest.raises(ValueError, match="service.headers must be a mapping"):
+            load_config(config)
+
+    def test_rejects_invalid_service_headers_json(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("E2E_SERVICE_HEADERS", "not-json")
+
+        with pytest.raises(ValueError):
+            load_config(tmp_path / "nonexistent.yaml")
+
+
+class TestBuildHeaders:
+    def _config(self, **header_kwargs):
         from e2e_harness.core.config import Service
 
         return E2EConfig(
-            service=Service(name="test", base_url="http://localhost", **auth_kwargs),
+            service=Service(name="test", base_url="http://localhost", **header_kwargs),
         )
 
     def test_headers_are_injected_directly(self):
-        from e2e_harness.runner.headers import build_auth_headers
+        from e2e_harness.runner.headers import build_headers
 
         config = self._config(
             headers={"X-Top-Tenant-Id": "t1", "X-Top-User-Id": "u1"},
         )
-        headers = build_auth_headers(config)
+        headers = build_headers(config)
         assert headers["X-Top-Tenant-Id"] == "t1"
         assert headers["X-Top-User-Id"] == "u1"
 
-    def test_no_auth_headers_when_empty(self):
-        from e2e_harness.runner.headers import build_auth_headers
+    def test_no_service_headers_when_empty(self):
+        from e2e_harness.runner.headers import build_headers
 
         config = self._config()
-        headers = build_auth_headers(config)
+        headers = build_headers(config)
         assert "X-Top-Tenant-Id" not in headers
         assert headers == {"Content-Type": "application/json"}
 
-    def test_extra_overrides_auth(self):
-        from e2e_harness.runner.headers import build_auth_headers
+    def test_extra_overrides_service_headers(self):
+        from e2e_harness.runner.headers import build_headers
 
         config = self._config(headers={"X-T": "t1"})
-        headers = build_auth_headers(config, extra={"X-T": "override"})
+        headers = build_headers(config, extra={"X-T": "override"})
         assert headers["X-T"] == "override"
 
     def test_exclude_drops_after_merge(self):
-        from e2e_harness.runner.headers import build_auth_headers
+        from e2e_harness.runner.headers import build_headers
 
         config = self._config(
             headers={"X-T": "t1", "X-U": "u1"},
         )
-        headers = build_auth_headers(config, exclude={"X-T"})
+        headers = build_headers(config, exclude={"X-T"})
         assert "X-T" not in headers
         assert headers["X-U"] == "u1"
 
     def test_custom_content_type(self):
-        from e2e_harness.runner.headers import build_auth_headers
+        from e2e_harness.runner.headers import build_headers
 
         config = self._config()
-        headers = build_auth_headers(config, content_type="text/event-stream")
+        headers = build_headers(config, content_type="text/event-stream")
         assert headers["Content-Type"] == "text/event-stream"
 
 
