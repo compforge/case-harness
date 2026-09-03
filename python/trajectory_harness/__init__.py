@@ -1,4 +1,4 @@
-"""Normalize, evaluate, aggregate, and report agent trajectories."""
+"""Normalize, verify, aggregate, and report agent trajectories."""
 
 from trajectory_harness.build import DatasetBuildResult as DatasetBuildResult
 from trajectory_harness.build import DatasetBuildSummary as DatasetBuildSummary
@@ -25,16 +25,16 @@ from trajectory_harness.detectors.repeated_tool_call import (
 from trajectory_harness.detectors.retry_loop import (
     RetryLoopDetector as RetryLoopDetector,
 )
-from trajectory_harness.evaluate import EvaluationResult as EvaluationResult
-from trajectory_harness.evaluate import Evaluator as Evaluator
-from trajectory_harness.evaluate import EvaluatorSpec as EvaluatorSpec
-from trajectory_harness.evaluate import TrajectoryEvaluation as TrajectoryEvaluation
-from trajectory_harness.evaluate import evaluate as evaluate
-from trajectory_harness.evaluators.execution_success import (
-    ExecutionSuccessEvaluator as ExecutionSuccessEvaluator,
+from trajectory_harness.verify import VerificationResult as VerificationResult
+from trajectory_harness.verify import Verifier as Verifier
+from trajectory_harness.verify import VerifierSpec as VerifierSpec
+from trajectory_harness.verify import TrajectoryVerification as TrajectoryVerification
+from trajectory_harness.verify import verify as verify
+from trajectory_harness.verifiers.execution_success import (
+    ExecutionSuccessVerifier as ExecutionSuccessVerifier,
 )
-from trajectory_harness.evaluators.tool_success import (
-    ToolSuccessEvaluator as ToolSuccessEvaluator,
+from trajectory_harness.verifiers.tool_success import (
+    ToolSuccessVerifier as ToolSuccessVerifier,
 )
 from trajectory_harness.failures import LLMErrorType as LLMErrorType
 from trajectory_harness.failures import LLMFailurePhase as LLMFailurePhase
@@ -45,6 +45,7 @@ from trajectory_harness.loaders.base import TrajectoryLoader as TrajectoryLoader
 from trajectory_harness.loaders.otel_json import OTelJsonLoader as OTelJsonLoader
 from trajectory_harness.measure import MeasurementResult as MeasurementResult
 from trajectory_harness.measure import MeasurementSpec as MeasurementSpec
+from trajectory_harness.measure import Measurements as Measurements
 from trajectory_harness.measure import Measurer as Measurer
 from trajectory_harness.measure import MeasurerSpec as MeasurerSpec
 from trajectory_harness.measure import TrajectoryMeasurement as TrajectoryMeasurement
@@ -60,7 +61,7 @@ from trajectory_harness.measurers.tool_usage import (
 )
 from trajectory_harness.metrics import Metric as Metric
 from trajectory_harness.metrics import (
-    TrajectoryEvaluationRun as TrajectoryEvaluationRun,
+    TrajectoryAnalysisRun as TrajectoryAnalysisRun,
 )
 from trajectory_harness.metrics import aggregate_metrics as aggregate_metrics
 from trajectory_harness.model import ExecutionResult as ExecutionResult
@@ -89,7 +90,7 @@ from trajectory_harness.runio import load_run_artifact as load_run_artifact
 from trajectory_harness.runio import write_dataset_artifact as write_dataset_artifact
 from trajectory_harness.runio import write_run_artifact as write_run_artifact
 from trajectory_harness.runner import (
-    TrajectoryEvaluationRunner as TrajectoryEvaluationRunner,
+    TrajectoryAnalysisRunner as TrajectoryAnalysisRunner,
 )
 from trajectory_harness.source import Recording as Recording
 from trajectory_harness.source import RecordingQuery as RecordingQuery

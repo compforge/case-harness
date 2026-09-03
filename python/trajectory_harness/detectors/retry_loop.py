@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from trajectory_harness._tool_calls import tool_names
 from trajectory_harness.detect import DetectionResult, DetectorSpec, Finding
+from trajectory_harness.measure import Measurements
 from trajectory_harness.model import Step, Trajectory
 
 
@@ -16,11 +17,15 @@ class RetryLoopDetector:
         detector_id="retry_loop",
         title="Retry loops",
         description="Detect repeated actions after an observed operation failure.",
+        category="cost",
         kind="common",
         owner="trajectory_harness",
     )
 
-    def detect(self, trajectory: Trajectory) -> DetectionResult:
+    def detect(
+        self, trajectory: Trajectory, *, measurements: Measurements = ()
+    ) -> DetectionResult:
+        del measurements
         if not trajectory.steps:
             return DetectionResult(
                 detector_id=self.spec.detector_id,

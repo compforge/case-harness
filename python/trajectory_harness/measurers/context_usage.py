@@ -26,6 +26,7 @@ class ContextUsageMeasurer:
         description=(
             "Measure model-input coverage and growth plus observed context compaction."
         ),
+        category="cost",
         owner="trajectory_harness",
         measurements=(
             MeasurementSpec(

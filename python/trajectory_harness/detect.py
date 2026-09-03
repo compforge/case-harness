@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from trajectory_harness.model import Trajectory
+from trajectory_harness.model import AnalysisCategory, RuleType, Trajectory
+from trajectory_harness.measure import Measurements
 
 DetectorKind = Literal["common", "domain"]
 DetectionStatus = Literal["analyzed", "not_applicable", "error"]
@@ -19,9 +20,16 @@ class DetectorSpec:
     detector_id: str
     title: str
     description: str
+    category: AnalysisCategory
     kind: DetectorKind = "domain"
     owner: str = ""
-    category: str = "behavior"
+    rule_type: RuleType = "hard"
+
+    def __post_init__(self) -> None:
+        if self.category not in ("cost", "effect"):
+            raise ValueError("detector category must be 'cost' or 'effect'")
+        if self.rule_type not in ("hard", "soft"):
+            raise ValueError("detector rule_type must be 'hard' or 'soft'")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -31,6 +39,7 @@ class DetectorSpec:
             "kind": self.kind,
             "owner": self.owner,
             "category": self.category,
+            "rule_type": self.rule_type,
         }
 
     @classmethod
@@ -39,9 +48,10 @@ class DetectorSpec:
             detector_id=str(value["detector_id"]),
             title=str(value["title"]),
             description=str(value.get("description") or ""),
+            category=value["category"],
             kind=value.get("kind", "domain"),
             owner=str(value.get("owner") or ""),
-            category=str(value.get("category") or "behavior"),
+            rule_type=value.get("rule_type", "hard"),
         )
 
 
@@ -106,11 +116,13 @@ class DetectionResult:
 
 @runtime_checkable
 class Detector(Protocol):
-    """Discover findings in one normalized trajectory."""
+    """Discover findings from a normalized trajectory and its measurements."""
 
     spec: DetectorSpec
 
-    def detect(self, trajectory: Trajectory) -> DetectionResult: ...
+    def detect(
+        self, trajectory: Trajectory, *, measurements: Measurements = ()
+    ) -> DetectionResult: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +132,11 @@ class TrajectoryDetection:
     trajectory: Trajectory
     results: tuple[DetectionResult, ...]
     target: str = ""
-    category: str = "behavior"
+    category: AnalysisCategory = "cost"
+
+    def __post_init__(self) -> None:
+        if self.category not in ("cost", "effect"):
+            raise ValueError("detection category must be 'cost' or 'effect'")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -137,7 +153,7 @@ class TrajectoryDetection:
         return cls(
             trajectory=trajectory,
             target=str(value.get("target") or ""),
-            category=str(value.get("category") or "behavior"),
+            category=value.get("category", "cost"),
             results=tuple(
                 DetectionResult.from_dict(item) for item in value.get("results", ())
             ),
@@ -148,15 +164,16 @@ def detect(
     trajectory: Trajectory,
     detectors: list[Detector] | tuple[Detector, ...],
     *,
+    measurements: Measurements = (),
     target: str = "",
-    category: str = "behavior",
+    category: AnalysisCategory = "cost",
 ) -> TrajectoryDetection:
     """Run detectors; detector failures remain health data."""
 
     results = []
     for detector in detectors:
         try:
-            results.append(detector.detect(trajectory))
+            results.append(detector.detect(trajectory, measurements=measurements))
         except Exception as error:  # detector plugins are an isolation boundary
             results.append(
                 DetectionResult(

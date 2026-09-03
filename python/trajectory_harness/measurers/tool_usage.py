@@ -22,6 +22,7 @@ class ToolUsageMeasurer:
             "Measure executed tool calls, normalized failures, duration, result "
             "coverage, result bytes, and observed concurrency."
         ),
+        category="cost",
         owner="trajectory_harness",
         measurements=(
             MeasurementSpec(

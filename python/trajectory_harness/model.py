@@ -12,6 +12,8 @@ from typing import Any, Literal
 
 FailureKind = Literal["llm", "tool", "agent", "workflow", "unknown"]
 ExecutionOutcome = Literal["completed", "failed", "timeout", "canceled", "unknown"]
+AnalysisCategory = Literal["cost", "effect"]
+RuleType = Literal["hard", "soft"]
 
 
 @dataclass(frozen=True, slots=True)

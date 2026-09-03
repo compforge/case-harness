@@ -7,18 +7,19 @@ import pytest
 from trajectory_harness import (
     DetectionResult,
     DetectorSpec,
-    EvaluationResult,
-    EvaluatorSpec,
+    VerificationResult,
+    VerifierSpec,
     ExecutionResult,
-    ExecutionSuccessEvaluator,
+    ExecutionSuccessVerifier,
     Failure,
     Finding,
+    MeasurementResult,
     RepeatedToolCallDetector,
     Step,
-    ToolSuccessEvaluator,
+    ToolSuccessVerifier,
     Trajectory,
     detect,
-    evaluate,
+    verify,
 )
 
 
@@ -131,7 +132,7 @@ def test_model_round_tool_calls_are_fallback_when_tool_spans_are_absent():
     assert result.findings[0].step_ids == ("s2",)
 
 
-def test_common_execution_and_tool_evaluators_keep_failures_as_facts():
+def test_common_execution_and_tool_verifiers_keep_failures_as_facts():
     failure = Failure(
         kind="tool",
         phase="prepare",
@@ -144,11 +145,11 @@ def test_common_execution_and_tool_evaluators_keep_failures_as_facts():
         execution=ExecutionResult(outcome="failed", duration_ms=25, failure=failure),
     )
 
-    evaluation = evaluate(
-        trajectory, [ExecutionSuccessEvaluator(), ToolSuccessEvaluator()]
+    verification = verify(
+        trajectory, [ExecutionSuccessVerifier(), ToolSuccessVerifier()]
     )
 
-    execution, tool = evaluation.results
+    execution, tool = verification.results
     assert execution.verdict == "fail"
     assert execution.score == 0
     assert tool.verdict == "fail"
@@ -187,24 +188,25 @@ def test_failure_and_execution_round_trip_with_trajectory():
     assert restored.steps[0].failure.key == "llm.request.rate_limit"
 
 
-def test_evaluator_exception_is_health_data_not_zero_score():
+def test_verifier_exception_is_health_data_not_zero_score():
     @dataclass(frozen=True)
-    class BrokenEvaluator:
-        spec: EvaluatorSpec = EvaluatorSpec(
-            evaluator_id="broken",
+    class BrokenVerifier:
+        spec: VerifierSpec = VerifierSpec(
+            verifier_id="broken",
             title="Broken",
-            description="Test evaluator failure.",
+            description="Test verifier failure.",
+            category="effect",
         )
 
-        def evaluate(self, trajectory, reference=None):
-            del trajectory, reference
+        def verify(self, trajectory, *, measurements=(), reference=None):
+            del trajectory, measurements, reference
             raise RuntimeError("judge unavailable")
 
-    evaluation = evaluate(Trajectory(trajectory_id="t1", steps=()), [BrokenEvaluator()])
+    verification = verify(Trajectory(trajectory_id="t1", steps=()), [BrokenVerifier()])
 
-    assert evaluation.results == (
-        EvaluationResult(
-            evaluator_id="broken",
+    assert verification.results == (
+        VerificationResult(
+            verifier_id="broken",
             status="error",
             explanation="RuntimeError: judge unavailable",
         ),
@@ -218,10 +220,11 @@ def test_detector_exception_is_health_data():
             detector_id="broken",
             title="Broken",
             description="Test detector failure.",
+            category="cost",
         )
 
-        def detect(self, trajectory):
-            del trajectory
+        def detect(self, trajectory, *, measurements=()):
+            del trajectory, measurements
             raise RuntimeError("detector unavailable")
 
     detection = detect(Trajectory(trajectory_id="t1", steps=()), [BrokenDetector()])
@@ -235,6 +238,67 @@ def test_detector_exception_is_health_data():
     )
 
 
-def test_evaluated_result_requires_a_judgment():
+def test_verified_result_requires_a_judgment():
     with pytest.raises(ValueError, match="verdict, a score, or both"):
-        EvaluationResult(evaluator_id="empty", status="evaluated")
+        VerificationResult(verifier_id="empty", status="verified")
+
+
+def test_detector_and_verifier_specs_reject_noncanonical_axes():
+    with pytest.raises(ValueError, match="category must be 'cost' or 'effect'"):
+        DetectorSpec("legacy", "Legacy", "", category="behavior")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="rule_type must be 'hard' or 'soft'"):
+        VerifierSpec("legacy", "Legacy", "", category="effect", rule_type="judge")  # type: ignore[arg-type]
+
+
+def test_detector_and_verifier_receive_measurements_and_keep_axes_orthogonal():
+    derived = (
+        MeasurementResult(
+            measurer_id="model_usage",
+            status="measured",
+            measurements={"total_tokens": 120},
+        ),
+    )
+
+    @dataclass(frozen=True)
+    class EffectDiscovery:
+        spec: DetectorSpec = DetectorSpec(
+            detector_id="effect_discovery",
+            title="Effect discovery",
+            description="Find an effect pattern with a soft rule.",
+            category="effect",
+            rule_type="soft",
+        )
+
+        def detect(self, trajectory, *, measurements=()):
+            del trajectory
+            assert measurements == derived
+            return DetectionResult(detector_id=self.spec.detector_id, status="analyzed")
+
+    @dataclass(frozen=True)
+    class CostBudget:
+        spec: VerifierSpec = VerifierSpec(
+            verifier_id="cost_budget",
+            title="Cost budget",
+            description="Verify a cost budget with a hard rule.",
+            category="cost",
+            rule_type="hard",
+        )
+
+        def verify(self, trajectory, *, measurements=(), reference=None):
+            del trajectory, reference
+            total = measurements[0].measurements["total_tokens"]
+            return VerificationResult(
+                verifier_id=self.spec.verifier_id,
+                status="verified",
+                verdict="pass" if total <= 128 else "fail",
+            )
+
+    trajectory = Trajectory(trajectory_id="t1", steps=())
+    detection = detect(trajectory, [EffectDiscovery()], measurements=derived)
+    verification = verify(trajectory, [CostBudget()], measurements=derived)
+
+    assert detection.results[0].status == "analyzed"
+    assert verification.results[0].verdict == "pass"
+    assert DetectorSpec.from_dict(EffectDiscovery().spec.to_dict()).rule_type == "soft"
+    restored = VerifierSpec.from_dict(CostBudget().spec.to_dict())
+    assert (restored.category, restored.rule_type) == ("cost", "hard")

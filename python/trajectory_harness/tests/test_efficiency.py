@@ -13,7 +13,7 @@ from trajectory_harness import (
     Step,
     ToolUsageMeasurer,
     Trajectory,
-    TrajectoryEvaluationRun,
+    TrajectoryAnalysisRun,
     measure,
     render_report_html,
 )
@@ -90,7 +90,7 @@ def test_generation_provenance_roundtrips_and_is_reported():
 
     html = render_report_html(
         [
-            TrajectoryEvaluationRun(
+            TrajectoryAnalysisRun(
                 run_id="generation",
                 created_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
                 dataset_id="reviews",
@@ -257,10 +257,10 @@ def _metric(
     )
 
 
-def _pareto_run(run_id: str, effect: float, cost: float) -> TrajectoryEvaluationRun:
+def _pareto_run(run_id: str, effect: float, cost: float) -> TrajectoryAnalysisRun:
     dimensions = (
-        ("category", "quality"),
-        ("evaluator_id", "domain_effect"),
+        ("category", "effect"),
+        ("verifier_id", "domain_effect"),
     )
     cost_dimensions = (
         ("category", "cost"),
@@ -268,12 +268,12 @@ def _pareto_run(run_id: str, effect: float, cost: float) -> TrajectoryEvaluation
         ("measurement", "total_tokens"),
     )
     metrics = (
-        _metric(run_id, "evaluation.pass", effect, "rate", dimensions),
+        _metric(run_id, "verification.pass", effect, "rate", dimensions),
         _metric(run_id, "measurement.value", cost, "mean", cost_dimensions),
         _metric(run_id, "execution.completion", 1.0, "rate"),
         _metric(run_id, "execution.duration_ms", 50.0, "p95"),
     )
-    return TrajectoryEvaluationRun(
+    return TrajectoryAnalysisRun(
         run_id=run_id,
         created_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
         dataset_id="reviews",
@@ -286,12 +286,12 @@ def _pareto_run(run_id: str, effect: float, cost: float) -> TrajectoryEvaluation
 def test_report_builds_explicit_effect_cost_pareto_comparison():
     pareto = ParetoSpec(
         effect=MetricSelector(
-            name="evaluation.pass",
+            name="verification.pass",
             aggregation="rate",
             objective="maximize",
             dimensions=(
-                ("category", "quality"),
-                ("evaluator_id", "domain_effect"),
+                ("category", "effect"),
+                ("verifier_id", "domain_effect"),
             ),
         ),
         cost=MetricSelector(

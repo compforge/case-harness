@@ -1,4 +1,4 @@
-"""Independent dataset/run artifacts for offline evaluation and report rendering."""
+"""Independent dataset/run artifacts for offline analysis and report rendering."""
 
 from __future__ import annotations
 
@@ -11,23 +11,23 @@ from typing import Any
 from trajectory_harness.build import DatasetBuildResult, DatasetBuildSummary
 from trajectory_harness.dataset import TrajectoryDataset
 from trajectory_harness.detect import DetectorSpec, TrajectoryDetection
-from trajectory_harness.evaluate import EvaluatorSpec, TrajectoryEvaluation
+from trajectory_harness.verify import VerifierSpec, TrajectoryVerification
 from trajectory_harness.measure import MeasurerSpec, TrajectoryMeasurement
-from trajectory_harness.metrics import Metric, TrajectoryEvaluationRun
+from trajectory_harness.metrics import Metric, TrajectoryAnalysisRun
 from trajectory_harness.model import Trajectory
 
 DATASET_SCHEMA = 3
-RUN_SCHEMA = 4
+RUN_SCHEMA = 5
 DATASET_FILE = "dataset.json"
 RUN_FILE = "run.json"
 
 
 @dataclass(frozen=True, slots=True)
 class TrajectoryRunArtifact:
-    """The fixed dataset plus one evaluation run over that exact version."""
+    """The fixed dataset plus one analysis run over that exact version."""
 
     build: DatasetBuildResult
-    run: TrajectoryEvaluationRun
+    run: TrajectoryAnalysisRun
 
     def __post_init__(self) -> None:
         dataset = self.build.dataset
@@ -36,17 +36,17 @@ class TrajectoryRunArtifact:
             raise ValueError("trajectory run does not match its dataset artifact")
         known_trajectory_ids = set(dataset.trajectory_by_id)
         if not set(self.run.trajectory_ids) <= known_trajectory_ids:
-            raise ValueError("evaluation run references an unknown trajectory")
+            raise ValueError("analysis run references an unknown trajectory")
         target_trajectory_ids = {item[0] for item in self.run.trajectory_targets}
         if len(self.run.trajectory_targets) != len(
             self.run.trajectory_ids
         ) or target_trajectory_ids != set(self.run.trajectory_ids):
-            raise ValueError("every trajectory must have exactly one evaluation target")
+            raise ValueError("every trajectory must have exactly one analysis target")
         result_trajectory_ids = {
             item.trajectory.trajectory_id
             for item in (
                 *self.run.detections,
-                *self.run.evaluations,
+                *self.run.verifications,
                 *self.run.measurements,
             )
         }
@@ -91,7 +91,7 @@ def write_dataset_artifact(directory: str | Path, build: DatasetBuildResult) -> 
 
 
 def load_dataset_artifact(directory: str | Path) -> DatasetBuildResult:
-    """Load a fixed dataset independently of any prior evaluation run."""
+    """Load a fixed dataset independently of any prior analysis run."""
 
     dataset_value = json.loads(
         (Path(directory) / DATASET_FILE).read_text(encoding="utf-8")
@@ -109,7 +109,7 @@ def load_dataset_artifact(directory: str | Path) -> DatasetBuildResult:
 
 
 def load_run_artifact(run_dir: str | Path) -> TrajectoryRunArtifact:
-    """Load one run without touching a Source, Loader, Evaluator, or Measurer."""
+    """Load one run without touching a Source, Loader, Verifier, or Measurer."""
 
     directory = Path(run_dir)
     build = load_dataset_artifact(directory)
@@ -119,7 +119,7 @@ def load_run_artifact(run_dir: str | Path) -> TrajectoryRunArtifact:
     return TrajectoryRunArtifact(build=build, run=run)
 
 
-def _run_to_dict(run: TrajectoryEvaluationRun) -> dict[str, Any]:
+def _run_to_dict(run: TrajectoryAnalysisRun) -> dict[str, Any]:
     return {
         "schema": RUN_SCHEMA,
         "run_id": run.run_id,
@@ -130,8 +130,8 @@ def _run_to_dict(run: TrajectoryEvaluationRun) -> dict[str, Any]:
         "trajectory_targets": dict(run.trajectory_targets),
         "detections": [item.to_dict() for item in run.detections],
         "detector_specs": [item.to_dict() for item in run.detector_specs],
-        "evaluations": [item.to_dict() for item in run.evaluations],
-        "evaluator_specs": [item.to_dict() for item in run.evaluator_specs],
+        "verifications": [item.to_dict() for item in run.verifications],
+        "verifier_specs": [item.to_dict() for item in run.verifier_specs],
         "measurements": [item.to_dict() for item in run.measurements],
         "measurer_specs": [item.to_dict() for item in run.measurer_specs],
         "annotation_count": run.annotation_count,
@@ -142,7 +142,7 @@ def _run_to_dict(run: TrajectoryEvaluationRun) -> dict[str, Any]:
 
 def _run_from_dict(
     value: dict[str, Any], trajectories: dict[str, Trajectory]
-) -> TrajectoryEvaluationRun:
+) -> TrajectoryAnalysisRun:
     if value.get("schema") != RUN_SCHEMA:
         raise ValueError(
             f"unsupported trajectory run schema {value.get('schema')!r}; "
@@ -161,7 +161,7 @@ def _run_from_dict(
                 f"run item references unknown trajectory {trajectory_id!r}"
             ) from error
 
-    return TrajectoryEvaluationRun(
+    return TrajectoryAnalysisRun(
         run_id=run_id,
         created_at=created_at,
         dataset_id=str(value["dataset_id"]),
@@ -177,12 +177,12 @@ def _run_from_dict(
         detector_specs=tuple(
             DetectorSpec.from_dict(item) for item in value.get("detector_specs", ())
         ),
-        evaluations=tuple(
-            TrajectoryEvaluation.from_dict(item, trajectory=trajectory_for(item))
-            for item in value.get("evaluations", ())
+        verifications=tuple(
+            TrajectoryVerification.from_dict(item, trajectory=trajectory_for(item))
+            for item in value.get("verifications", ())
         ),
-        evaluator_specs=tuple(
-            EvaluatorSpec.from_dict(item) for item in value.get("evaluator_specs", ())
+        verifier_specs=tuple(
+            VerifierSpec.from_dict(item) for item in value.get("verifier_specs", ())
         ),
         measurements=tuple(
             TrajectoryMeasurement.from_dict(item, trajectory=trajectory_for(item))

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from trajectory_harness._steps import is_compact_step
 from trajectory_harness._tool_calls import tool_calls
 from trajectory_harness.detect import DetectionResult, DetectorSpec, Finding
+from trajectory_harness.measure import Measurements
 from trajectory_harness.model import Trajectory
 
 
@@ -16,11 +17,15 @@ class PostCompactRefetchDetector:
         detector_id="post_compact_refetch",
         title="Post-compact refetch",
         description="Detect exact tool calls repeated across a context-compaction boundary.",
+        category="cost",
         kind="common",
         owner="trajectory_harness",
     )
 
-    def detect(self, trajectory: Trajectory) -> DetectionResult:
+    def detect(
+        self, trajectory: Trajectory, *, measurements: Measurements = ()
+    ) -> DetectionResult:
+        del measurements
         positions = {
             step.step_id: position
             for position, (_, step) in enumerate(

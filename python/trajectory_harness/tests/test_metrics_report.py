@@ -4,19 +4,19 @@ from datetime import datetime, timezone
 
 from trajectory_harness import (
     ExecutionResult,
-    ExecutionSuccessEvaluator,
+    ExecutionSuccessVerifier,
     Failure,
     Metric,
     Step,
     Trajectory,
-    TrajectoryEvaluationRun,
+    TrajectoryAnalysisRun,
     aggregate_metrics,
-    evaluate,
+    verify,
     render_report_html,
 )
 
 
-def _run(run_id: str, day: int, success: bool) -> TrajectoryEvaluationRun:
+def _run(run_id: str, day: int, success: bool) -> TrajectoryAnalysisRun:
     failure = None
     if not success:
         failure = Failure(
@@ -45,36 +45,36 @@ def _run(run_id: str, day: int, success: bool) -> TrajectoryEvaluationRun:
             failure=failure,
         ),
     )
-    evaluator = ExecutionSuccessEvaluator()
-    return TrajectoryEvaluationRun(
+    verifier = ExecutionSuccessVerifier()
+    return TrajectoryAnalysisRun(
         run_id=run_id,
         created_at=datetime(2026, 8, day, tzinfo=timezone.utc),
         dataset_id="reviews",
         dataset_version="",
         trajectory_ids=(trajectory.trajectory_id,),
         trajectory_targets=((trajectory.trajectory_id, "review1"),),
-        evaluations=(
-            evaluate(
+        verifications=(
+            verify(
                 trajectory,
-                [evaluator],
+                [verifier],
                 target="review1",
-                category="quality",
+                category="effect",
             ),
         ),
-        evaluator_specs=(evaluator.spec,),
+        verifier_specs=(verifier.spec,),
         annotation_count=1,
     )
 
 
-def test_aggregate_metrics_combines_execution_failure_and_evaluation():
+def test_aggregate_metrics_combines_execution_failure_and_verification():
     metrics = aggregate_metrics(_run("run-2", 2, False))
     by_name = {metric.qualified_name: metric.value for metric in metrics}
 
     assert by_name["execution.timeout.rate{target=review1}"] == 1
     assert (
         by_name[
-            "evaluation.pass.rate{target=review1,category=quality,"
-            "evaluator_id=execution_success}"
+            "verification.pass.rate{target=review1,category=effect,"
+            "verifier_id=execution_success}"
         ]
         == 0
     )
@@ -86,7 +86,7 @@ def test_aggregate_metrics_combines_execution_failure_and_evaluation():
         == 1
     )
     assert Metric.from_dict(metrics[0].to_dict()) == metrics[0]
-    assert TrajectoryEvaluationRun.from_dict(
+    assert TrajectoryAnalysisRun.from_dict(
         _run("roundtrip", 2, False).to_dict()
     ) == _run("roundtrip", 2, False)
 

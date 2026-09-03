@@ -1,4 +1,4 @@
-"""Trajectory evaluation runs and generic metric aggregation."""
+"""Trajectory analysis runs and generic metric aggregation."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, Iterable, Literal
 
 from trajectory_harness.detect import DetectorSpec, TrajectoryDetection
-from trajectory_harness.evaluate import EvaluatorSpec, TrajectoryEvaluation
+from trajectory_harness.verify import VerifierSpec, TrajectoryVerification
 from trajectory_harness.measure import (
     MetricDirection,
     MeasurerSpec,
@@ -21,7 +21,7 @@ MetricAggregation = Literal["count", "rate", "sum", "mean", "p50", "p95"]
 
 
 @dataclass(frozen=True, slots=True)
-class TrajectoryEvaluationRun:
+class TrajectoryAnalysisRun:
     """One Worksheet produced by evaluating a fixed trajectory dataset version."""
 
     run_id: str
@@ -32,8 +32,8 @@ class TrajectoryEvaluationRun:
     trajectory_targets: tuple[tuple[str, str], ...] = ()
     detections: tuple[TrajectoryDetection, ...] = ()
     detector_specs: tuple[DetectorSpec, ...] = ()
-    evaluations: tuple[TrajectoryEvaluation, ...] = ()
-    evaluator_specs: tuple[EvaluatorSpec, ...] = ()
+    verifications: tuple[TrajectoryVerification, ...] = ()
+    verifier_specs: tuple[VerifierSpec, ...] = ()
     measurements: tuple[TrajectoryMeasurement, ...] = ()
     measurer_specs: tuple[MeasurerSpec, ...] = ()
     annotation_count: int | None = None
@@ -54,8 +54,8 @@ class TrajectoryEvaluationRun:
             "trajectory_targets": dict(self.trajectory_targets),
             "detections": [item.to_dict() for item in self.detections],
             "detector_specs": [item.to_dict() for item in self.detector_specs],
-            "evaluations": [item.to_dict() for item in self.evaluations],
-            "evaluator_specs": [item.to_dict() for item in self.evaluator_specs],
+            "verifications": [item.to_dict() for item in self.verifications],
+            "verifier_specs": [item.to_dict() for item in self.verifier_specs],
             "measurements": [item.to_dict() for item in self.measurements],
             "measurer_specs": [item.to_dict() for item in self.measurer_specs],
             "annotation_count": self.annotation_count,
@@ -64,7 +64,7 @@ class TrajectoryEvaluationRun:
         }
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> TrajectoryEvaluationRun:
+    def from_dict(cls, value: dict[str, Any]) -> TrajectoryAnalysisRun:
         trajectories = {
             trajectory.trajectory_id: trajectory
             for trajectory in (
@@ -100,13 +100,12 @@ class TrajectoryEvaluationRun:
             detector_specs=tuple(
                 DetectorSpec.from_dict(item) for item in value.get("detector_specs", ())
             ),
-            evaluations=tuple(
-                TrajectoryEvaluation.from_dict(item, trajectory=trajectory_for(item))
-                for item in value.get("evaluations", ())
+            verifications=tuple(
+                TrajectoryVerification.from_dict(item, trajectory=trajectory_for(item))
+                for item in value.get("verifications", ())
             ),
-            evaluator_specs=tuple(
-                EvaluatorSpec.from_dict(item)
-                for item in value.get("evaluator_specs", ())
+            verifier_specs=tuple(
+                VerifierSpec.from_dict(item) for item in value.get("verifier_specs", ())
             ),
             measurements=tuple(
                 TrajectoryMeasurement.from_dict(item, trajectory=trajectory_for(item))
@@ -191,7 +190,7 @@ class Metric:
 
 
 def aggregate_metrics(
-    run: TrajectoryEvaluationRun,
+    run: TrajectoryAnalysisRun,
     *,
     trajectories: Iterable[Trajectory] = (),
 ) -> tuple[Metric, ...]:
@@ -207,13 +206,13 @@ def aggregate_metrics(
         metrics.extend(_execution_metrics(run, target, trajectories))
         metrics.extend(_failure_metrics(run, target, trajectories))
     metrics.extend(_detection_metrics(run))
-    metrics.extend(_evaluation_metrics(run))
+    metrics.extend(_verification_metrics(run))
     metrics.extend(_measurement_metrics(run))
     return tuple(metrics)
 
 
 def _execution_metrics(
-    run: TrajectoryEvaluationRun,
+    run: TrajectoryAnalysisRun,
     target: str,
     trajectories: list[Trajectory],
 ) -> list[Metric]:
@@ -284,7 +283,7 @@ def _execution_metrics(
 
 
 def _failure_metrics(
-    run: TrajectoryEvaluationRun,
+    run: TrajectoryAnalysisRun,
     target: str,
     trajectories: list[Trajectory],
 ) -> list[Metric]:
@@ -343,15 +342,15 @@ def _failure_metrics(
     return result
 
 
-def _run_trajectories(run: TrajectoryEvaluationRun) -> tuple[Trajectory, ...]:
+def _run_trajectories(run: TrajectoryAnalysisRun) -> tuple[Trajectory, ...]:
     by_id = {
         item.trajectory.trajectory_id: item.trajectory
-        for item in (*run.detections, *run.evaluations, *run.measurements)
+        for item in (*run.detections, *run.verifications, *run.measurements)
     }
     return tuple(by_id.values())
 
 
-def _detection_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
+def _detection_metrics(run: TrajectoryAnalysisRun) -> list[Metric]:
     result = []
     grouped = defaultdict(list)
     for item in run.detections:
@@ -444,28 +443,28 @@ def _detection_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
     return result
 
 
-def _evaluation_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
+def _verification_metrics(run: TrajectoryAnalysisRun) -> list[Metric]:
     result = []
     grouped = defaultdict(list)
-    for item in run.evaluations:
-        for evaluation in item.results:
-            grouped[(item.target, item.category, evaluation.evaluator_id)].append(
-                evaluation
+    for item in run.verifications:
+        for verification in item.results:
+            grouped[(item.target, item.category, verification.verifier_id)].append(
+                verification
             )
-    for (target, category, evaluator_id), evaluations in sorted(grouped.items()):
+    for (target, category, verifier_id), verifications in sorted(grouped.items()):
         total = _target_total(run, target)
-        evaluated = [item for item in evaluations if item.status == "evaluated"]
-        errors = [item for item in evaluations if item.status == "error"]
+        verified = [item for item in verifications if item.status == "verified"]
+        errors = [item for item in verifications if item.status == "error"]
         dimensions = _context_dimensions(target, category) + (
-            ("evaluator_id", evaluator_id),
+            ("verifier_id", verifier_id),
         )
         if total:
             result.extend(
                 (
                     _metric(
                         run,
-                        "evaluation.applicability",
-                        len(evaluated) / total,
+                        "verification.applicability",
+                        len(verified) / total,
                         "rate",
                         "ratio",
                         "neutral",
@@ -473,7 +472,7 @@ def _evaluation_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
                     ),
                     _metric(
                         run,
-                        "evaluation.error",
+                        "verification.error",
                         len(errors) / total,
                         "rate",
                         "ratio",
@@ -482,14 +481,14 @@ def _evaluation_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
                     ),
                 )
             )
-        if evaluated:
-            judged = [item for item in evaluated if item.verdict is not None]
+        if verified:
+            judged = [item for item in verified if item.verdict is not None]
             if judged:
                 passing = sum(item.verdict == "pass" for item in judged)
                 result.append(
                     _metric(
                         run,
-                        "evaluation.pass",
+                        "verification.pass",
                         passing / len(judged),
                         "rate",
                         "ratio",
@@ -497,11 +496,11 @@ def _evaluation_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
                         dimensions,
                     )
                 )
-            scores = [item.score for item in evaluated if item.score is not None]
+            scores = [item.score for item in verified if item.score is not None]
             result.extend(
                 _distribution_metrics(
                     run,
-                    "evaluation.score",
+                    "verification.score",
                     scores,
                     "score",
                     "higher_is_better",
@@ -513,7 +512,7 @@ def _evaluation_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
     return result
 
 
-def _measurement_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
+def _measurement_metrics(run: TrajectoryAnalysisRun) -> list[Metric]:
     result = []
     specs = {spec.measurer_id: spec for spec in run.measurer_specs}
     grouped = defaultdict(list)
@@ -577,7 +576,7 @@ def _measurement_metrics(run: TrajectoryEvaluationRun) -> list[Metric]:
 
 
 def _distribution_metrics(
-    run: TrajectoryEvaluationRun,
+    run: TrajectoryAnalysisRun,
     name: str,
     values: Iterable[float],
     unit: str,
@@ -620,7 +619,7 @@ def _percentile(values: list[float], percentile: float) -> float:
 
 
 def _metric(
-    run: TrajectoryEvaluationRun,
+    run: TrajectoryAnalysisRun,
     name: str,
     value: float,
     aggregation: MetricAggregation,
@@ -650,7 +649,7 @@ def _context_dimensions(target: str, category: str = "") -> tuple[tuple[str, str
     return tuple(dimensions)
 
 
-def _target_total(run: TrajectoryEvaluationRun, target: str) -> int:
+def _target_total(run: TrajectoryAnalysisRun, target: str) -> int:
     if run.trajectory_targets:
         return sum(item_target == target for _, item_target in run.trajectory_targets)
     return len(run.trajectory_ids) if not target else 0

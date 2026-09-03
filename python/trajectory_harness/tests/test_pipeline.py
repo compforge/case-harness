@@ -9,7 +9,7 @@ from harness_common.report_kit import Prose, Section
 from harness_common.verdict import CheckVerdict
 from trajectory_harness import (
     ExecutionResult,
-    ExecutionSuccessEvaluator,
+    ExecutionSuccessVerifier,
     ModelUsageMeasurer,
     Recording,
     RecordingQuery,
@@ -19,7 +19,7 @@ from trajectory_harness import (
     Trajectory,
     TrajectoryDataset,
     TrajectoryDatasetBuilder,
-    TrajectoryEvaluationRunner,
+    TrajectoryAnalysisRunner,
     TrajectoryHarness,
     TrajectoryReportBuilder,
     TrajectoryAnnotation,
@@ -136,7 +136,7 @@ class _CCRDatasetBuilder(TrajectoryDatasetBuilder):
         )
 
 
-class _CCRRunner(TrajectoryEvaluationRunner):
+class _CCRRunner(TrajectoryAnalysisRunner):
     def target_for(self, trajectory, dataset):
         del dataset
         return trajectory.metadata["review_stage"]
@@ -162,7 +162,7 @@ def _harness(source, version, *, verdict_policy=None):
         builder=_CCRDatasetBuilder(source=source, version=version),
         runner=_CCRRunner(
             detectors=(RepeatedToolCallDetector(),),
-            evaluators=(ExecutionSuccessEvaluator(),),
+            verifiers=(ExecutionSuccessVerifier(),),
             measurers=(ModelUsageMeasurer(),),
         ),
         reporter=_CCRReport(),
@@ -171,7 +171,7 @@ def _harness(source, version, *, verdict_policy=None):
 
 
 class _PassingPolicy:
-    def evaluate(self, artifact):
+    def verify(self, artifact):
         return [
             CheckVerdict(
                 name="wrong_rate <= 0.1",
@@ -183,7 +183,7 @@ class _PassingPolicy:
 
 
 class _InvalidPolicy:
-    def evaluate(self, artifact):
+    def verify(self, artifact):
         del artifact
         return [CheckVerdict(name="invalid", status="warning")]
 
@@ -222,9 +222,9 @@ def test_harness_persists_current_run_and_rerenders_without_source(tmp_path):
     assert result.artifact.run.annotation_count == 1
     assert result.artifact.run.trajectory_targets == (("ok", "review1"),)
     assert result.artifact.run.detections[0].target == "review1"
-    assert result.artifact.run.detections[0].category == "behavior"
-    assert result.artifact.run.evaluations[0].target == "review1"
-    assert result.artifact.run.evaluations[0].category == "quality"
+    assert result.artifact.run.detections[0].category == "cost"
+    assert result.artifact.run.verifications[0].target == "review1"
+    assert result.artifact.run.verifications[0].category == "effect"
     assert result.artifact.run.measurements[0].category == "cost"
     assert all(
         metric.dataset_version == "2026-W34" for metric in result.artifact.run.metrics
@@ -244,7 +244,7 @@ def test_harness_persists_current_run_and_rerenders_without_source(tmp_path):
     assert "CCR weekly report" in html
     assert "Dataset build health" in html
     assert "unsupported recording" in html
-    assert "Evaluation evidence" in html
+    assert "Verification evidence" in html
     assert "Detection evidence" in html
     assert "repeated_tool_call" in html
     assert "Measurement evidence" in html
@@ -299,7 +299,7 @@ def test_runner_preserves_target_and_category_as_worksheet_dimensions():
 
     run = _CCRRunner(
         detectors=(RepeatedToolCallDetector(),),
-        evaluators=(ExecutionSuccessEvaluator(),),
+        verifiers=(ExecutionSuccessVerifier(),),
         measurers=(ModelUsageMeasurer(),),
     ).run(dataset, run_id="compare-reviews")
 
@@ -308,12 +308,12 @@ def test_runner_preserves_target_and_category_as_worksheet_dimensions():
         ("review-2", "review2"),
     )
     assert {(item.target, item.category) for item in run.detections} == {
-        ("review1", "behavior"),
-        ("review2", "behavior"),
+        ("review1", "cost"),
+        ("review2", "cost"),
     }
-    assert {(item.target, item.category) for item in run.evaluations} == {
-        ("review1", "quality"),
-        ("review2", "quality"),
+    assert {(item.target, item.category) for item in run.verifications} == {
+        ("review1", "effect"),
+        ("review2", "effect"),
     }
     assert {(item.target, item.category) for item in run.measurements} == {
         ("review1", "cost"),

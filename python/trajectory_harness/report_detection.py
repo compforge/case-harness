@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Sequence
 
 from harness_common.report_kit import Section, Table
-from trajectory_harness.metrics import TrajectoryEvaluationRun
+from trajectory_harness.metrics import TrajectoryAnalysisRun
 
 
-def detector_catalog_section(runs: Sequence[TrajectoryEvaluationRun]) -> Section:
+def detector_catalog_section(runs: Sequence[TrajectoryAnalysisRun]) -> Section:
     specs = {}
     for run in runs:
         for spec in run.detector_specs:
@@ -17,11 +17,19 @@ def detector_catalog_section(runs: Sequence[TrajectoryEvaluationRun]) -> Section
         heading="Detector catalog",
         blocks=[
             Table(
-                columns=["Detector", "Category", "Kind", "Owner", "Description"],
+                columns=[
+                    "Detector",
+                    "Category",
+                    "Rule type",
+                    "Kind",
+                    "Owner",
+                    "Description",
+                ],
                 rows=[
                     [
                         spec.detector_id,
                         spec.category,
+                        spec.rule_type,
                         spec.kind,
                         spec.owner or "—",
                         spec.description,
@@ -35,7 +43,7 @@ def detector_catalog_section(runs: Sequence[TrajectoryEvaluationRun]) -> Section
     )
 
 
-def detection_evidence_section(runs: Sequence[TrajectoryEvaluationRun]) -> Section:
+def detection_evidence_section(runs: Sequence[TrajectoryAnalysisRun]) -> Section:
     rows = []
     for run in sorted(runs, key=lambda item: item.dataset_id):
         for item in run.detections:

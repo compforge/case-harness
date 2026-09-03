@@ -93,6 +93,10 @@ Dataset + Detectors / Evaluators / Measurers / optional Policy
 Worksheet 的一行始终等于 Unit seed 加上本次 Finding、Evaluation 与 Measurement；聚合、透视和报告都是这张
 表的下游操作。
 
+trajectory_harness 在这套通用 Kernel 上采用更窄的领域词汇：Trajectory 与从它确定性派生的
+Measurements 共同作为 Detector / Verifier 输入；Detector 负责发现，Verifier 负责判据验证。
+两者均可面向 cost / effect，也均可采用 hard / soft 规则，因此不再单设 Evaluator 角色。
+
 Dataset 和 Worksheet 使用相同 Unit grain。一个 Harness 存在多种基本粒度时，应形成多个明确 grain
 的 Dataset / Worksheet，不能把不同层级的行混进一张无从解释的大表。具体 grain 和 key 由领域文档
 定义。

@@ -142,7 +142,7 @@ This split keeps test intent close to the product while allowing execution mecha
 | `python/eval_harness` | Agent evaluation and comparative experiments |
 | `python/perf_harness` / `typescript/perf-harness` | Load generation, SLOs, and capacity evidence |
 | `python/trace_harness` / `typescript/trace-harness` | Trace normalization, attribution, and findings |
-| `python/trajectory_harness` | Agent trajectory normalization and evaluation |
+| `python/trajectory_harness` | Trajectory normalization, derived measurements, detection, and verification |
 | `go/toolbox/kube` / `python/harness_toolbox/kube` | Kubernetes control and observation shared by e2e and perf |
 
 ## Repository development

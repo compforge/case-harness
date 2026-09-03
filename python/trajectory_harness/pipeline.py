@@ -15,7 +15,7 @@ from trajectory_harness.runio import (
     load_run_artifact,
     write_run_artifact,
 )
-from trajectory_harness.runner import TrajectoryEvaluationRunner
+from trajectory_harness.runner import TrajectoryAnalysisRunner
 from trajectory_harness.source import RecordingQuery
 from trajectory_harness.verdict import (
     TrajectoryVerdictPolicy,
@@ -40,7 +40,7 @@ class TrajectoryHarness:
         self,
         *,
         builder: TrajectoryDatasetBuilder,
-        runner: TrajectoryEvaluationRunner,
+        runner: TrajectoryAnalysisRunner,
         reporter: TrajectoryReportBuilder,
         verdict_policy: TrajectoryVerdictPolicy | None = None,
     ) -> None:

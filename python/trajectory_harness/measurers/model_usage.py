@@ -25,6 +25,7 @@ class ModelUsageMeasurer:
         measurer_id="model_usage",
         title="Model usage",
         description="Measure model calls, token usage, and prompt-cache efficiency.",
+        category="cost",
         owner="trajectory_harness",
         measurements=(
             MeasurementSpec(
