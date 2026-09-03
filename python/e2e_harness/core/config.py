@@ -119,15 +119,16 @@ def load_config(config_path: str | Path = "config.yaml") -> E2EConfig:
     else:
         data = _build_from_env()
 
+    _validate_config(data)
     return _parse_config(data)
 
 
 def _build_from_env() -> dict:
     """Fallback: construct config dict purely from environment variables."""
-    raw_headers = os.environ.get("E2E_AUTH_HEADERS", "")
+    raw_headers = os.environ.get("E2E_SERVICE_HEADERS", "")
     headers = json.loads(raw_headers) if raw_headers else {}
     if not isinstance(headers, dict):
-        raise ValueError("E2E_AUTH_HEADERS must be a JSON object")
+        raise ValueError("E2E_SERVICE_HEADERS must be a JSON object")
     return {
         "service": {
             "name": os.environ.get("E2E_SERVICE_NAME", ""),
@@ -150,6 +151,74 @@ def _build_from_env() -> dict:
         "profile": os.environ.get("E2E_PROFILE", "full"),
         "custom": {},
     }
+
+
+def _validate_config(data: Any) -> None:
+    root = _require_mapping(data, "config")
+    _reject_unknown_fields(
+        root,
+        "config",
+        {
+            "service",
+            "runtime",
+            "profile",
+            "capabilities_endpoint",
+            "custom",
+            "discover",
+            "judge",
+        },
+    )
+
+    service = _mapping_field(root, "service", "service")
+    _reject_unknown_fields(
+        service,
+        "service",
+        {"name", "component", "environment", "base_url", "headers"},
+    )
+    component = _mapping_field(service, "component", "service.component")
+    _reject_unknown_fields(component, "service.component", {"repository", "name"})
+    repository = _mapping_field(component, "repository", "service.component.repository")
+    _reject_unknown_fields(
+        repository, "service.component.repository", {"forge", "path"}
+    )
+    environment = _mapping_field(service, "environment", "service.environment")
+    _reject_unknown_fields(
+        environment,
+        "service.environment",
+        {"name", "kubeconfig", "context"},
+    )
+    _mapping_field(service, "headers", "service.headers")
+
+    runtime = _mapping_field(root, "runtime", "runtime")
+    _reject_unknown_fields(
+        runtime,
+        "runtime",
+        {"http_timeout_s", "poll_interval_ms", "poll_timeout_s", "parallel"},
+    )
+    discover = _mapping_field(root, "discover", "discover")
+    _reject_unknown_fields(discover, "discover", {"source_root", "test_root"})
+    judge = _mapping_field(root, "judge", "judge")
+    _reject_unknown_fields(judge, "judge", {"llm_endpoint", "llm_model", "llm_api_key"})
+    _mapping_field(root, "custom", "custom")
+
+
+def _require_mapping(value: Any, path: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be a mapping")
+    return value
+
+
+def _mapping_field(parent: dict[str, Any], key: str, path: str) -> dict[str, Any]:
+    value = parent.get(key)
+    if value is None:
+        return {}
+    return _require_mapping(value, path)
+
+
+def _reject_unknown_fields(data: dict[str, Any], path: str, allowed: set[str]) -> None:
+    unknown = sorted(set(data) - allowed)
+    if unknown:
+        raise ValueError(f"{path} contains unknown field(s): {', '.join(unknown)}")
 
 
 def _parse_config(data: dict) -> E2EConfig:

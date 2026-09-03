@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -156,19 +157,15 @@ func LoadConfig(configPath string) (*E2EConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	if service, ok := resolved["service"].(map[string]any); ok {
-		if headers, exists := service["headers"]; exists {
-			if _, ok := headers.(map[string]any); !ok {
-				return nil, fmt.Errorf("parse config %s: service.headers must be a mapping", configPath)
-			}
-		}
+	if err := validateConfig(resolved); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w", configPath, err)
 	}
 
 	return parseConfig(resolved), nil
 }
 
 func loadFromEnvVars() (*E2EConfig, error) {
-	headers, err := authHeadersFromEnv()
+	headers, err := serviceHeadersFromEnv()
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +196,103 @@ func loadFromEnvVars() (*E2EConfig, error) {
 		Profile: envOrDefault("E2E_PROFILE", "full"),
 		Custom:  map[string]string{},
 	}, nil
+}
+
+func validateConfig(data map[string]any) error {
+	if err := rejectUnknownFields(data, "config", "service", "runtime", "profile", "capabilities_endpoint", "custom", "discover", "judge"); err != nil {
+		return err
+	}
+	service, err := mappingField(data, "service", "service")
+	if err != nil {
+		return err
+	}
+	if service != nil {
+		if err := rejectUnknownFields(service, "service", "name", "component", "environment", "base_url", "headers"); err != nil {
+			return err
+		}
+		component, err := mappingField(service, "component", "service.component")
+		if err != nil {
+			return err
+		}
+		if component != nil {
+			if err := rejectUnknownFields(component, "service.component", "repository", "name"); err != nil {
+				return err
+			}
+			repository, err := mappingField(component, "repository", "service.component.repository")
+			if err != nil {
+				return err
+			}
+			if repository != nil {
+				if err := rejectUnknownFields(repository, "service.component.repository", "forge", "path"); err != nil {
+					return err
+				}
+			}
+		}
+		environment, err := mappingField(service, "environment", "service.environment")
+		if err != nil {
+			return err
+		}
+		if environment != nil {
+			if err := rejectUnknownFields(environment, "service.environment", "name", "kubeconfig", "context"); err != nil {
+				return err
+			}
+		}
+		if _, err := mappingField(service, "headers", "service.headers"); err != nil {
+			return err
+		}
+	}
+	for _, section := range []struct {
+		name   string
+		fields []string
+	}{
+		{"runtime", []string{"http_timeout_s", "poll_interval_ms", "poll_timeout_s", "parallel"}},
+		{"discover", []string{"source_root", "test_root"}},
+		{"judge", []string{"llm_endpoint", "llm_model", "llm_api_key"}},
+	} {
+		value, err := mappingField(data, section.name, section.name)
+		if err != nil {
+			return err
+		}
+		if value != nil {
+			if err := rejectUnknownFields(value, section.name, section.fields...); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := mappingField(data, "custom", "custom"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func mappingField(parent map[string]any, key, path string) (map[string]any, error) {
+	value, exists := parent[key]
+	if !exists || value == nil {
+		return nil, nil
+	}
+	mapping, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be a mapping", path)
+	}
+	return mapping, nil
+}
+
+func rejectUnknownFields(data map[string]any, path string, fields ...string) error {
+	allowed := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		allowed[field] = struct{}{}
+	}
+	unknown := make([]string, 0)
+	for field := range data {
+		if _, ok := allowed[field]; !ok {
+			unknown = append(unknown, field)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	return fmt.Errorf("%s contains unknown field(s): %s", path, strings.Join(unknown, ", "))
 }
 
 func parseConfig(data map[string]any) *E2EConfig {
@@ -260,14 +354,14 @@ func parseConfig(data map[string]any) *E2EConfig {
 	return config
 }
 
-func authHeadersFromEnv() (map[string]string, error) {
-	raw := os.Getenv("E2E_AUTH_HEADERS")
+func serviceHeadersFromEnv() (map[string]string, error) {
+	raw := os.Getenv("E2E_SERVICE_HEADERS")
 	if raw == "" {
 		return map[string]string{}, nil
 	}
 	headers := map[string]string{}
 	if err := json.Unmarshal([]byte(raw), &headers); err != nil {
-		return nil, fmt.Errorf("parse E2E_AUTH_HEADERS as JSON object: %w", err)
+		return nil, fmt.Errorf("parse E2E_SERVICE_HEADERS as JSON object: %w", err)
 	}
 	return headers, nil
 }

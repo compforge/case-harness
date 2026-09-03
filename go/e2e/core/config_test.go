@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -100,11 +101,11 @@ custom:
 
 func TestLoadConfigFallback(t *testing.T) {
 	os.Setenv("E2E_BASE_URL", "http://fallback:8080")
-	os.Setenv("E2E_AUTH_HEADERS", `{"Authorization":"Bearer fallback"}`)
+	os.Setenv("E2E_SERVICE_HEADERS", `{"Authorization":"Bearer fallback"}`)
 	os.Setenv("E2E_PROFILE", "full")
 	defer func() {
 		os.Unsetenv("E2E_BASE_URL")
-		os.Unsetenv("E2E_AUTH_HEADERS")
+		os.Unsetenv("E2E_SERVICE_HEADERS")
 		os.Unsetenv("E2E_PROFILE")
 	}()
 
@@ -123,20 +124,43 @@ func TestLoadConfigFallback(t *testing.T) {
 	}
 }
 
-func TestLoadConfigRejectsInvalidAuthHeadersJSON(t *testing.T) {
-	os.Setenv("E2E_AUTH_HEADERS", "not-json")
-	defer os.Unsetenv("E2E_AUTH_HEADERS")
+func TestLoadConfigRejectsInvalidServiceHeadersJSON(t *testing.T) {
+	os.Setenv("E2E_SERVICE_HEADERS", "not-json")
+	defer os.Unsetenv("E2E_SERVICE_HEADERS")
 	if _, err := LoadConfig("/nonexistent/config.yaml"); err == nil {
-		t.Fatal("expected invalid E2E_AUTH_HEADERS error")
+		t.Fatal("expected invalid E2E_SERVICE_HEADERS error")
 	}
 }
 
-func TestLoadConfigRejectsNonMappingAuthHeaders(t *testing.T) {
+func TestLoadConfigRejectsNonMappingServiceHeaders(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(configPath, []byte("service:\n  headers: bearer-token\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadConfig(configPath); err == nil {
 		t.Fatal("expected non-mapping service.headers error")
+	}
+}
+
+func TestLoadConfigRejectsUnknownFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		field   string
+	}{
+		{name: "top-level", content: "auth:\n  headers: {}\n", field: "auth"},
+		{name: "service", content: "service:\n  base_url: http://localhost\n  typo: true\n", field: "typo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(configPath, []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadConfig(configPath)
+			if err == nil || !strings.Contains(err.Error(), tt.field) {
+				t.Fatalf("expected unknown field %q error, got %v", tt.field, err)
+			}
+		})
 	}
 }
