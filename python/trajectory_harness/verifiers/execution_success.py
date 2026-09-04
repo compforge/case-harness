@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import trajectory_execution
 from trajectory_harness.measure import Measurements
 from trajectory_harness.verify import VerificationResult, VerifierSpec
 
@@ -28,7 +30,7 @@ class ExecutionSuccessVerifier:
         reference: Trajectory | None = None,
     ) -> VerificationResult:
         del measurements, reference
-        execution = trajectory.execution
+        execution = trajectory_execution(trajectory)
         if execution is None or execution.outcome == "unknown":
             return VerificationResult(
                 verifier_id=self.spec.verifier_id,

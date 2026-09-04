@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from trajectory_harness._tool_calls import tool_output_bytes
+from atif import Step, Trajectory
+
+from trajectory_harness._tool_calls import has_tool_execution, tool_output_bytes
 from trajectory_harness.measure import MeasurementResult, MeasurementSpec, MeasurerSpec
-from trajectory_harness.model import Step, Trajectory
+from trajectory_harness.model import (
+    step_duration_ms,
+    step_failure,
+    step_id,
+    step_output_messages,
+    step_start_ms,
+)
 
 _DISTRIBUTION_AGGREGATIONS = ("sum", "mean", "p50", "p95")
 
@@ -99,9 +107,7 @@ class ToolUsageMeasurer:
     )
 
     def measure(self, trajectory: Trajectory) -> MeasurementResult:
-        calls = tuple(
-            step for step in trajectory.steps if step.operation == "execute_tool"
-        )
+        calls = tuple(step for step in trajectory.steps if has_tool_execution(step))
         if not calls:
             return MeasurementResult(
                 measurer_id=self.spec.measurer_id,
@@ -109,14 +115,18 @@ class ToolUsageMeasurer:
                 explanation="Trajectory contains no executed tool-call steps.",
             )
 
-        failed = sum(call.failure is not None for call in calls)
-        reported = tuple(call for call in calls if call.output_messages)
+        failed = sum(step_failure(call) is not None for call in calls)
+        reported = tuple(
+            call
+            for call in calls
+            if call.observation is not None or step_output_messages(call)
+        )
         result_sizes = tuple(tool_output_bytes(call) for call in reported)
         measurements: dict[str, float | int | bool] = {
             "tool_call_count": len(calls),
             "failed_tool_call_count": failed,
             "tool_failure_ratio": round(failed / len(calls), 6),
-            "tool_duration_ms": round(sum(call.duration_ms for call in calls), 6),
+            "tool_duration_ms": round(sum(step_duration_ms(call) for call in calls), 6),
             "result_reported_call_count": len(reported),
             "result_coverage_ratio": round(len(reported) / len(calls), 6),
             "result_bytes": sum(result_sizes),
@@ -135,15 +145,18 @@ class ToolUsageMeasurer:
                 f"Observed {len(calls)} executed tool calls; "
                 f"{len(reported)} reported output messages."
             ),
-            step_ids=tuple(call.step_id for call in calls),
+            step_ids=tuple(step_id(call) for call in calls),
         )
 
 
 def _max_concurrency(calls: tuple[Step, ...]) -> int:
     intervals = [
-        (call.start_ms, call.start_ms + call.duration_ms)
+        (
+            step_start_ms(call),
+            step_start_ms(call) + step_duration_ms(call),
+        )
         for call in calls
-        if call.duration_ms > 0
+        if step_duration_ms(call) > 0
     ]
     if not intervals:
         return 1

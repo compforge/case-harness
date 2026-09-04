@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
 
 
 @runtime_checkable

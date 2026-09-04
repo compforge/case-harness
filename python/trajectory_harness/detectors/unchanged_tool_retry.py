@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from trajectory_harness._tool_calls import tool_calls, tool_retry_transitions
 from trajectory_harness.detect import DetectionResult, DetectorSpec, Finding
 from trajectory_harness.measure import Measurements
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import step_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,9 +51,12 @@ class UnchangedToolRetryDetector:
 
         step_ids = tuple(
             dict.fromkeys(
-                step_id
+                current_step_id
                 for item in unchanged
-                for step_id in (item.failed.step.step_id, item.retry.step.step_id)
+                for current_step_id in (
+                    step_id(item.failed.step),
+                    step_id(item.retry.step),
+                )
             )
         )
         summary = (

@@ -1,12 +1,25 @@
 # trajectory_harness
 
-Normalize agent and workflow recordings, derive measurements, discover patterns, verify
-criteria, aggregate dataset-level metrics, and render comparable trajectory reports.
+Consume standard ATIF v1.7 agent trajectories, adapt other recordings to ATIF, derive
+measurements, discover patterns, verify criteria, aggregate dataset-level metrics, and render
+comparable reports.
 
 `Trajectory` is the normalized execution fact. `Measurements` is deterministic data derived
 from that trajectory. Together they are the inputs to `Detector` (discovery and data mining)
 and `Verifier` (checking an explicit criterion). Both component types declare two independent
 dimensions: `category="cost" | "effect"` and `rule_type="hard" | "soft"`.
+
+Native trajectory input is standard ATIF:
+
+```python
+from trajectory_harness import ATIFJsonLoader
+
+trajectories = ATIFJsonLoader().load("trajectory.json")
+```
+
+Import ATIF models such as `Agent`, `Step`, `ToolCall`, and `Trajectory` from the official
+`atif` package when producing trajectories. The `Trajectory` and `Step` names re-exported by
+`trajectory_harness` are those same official classes.
 
 ```python
 from datetime import datetime, timezone
@@ -113,7 +126,7 @@ class ReviewDatasetBuilder(TrajectoryDatasetBuilder):
 
 class ReviewRunner(TrajectoryAnalysisRunner):
     def target_for(self, trajectory, dataset):
-        return trajectory.metadata["review_stage"]
+        return str((trajectory.extra or {}).get("review_stage", ""))
 
 
 class ReviewReport(TrajectoryReportBuilder):
@@ -169,18 +182,19 @@ Source implementations discover lightweight `RecordingRef` values and fetch raw 
 text. Loaders own format parsing and can consume either files with `load` or fetched content with
 `loads`; dataset builders attach labels separately instead of coupling annotations to storage.
 
-The bundled loader accepts OTLP JSON, Tempo's OTLP wrapper, and flat OTLP JSONL. Message
-payloads follow the OTel GenAI `role + parts` schema. A failed operation carries a
-normalized `Failure(kind, phase, error_type)`; for example `llm.request.timeout` or
-`tool.prepare.dependency_missing`.
+`ATIFJsonLoader` validates and consumes native ATIF JSON, arrays, and JSONL without projecting them
+into a Harness-owned trajectory schema. `OTelJsonLoader` is an adapter for OTLP JSON, Tempo's OTLP
+wrapper, and flat OTLP JSONL; it maps standard agent, step, tool-call, observation, and token fields
+to ATIF. Source details that ATIF does not standardize remain under namespaced `extra` fields.
 
 A trajectory may contain one agent loop or a pipeline of several agent loops and deterministic
-operations. `Step.parent_step_id` preserves that execution hierarchy; domain verifiers select
-the relevant subtrees through step `operation`, `name`, and `attributes`. The common model does
-not introduce a separate stage abstraction. `Trajectory.generation` is a provenance map for the
-agent, instruction/skill, tool-contract, model, loop, and orchestration versions that actually
-produced the behavior. Loaders and project wrappers populate it; it is not a separate domain object
-and is never inferred from Dataset or Verifier versions.
+operations. Ordered turns use ATIF `step_id`; multi-agent execution uses
+`subagent_trajectories` and `SubagentTrajectoryRef`. OTel span parentage, operation names, timing,
+status, and normalized failures are optional source facts under `extra.case_harness`, not a second
+Step schema. Agent name, version, model, tool definitions, messages, tool calls, observations, and
+token metrics use ATIF's standard fields. Additional instruction/skill, tool-contract, loop, and
+orchestration versions may be carried in namespaced `extra` and are never inferred from Dataset or
+Verifier versions.
 
 Recurring LLM failures use the shared `llm_failure(phase, error_type)` constructor;
 `llm_timeout(phase)` narrows timeouts to observed boundaries such as `connect`,
@@ -227,8 +241,8 @@ The HTML report keeps low-cardinality failure metrics and lists the affected tra
 so consumers can correlate failures with case attributes without turning case IDs into metric
 dimensions.
 
-The Harness owns common formats, derived measurements, reusable structural rules, and execution
-flow. A consuming project owns business data and semantics. Its trajectory workflow should add a
+ATIF owns the trajectory format. The Harness owns derived measurements, reusable structural rules,
+and execution flow. A consuming project owns business data and semantics. Its trajectory workflow should add a
 project `Measurer` when a business value can be deterministically derived, a `Detector` when a
 repeated domain pattern should become a Finding, and a `Verifier` when the business supplies an
 explicit threshold, reference, or rubric. Register those subclasses in the project runner; do not

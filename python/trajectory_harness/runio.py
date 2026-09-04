@@ -14,9 +14,9 @@ from trajectory_harness.detect import DetectorSpec, TrajectoryDetection
 from trajectory_harness.verify import VerifierSpec, TrajectoryVerification
 from trajectory_harness.measure import MeasurerSpec, TrajectoryMeasurement
 from trajectory_harness.metrics import Metric, TrajectoryAnalysisRun
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
 
-DATASET_SCHEMA = 3
+DATASET_SCHEMA = 4
 RUN_SCHEMA = 5
 DATASET_FILE = "dataset.json"
 RUN_FILE = "run.json"

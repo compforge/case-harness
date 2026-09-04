@@ -1,4 +1,7 @@
-"""Normalize, verify, aggregate, and report agent trajectories."""
+"""Measure, detect, verify, aggregate, and report ATIF trajectories."""
+
+from atif import Step as Step
+from atif import Trajectory as Trajectory
 
 from trajectory_harness.build import DatasetBuildResult as DatasetBuildResult
 from trajectory_harness.build import DatasetBuildSummary as DatasetBuildSummary
@@ -60,6 +63,7 @@ from trajectory_harness.failures import LLMTimeoutPhase as LLMTimeoutPhase
 from trajectory_harness.failures import llm_failure as llm_failure
 from trajectory_harness.failures import llm_timeout as llm_timeout
 from trajectory_harness.loaders.base import TrajectoryLoader as TrajectoryLoader
+from trajectory_harness.loaders.atif_json import ATIFJsonLoader as ATIFJsonLoader
 from trajectory_harness.loaders.otel_json import OTelJsonLoader as OTelJsonLoader
 from trajectory_harness.measure import MeasurementResult as MeasurementResult
 from trajectory_harness.measure import MeasurementSpec as MeasurementSpec
@@ -87,8 +91,6 @@ from trajectory_harness.metrics import (
 from trajectory_harness.metrics import aggregate_metrics as aggregate_metrics
 from trajectory_harness.model import ExecutionResult as ExecutionResult
 from trajectory_harness.model import Failure as Failure
-from trajectory_harness.model import Step as Step
-from trajectory_harness.model import Trajectory as Trajectory
 from trajectory_harness.pipeline import (
     TrajectoryHarness as TrajectoryHarness,
 )

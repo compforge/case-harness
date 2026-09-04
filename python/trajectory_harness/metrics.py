@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Iterable, Literal
 
+from atif import Trajectory
+
 from trajectory_harness.detect import DetectorSpec, TrajectoryDetection
 from trajectory_harness.verify import VerifierSpec, TrajectoryVerification
 from trajectory_harness.measure import (
@@ -15,7 +17,13 @@ from trajectory_harness.measure import (
     MeasurerSpec,
     TrajectoryMeasurement,
 )
-from trajectory_harness.model import Trajectory
+from trajectory_harness.model import (
+    require_trajectory_id,
+    step_failure,
+    trajectory_execution,
+    trajectory_from_dict,
+    trajectory_to_dict,
+)
 
 MetricAggregation = Literal["count", "rate", "sum", "mean", "p50", "p95"]
 
@@ -49,7 +57,9 @@ class TrajectoryAnalysisRun:
             "created_at": self.created_at.isoformat(),
             "dataset_id": self.dataset_id,
             "dataset_version": self.dataset_version,
-            "trajectories": [item.to_dict() for item in _run_trajectories(self)],
+            "trajectories": [
+                trajectory_to_dict(item) for item in _run_trajectories(self)
+            ],
             "trajectory_ids": list(self.trajectory_ids),
             "trajectory_targets": dict(self.trajectory_targets),
             "detections": [item.to_dict() for item in self.detections],
@@ -66,9 +76,9 @@ class TrajectoryAnalysisRun:
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> TrajectoryAnalysisRun:
         trajectories = {
-            trajectory.trajectory_id: trajectory
+            require_trajectory_id(trajectory): trajectory
             for trajectory in (
-                Trajectory.from_dict(item) for item in value.get("trajectories", ())
+                trajectory_from_dict(item) for item in value.get("trajectories", ())
             )
         }
 
@@ -198,10 +208,10 @@ def aggregate_metrics(
 
     metrics: list[Metric] = []
     targets: dict[str, list[Trajectory]] = defaultdict(list)
-    by_id = {item.trajectory_id: item for item in trajectories}
-    by_id.update({item.trajectory_id: item for item in _run_trajectories(run)})
+    by_id = {require_trajectory_id(item): item for item in trajectories}
+    by_id.update({require_trajectory_id(item): item for item in _run_trajectories(run)})
     for trajectory in by_id.values():
-        targets[run.target_for(trajectory.trajectory_id)].append(trajectory)
+        targets[run.target_for(require_trajectory_id(trajectory))].append(trajectory)
     for target, trajectories in sorted(targets.items()):
         metrics.extend(_execution_metrics(run, target, trajectories))
         metrics.extend(_failure_metrics(run, target, trajectories))
@@ -227,11 +237,11 @@ def _execution_metrics(
             dimensions=dimensions,
         )
     ]
-    known = [
-        trajectory.execution
-        for trajectory in trajectories
-        if trajectory.execution and trajectory.execution.outcome != "unknown"
-    ]
+    known = []
+    for trajectory in trajectories:
+        execution = trajectory_execution(trajectory)
+        if execution and execution.outcome != "unknown":
+            known.append(execution)
     if not known:
         return metrics
     outcomes = Counter(execution.outcome for execution in known)
@@ -292,20 +302,22 @@ def _failure_metrics(
     affected: dict[tuple[str, str, str, str], set[str]] = defaultdict(set)
     for trajectory in trajectories:
         for step in trajectory.steps:
-            if step.failure:
+            failure = step_failure(step)
+            if failure:
                 key = (
                     "step",
-                    step.failure.kind,
-                    step.failure.phase,
-                    step.failure.error_type,
+                    failure.kind,
+                    failure.phase,
+                    failure.error_type,
                 )
                 events[key] += 1
-                affected[key].add(trajectory.trajectory_id)
-        if trajectory.execution and trajectory.execution.failure:
-            failure = trajectory.execution.failure
+                affected[key].add(require_trajectory_id(trajectory))
+        execution = trajectory_execution(trajectory)
+        if execution and execution.failure:
+            failure = execution.failure
             key = ("execution", failure.kind, failure.phase, failure.error_type)
             events[key] += 1
-            affected[key].add(trajectory.trajectory_id)
+            affected[key].add(require_trajectory_id(trajectory))
 
     result = []
     for key, count in sorted(events.items()):
@@ -344,7 +356,7 @@ def _failure_metrics(
 
 def _run_trajectories(run: TrajectoryAnalysisRun) -> tuple[Trajectory, ...]:
     by_id = {
-        item.trajectory.trajectory_id: item.trajectory
+        require_trajectory_id(item.trajectory): item.trajectory
         for item in (*run.detections, *run.verifications, *run.measurements)
     }
     return tuple(by_id.values())

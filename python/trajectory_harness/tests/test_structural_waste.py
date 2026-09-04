@@ -10,11 +10,14 @@ from trajectory_harness import (
     OversizedToolObservationDetector,
     RetryUsageMeasurer,
     ShortDecisionChurnDetector,
-    Step,
-    Trajectory,
     TrajectoryAnalysisRunner,
     TrajectoryDataset,
     UnchangedToolRetryDetector,
+)
+from trajectory_harness.model import (
+    make_atif_step as Step,
+    make_atif_trajectory as Trajectory,
+    step_failure,
 )
 
 
@@ -107,9 +110,9 @@ def test_retry_usage_and_unchanged_retry_finding_preserve_argument_delta():
         "changed_retry_count": 1,
         "recovered_retry_count": 1,
     }
-    assert measurement.step_ids == ("failed-1", "failed-2", "recovered")
+    assert measurement.step_ids == ("1", "2", "3")
     assert detection.findings[0].code == "unchanged_tool_retry"
-    assert detection.findings[0].step_ids == ("failed-1", "failed-2")
+    assert detection.findings[0].step_ids == ("1", "2")
 
 
 def test_retry_usage_does_not_pair_parallel_calls_in_the_same_failed_step():
@@ -170,8 +173,8 @@ def test_oversized_tool_observation_is_a_finding_not_a_failure():
 
     assert result.status == "analyzed"
     assert result.findings[0].code == "oversized_tool_observation"
-    assert result.findings[0].step_ids == ("read",)
-    assert trajectory.steps[0].failure is None
+    assert result.findings[0].step_ids == ("1",)
+    assert step_failure(trajectory.steps[0]) is None
 
 
 def test_short_decision_churn_requires_covered_repeated_short_outputs():
@@ -194,12 +197,7 @@ def test_short_decision_churn_requires_covered_repeated_short_outputs():
     assert measurement.measurements["output_under_500_tokens_call_count"] == 4
     assert measurement.measurements["output_under_500_tokens_ratio"] == 1.0
     assert result.findings[0].code == "short_decision_churn"
-    assert result.findings[0].step_ids == (
-        "model-0",
-        "model-1",
-        "model-2",
-        "model-3",
-    )
+    assert result.findings[0].step_ids == ("1", "2", "3", "4")
 
 
 def test_context_and_cache_detectors_consume_derived_measurements():

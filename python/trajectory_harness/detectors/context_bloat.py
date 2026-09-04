@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from trajectory_harness._measurements import measured_result, numeric_measurement
 from trajectory_harness.detect import DetectionResult, DetectorSpec, Finding
 from trajectory_harness.measure import Measurements
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
 
 MIN_LAST_INPUT_TOKENS = 16_000
 MIN_INPUT_GROWTH_RATIO = 2.0

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from atif import Step, Trajectory
+
 from trajectory_harness._steps import is_compact_step
 from trajectory_harness.measure import MeasurementResult, MeasurementSpec, MeasurerSpec
 from trajectory_harness.measurers._tokens import (
@@ -11,7 +13,11 @@ from trajectory_harness.measurers._tokens import (
     MODEL_OPERATIONS,
     token_count,
 )
-from trajectory_harness.model import Step, Trajectory
+from trajectory_harness.model import (
+    step_id,
+    step_operation,
+    step_start_ms,
+)
 
 _DISTRIBUTION_AGGREGATIONS = ("sum", "mean", "p50", "p95")
 
@@ -114,11 +120,11 @@ class ContextUsageMeasurer:
             step
             for _, step in sorted(
                 enumerate(trajectory.steps),
-                key=lambda item: (item[1].start_ms, item[0]),
+                key=lambda item: (step_start_ms(item[1]), item[0]),
             )
         )
         model_calls = tuple(
-            step for step in ordered if step.operation in MODEL_OPERATIONS
+            step for step in ordered if step_operation(step) in MODEL_OPERATIONS
         )
         compacts = tuple(step for step in ordered if is_compact_step(step))
         if not model_calls and not compacts:
@@ -170,8 +176,8 @@ class ContextUsageMeasurer:
             ),
             step_ids=tuple(
                 dict.fromkeys(
-                    [step.step_id for step, _ in covered]
-                    + [step.step_id for step in compacts]
+                    [step_id(step) for step, _ in covered]
+                    + [step_id(step) for step in compacts]
                 )
             ),
         )
@@ -182,19 +188,19 @@ def _compact_reductions(
     covered: tuple[tuple[Step, int], ...],
     compacts: tuple[Step, ...],
 ) -> list[int]:
-    positions = {step.step_id: index for index, step in enumerate(ordered)}
+    positions = {step_id(step): index for index, step in enumerate(ordered)}
     observed = []
     for compact in compacts:
-        compact_index = positions[compact.step_id]
+        compact_index = positions[step_id(compact)]
         before = [
-            (positions[step.step_id], count)
+            (positions[step_id(step)], count)
             for step, count in covered
-            if positions[step.step_id] < compact_index
+            if positions[step_id(step)] < compact_index
         ]
         after = [
-            (positions[step.step_id], count)
+            (positions[step_id(step)], count)
             for step, count in covered
-            if positions[step.step_id] > compact_index
+            if positions[step_id(step)] > compact_index
         ]
         if before and after:
             observed.append(after[0][1] - before[-1][1])

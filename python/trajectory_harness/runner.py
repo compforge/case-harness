@@ -11,7 +11,9 @@ from trajectory_harness.detect import Detector, DetectorSpec, detect
 from trajectory_harness.verify import Verifier, VerifierSpec, verify
 from trajectory_harness.measure import Measurer, MeasurerSpec, measure
 from trajectory_harness.metrics import TrajectoryAnalysisRun, aggregate_metrics
-from trajectory_harness.model import AnalysisCategory, Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import AnalysisCategory
 
 
 class TrajectoryAnalysisRunner:

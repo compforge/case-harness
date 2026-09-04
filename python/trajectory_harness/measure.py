@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from trajectory_harness.model import AnalysisCategory, Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import AnalysisCategory
 
 MeasurementStatus = Literal["measured", "not_applicable", "error"]
 MetricDirection = Literal["higher_is_better", "lower_is_better", "neutral"]

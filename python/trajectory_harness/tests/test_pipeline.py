@@ -15,8 +15,6 @@ from trajectory_harness import (
     RecordingQuery,
     RecordingRef,
     RepeatedToolCallDetector,
-    Step,
-    Trajectory,
     TrajectoryDataset,
     TrajectoryDatasetBuilder,
     TrajectoryAnalysisRunner,
@@ -25,6 +23,12 @@ from trajectory_harness import (
     TrajectoryAnnotation,
     load_dataset_artifact,
     load_run_artifact,
+)
+from trajectory_harness.model import (
+    make_atif_step as Step,
+    make_atif_trajectory as Trajectory,
+    trajectory_metadata,
+    trajectory_recording_id,
 )
 
 
@@ -67,33 +71,33 @@ class _Loader:
                 metadata={"review_stage": "review1"},
                 steps=(
                     Step(
-                        "model",
-                        None,
-                        "chat",
-                        "model",
-                        0,
-                        1,
+                        step_id="model",
+                        parent_step_id=None,
+                        operation="chat",
+                        name="model",
+                        start_ms=0,
+                        duration_ms=1,
                         attributes={
                             "gen_ai.usage.input_tokens": 12,
                             "gen_ai.usage.output_tokens": 3,
                         },
                     ),
                     Step(
-                        "tool-1",
-                        None,
-                        "execute_tool",
-                        "read",
-                        1,
-                        1,
+                        step_id="tool-1",
+                        parent_step_id=None,
+                        operation="execute_tool",
+                        name="read",
+                        start_ms=1,
+                        duration_ms=1,
                         input_messages=(tool_call,),
                     ),
                     Step(
-                        "tool-2",
-                        None,
-                        "execute_tool",
-                        "read",
-                        2,
-                        1,
+                        step_id="tool-2",
+                        parent_step_id=None,
+                        operation="execute_tool",
+                        name="read",
+                        start_ms=2,
+                        duration_ms=1,
                         input_messages=(tool_call,),
                     ),
                 ),
@@ -113,7 +117,7 @@ class _CCRDatasetBuilder(TrajectoryDatasetBuilder):
             recording.recording_id: tuple(
                 item.trajectory_id
                 for item in trajectories
-                if item.recording_id == recording.recording_id
+                if trajectory_recording_id(item) == recording.recording_id
             )
             for recording in recordings
         }
@@ -139,7 +143,7 @@ class _CCRDatasetBuilder(TrajectoryDatasetBuilder):
 class _CCRRunner(TrajectoryAnalysisRunner):
     def target_for(self, trajectory, dataset):
         del dataset
-        return trajectory.metadata["review_stage"]
+        return trajectory_metadata(trajectory)["review_stage"]
 
     def metadata_for(self, dataset):
         return {"domain": dataset.metadata["domain"]}
@@ -211,10 +215,12 @@ def test_harness_persists_current_run_and_rerenders_without_source(tmp_path):
     assert result.artifact.build.summary.loaded_trajectories == 1
     assert result.artifact.build.summary.included_annotations == 3
     assert result.artifact.build.summary.unmatched_annotations == 2
-    assert result.artifact.dataset.trajectories[0].recording_id == "ok"
+    assert trajectory_recording_id(result.artifact.dataset.trajectories[0]) == "ok"
     dataset_doc = json.loads(result.dataset_path.read_text())
     assert "bundles" not in dataset_doc["dataset"]
-    assert dataset_doc["dataset"]["trajectories"][0]["recording_id"] == "ok"
+    persisted = dataset_doc["dataset"]["trajectories"][0]
+    assert persisted["schema_version"] == "ATIF-v1.7"
+    assert persisted["extra"]["case_harness"]["recording"]["id"] == "ok"
     assert [item.phase for item in result.artifact.build.summary.issues] == [
         "load",
         "fetch",

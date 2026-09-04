@@ -3,6 +3,14 @@ from __future__ import annotations
 import json
 
 from trajectory_harness.loaders.otel_json import OTelJsonLoader
+from trajectory_harness.model import (
+    step_attributes,
+    step_duration_ms,
+    step_failure,
+    step_name,
+    step_parent_id,
+    step_status,
+)
 
 
 def _attr(key, value):
@@ -83,16 +91,16 @@ def test_loads_ordered_genai_steps_and_synthesizes_tool_messages(tmp_path):
     assert len(trajectories) == 1
     trajectory = trajectories[0]
     assert trajectory.trajectory_id == "trace-1"
-    assert [step.step_id for step in trajectory.steps] == ["model-1", "tool-1"]
+    assert [step.step_id for step in trajectory.steps] == [1, 2]
     tool = trajectory.steps[1]
-    assert tool.parent_step_id == "model-1"
-    assert tool.name == "file_read"
-    assert tool.status == "ok"
-    assert tool.duration_ms == 3
-    assert tool.input_messages[0]["parts"][0]["arguments"] == {"path": "a.go"}
-    assert tool.output_messages[0]["parts"][0]["response"] == "package a"
-    assert tool.attributes["service.name"] == "reviewer"
-    assert tool.attributes["otel.scope.name"] == "agentgo"
+    assert step_parent_id(tool) == "model-1"
+    assert step_name(tool) == "file_read"
+    assert step_status(tool) == "ok"
+    assert step_duration_ms(tool) == 3
+    assert tool.tool_calls[0].arguments == {"path": "a.go"}
+    assert tool.observation.results[0].content == "package a"
+    assert step_attributes(tool)["service.name"] == "reviewer"
+    assert step_attributes(tool)["otel.scope.name"] == "agentgo"
 
 
 def test_promotes_message_attributes_from_events(tmp_path):
@@ -122,7 +130,7 @@ def test_promotes_message_attributes_from_events(tmp_path):
 
     trajectory = OTelJsonLoader().load(path)[0]
 
-    assert trajectory.steps[0].output_messages[0]["parts"][0]["content"] == "done"
+    assert trajectory.steps[0].message == "done"
 
 
 def test_preserves_nested_agent_workflow_step_tree(tmp_path):
@@ -187,17 +195,17 @@ def test_preserves_nested_agent_workflow_step_tree(tmp_path):
     )
 
     trajectory = OTelJsonLoader().load(path)[0]
-    steps = {step.step_id: step for step in trajectory.steps}
+    steps = {step_attributes(step)["otel.span_id"]: step for step in trajectory.steps}
 
     assert len(steps) == 5
     assert "workflow-1" in steps
-    assert steps["workflow-1"].name == "unit_review"
-    assert steps["planner"].parent_step_id == "workflow-1"
-    assert steps["planner-model"].parent_step_id == "planner"
-    assert steps["executor"].parent_step_id == "workflow-1"
-    assert steps["executor-model"].parent_step_id == "executor"
-    assert steps["planner"].name == "planner"
-    assert steps["executor"].name == "executor"
+    assert step_name(steps["workflow-1"]) == "unit_review"
+    assert step_parent_id(steps["planner"]) == "workflow-1"
+    assert step_parent_id(steps["planner-model"]) == "planner"
+    assert step_parent_id(steps["executor"]) == "workflow-1"
+    assert step_parent_id(steps["executor-model"]) == "executor"
+    assert step_name(steps["planner"]) == "planner"
+    assert step_name(steps["executor"]) == "executor"
 
 
 def test_normalizes_otel_error_type_on_the_failed_operation(tmp_path):
@@ -226,6 +234,7 @@ def test_normalizes_otel_error_type_on_the_failed_operation(tmp_path):
 
     step = OTelJsonLoader().load(path)[0].steps[0]
 
-    assert step.failure is not None
-    assert step.failure.key == "llm.request.timeout"
-    assert step.failure.message == "provider deadline exceeded"
+    failure = step_failure(step)
+    assert failure is not None
+    assert failure.key == "llm.request.timeout"
+    assert failure.message == "provider deadline exceeded"

@@ -6,6 +6,11 @@ from typing import Sequence
 
 from harness_common.report_kit import Section, Table
 from trajectory_harness.metrics import TrajectoryAnalysisRun
+from trajectory_harness.model import (
+    require_trajectory_id,
+    trajectory_recording_id,
+    trajectory_source,
+)
 
 
 def detector_catalog_section(runs: Sequence[TrajectoryAnalysisRun]) -> Section:
@@ -53,9 +58,9 @@ def detection_evidence_section(runs: Sequence[TrajectoryAnalysisRun]) -> Section
                     rows.append(
                         [
                             run.dataset_id,
-                            item.trajectory.trajectory_id,
-                            item.trajectory.recording_id or "—",
-                            item.trajectory.source or "—",
+                            require_trajectory_id(item.trajectory),
+                            trajectory_recording_id(item.trajectory) or "—",
+                            trajectory_source(item.trajectory) or "—",
                             item.target or "—",
                             item.category,
                             result.detector_id,

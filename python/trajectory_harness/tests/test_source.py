@@ -11,6 +11,7 @@ from trajectory_harness import (
     RecordingRef,
     RecordingSource,
 )
+from trajectory_harness.model import trajectory_source
 
 
 class MemorySource:
@@ -59,7 +60,7 @@ def test_source_composes_with_in_memory_loader() -> None:
     )
 
     assert trajectories[0].trajectory_id == "trace-1"
-    assert trajectories[0].source == "memory://recording-1"
+    assert trajectory_source(trajectories[0]) == "memory://recording-1"
 
 
 def test_recording_query_rejects_non_positive_limit() -> None:

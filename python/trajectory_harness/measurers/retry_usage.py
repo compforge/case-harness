@@ -6,7 +6,9 @@ from dataclasses import dataclass
 
 from trajectory_harness._tool_calls import tool_calls, tool_retry_transitions
 from trajectory_harness.measure import MeasurementResult, MeasurementSpec, MeasurerSpec
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import step_failure, step_id, step_status
 
 _DISTRIBUTION_AGGREGATIONS = ("sum", "mean", "p50", "p95")
 
@@ -81,7 +83,7 @@ class RetryUsageMeasurer:
         failed = tuple(
             call
             for call in calls
-            if call.step.failure is not None or call.step.status == "error"
+            if step_failure(call.step) is not None or step_status(call.step) == "error"
         )
         transitions = tool_retry_transitions(trajectory.steps)
         unchanged = sum(not item.arguments_changed for item in transitions)
@@ -109,9 +111,12 @@ class RetryUsageMeasurer:
             ),
             step_ids=tuple(
                 dict.fromkeys(
-                    step_id
+                    current_step_id
                     for item in transitions
-                    for step_id in (item.failed.step.step_id, item.retry.step.step_id)
+                    for current_step_id in (
+                        step_id(item.failed.step),
+                        step_id(item.retry.step),
+                    )
                 )
             ),
         )

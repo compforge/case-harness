@@ -5,7 +5,9 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from trajectory_harness.model import Step
+from atif import Step
+
+from trajectory_harness.model import step_attributes
 
 MODEL_OPERATIONS = {
     "inference",
@@ -40,8 +42,21 @@ CACHED_INPUT_TOKEN_ATTRIBUTES = (
 
 
 def token_count(step: Step, names: tuple[str, ...]) -> int | None:
+    standard = {
+        INPUT_TOKEN_ATTRIBUTES: step.metrics.prompt_tokens if step.metrics else None,
+        OUTPUT_TOKEN_ATTRIBUTES: (
+            step.metrics.completion_tokens if step.metrics else None
+        ),
+        CACHED_INPUT_TOKEN_ATTRIBUTES: (
+            step.metrics.cached_tokens if step.metrics else None
+        ),
+    }.get(names)
+    value = _non_negative_int(standard)
+    if value is not None:
+        return value
+    attributes = step_attributes(step)
     for name in names:
-        value = _non_negative_int(step.attributes.get(name))
+        value = _non_negative_int(attributes.get(name))
         if value is not None:
             return value
     return None

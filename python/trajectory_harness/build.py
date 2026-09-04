@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Literal, Sequence
 
 from trajectory_harness.dataset import TrajectoryDataset
 from trajectory_harness.loaders.base import TrajectoryLoader
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import with_recording
 from trajectory_harness.source import RecordingQuery, RecordingRef, RecordingSource
 
 DatasetBuildPhase = Literal["fetch", "load"]
@@ -126,7 +128,11 @@ class TrajectoryDatasetBuilder(ABC):
                 issues.append(_issue(ref, "load", error))
                 continue
             trajectories.extend(
-                replace(item, recording_id=recording.ref.recording_id)
+                with_recording(
+                    item,
+                    recording_id=recording.ref.recording_id,
+                    source=recording.ref.uri,
+                )
                 for item in loaded_trajectories
             )
 

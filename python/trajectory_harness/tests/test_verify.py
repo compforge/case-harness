@@ -15,11 +15,16 @@ from trajectory_harness import (
     Finding,
     MeasurementResult,
     RepeatedToolCallDetector,
-    Step,
     ToolSuccessVerifier,
-    Trajectory,
     detect,
     verify,
+)
+from trajectory_harness.model import (
+    make_atif_step as Step,
+    make_atif_trajectory as Trajectory,
+    step_failure,
+    trajectory_from_dict,
+    trajectory_to_dict,
 )
 
 
@@ -67,7 +72,7 @@ def test_repeated_tool_call_detector_returns_finding_and_evidence():
             code="repeated_tool_call",
             severity="warning",
             summary="1 of 3 tool calls repeat an earlier tool name and arguments.",
-            step_ids=("s3",),
+            step_ids=("3",),
             hypotheses=(
                 "The tool may be missing a batch operation.",
                 "The tool description may not encourage batching or result reuse.",
@@ -75,7 +80,7 @@ def test_repeated_tool_call_detector_returns_finding_and_evidence():
             ),
         ),
     )
-    assert result.to_dict()["findings"][0]["step_ids"] == ["s3"]
+    assert result.to_dict()["findings"][0]["step_ids"] == ["3"]
 
 
 def test_detector_is_not_applicable_when_trajectory_has_no_tool_calls():
@@ -129,7 +134,7 @@ def test_model_round_tool_calls_are_fallback_when_tool_spans_are_absent():
 
     result = RepeatedToolCallDetector().detect(trajectory)
 
-    assert result.findings[0].step_ids == ("s2",)
+    assert result.findings[0].step_ids == ("2",)
 
 
 def test_common_execution_and_tool_verifiers_keep_failures_as_facts():
@@ -154,7 +159,7 @@ def test_common_execution_and_tool_verifiers_keep_failures_as_facts():
     assert execution.score == 0
     assert tool.verdict == "fail"
     assert tool.score == 0
-    assert tool.step_ids == ("s1",)
+    assert tool.step_ids == ("1",)
 
 
 def test_failure_and_execution_round_trip_with_trajectory():
@@ -182,10 +187,12 @@ def test_failure_and_execution_round_trip_with_trajectory():
         execution=ExecutionResult(outcome="failed", duration_ms=2, failure=failure),
     )
 
-    restored = Trajectory.from_dict(original.to_dict())
+    restored = trajectory_from_dict(trajectory_to_dict(original))
 
     assert restored == original
-    assert restored.steps[0].failure.key == "llm.request.rate_limit"
+    restored_failure = step_failure(restored.steps[0])
+    assert restored_failure is not None
+    assert restored_failure.key == "llm.request.rate_limit"
 
 
 def test_verifier_exception_is_health_data_not_zero_score():

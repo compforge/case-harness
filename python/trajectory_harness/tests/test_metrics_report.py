@@ -7,12 +7,14 @@ from trajectory_harness import (
     ExecutionSuccessVerifier,
     Failure,
     Metric,
-    Step,
-    Trajectory,
     TrajectoryAnalysisRun,
     aggregate_metrics,
     verify,
     render_report_html,
+)
+from trajectory_harness.model import (
+    make_atif_step as Step,
+    make_atif_trajectory as Trajectory,
 )
 
 

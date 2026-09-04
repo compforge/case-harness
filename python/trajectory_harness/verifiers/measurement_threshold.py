@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from trajectory_harness.measure import Measurements
-from trajectory_harness.model import AnalysisCategory, Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import AnalysisCategory
 from trajectory_harness.verify import (
     VerificationResult,
     VerifierKind,
