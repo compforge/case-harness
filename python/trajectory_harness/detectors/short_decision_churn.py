@@ -11,7 +11,9 @@ from trajectory_harness.measurers._tokens import (
     OUTPUT_TOKEN_ATTRIBUTES,
     token_count,
 )
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import step_id, step_operation
 
 MIN_COVERED_CALLS = 3
 SHORT_OUTPUT_TOKENS = 500
@@ -39,7 +41,7 @@ class ShortDecisionChurnDetector:
         covered = tuple(
             (step, count)
             for step in trajectory.steps
-            if step.operation in MODEL_OPERATIONS
+            if step_operation(step) in MODEL_OPERATIONS
             if (count := token_count(step, OUTPUT_TOKEN_ATTRIBUTES)) is not None
         )
         if len(covered) < MIN_COVERED_CALLS:
@@ -74,7 +76,7 @@ class ShortDecisionChurnDetector:
                     code="short_decision_churn",
                     severity="warning",
                     summary=summary,
-                    step_ids=tuple(step.step_id for step in short),
+                    step_ids=tuple(step_id(step) for step in short),
                     hypotheses=(
                         "Several decisions may be expressible as one model call.",
                         "A deterministic transform may replace some model calls.",

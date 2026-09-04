@@ -8,7 +8,9 @@ from trajectory_harness._steps import is_compact_step
 from trajectory_harness._tool_calls import tool_calls
 from trajectory_harness.detect import DetectionResult, DetectorSpec, Finding
 from trajectory_harness.measure import Measurements
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import step_id, step_start_ms
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,16 +29,16 @@ class PostCompactRefetchDetector:
     ) -> DetectionResult:
         del measurements
         positions = {
-            step.step_id: position
+            step_id(step): position
             for position, (_, step) in enumerate(
                 sorted(
                     enumerate(trajectory.steps),
-                    key=lambda item: (item[1].start_ms, item[0]),
+                    key=lambda item: (step_start_ms(item[1]), item[0]),
                 )
             )
         }
         compact_positions = tuple(
-            positions[step.step_id]
+            positions[step_id(step)]
             for step in trajectory.steps
             if is_compact_step(step)
         )
@@ -58,9 +60,9 @@ class PostCompactRefetchDetector:
         pairs = []
         for call in sorted(
             calls,
-            key=lambda item: positions.get(item.step.step_id, 0),
+            key=lambda item: positions.get(step_id(item.step), 0),
         ):
-            position = positions.get(call.step.step_id, 0)
+            position = positions.get(step_id(call.step), 0)
             prior = earlier.get(call.signature, [])
             matching = next(
                 (
@@ -74,8 +76,10 @@ class PostCompactRefetchDetector:
                 None,
             )
             if matching:
-                pairs.append((matching, call.step.step_id))
-            earlier.setdefault(call.signature, []).append((position, call.step.step_id))
+                pairs.append((matching, step_id(call.step)))
+            earlier.setdefault(call.signature, []).append(
+                (position, step_id(call.step))
+            )
 
         if not pairs:
             return DetectionResult(

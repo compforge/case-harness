@@ -12,7 +12,9 @@ from trajectory_harness.measurers._tokens import (
     OUTPUT_TOKEN_ATTRIBUTES,
     token_count,
 )
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import step_id, step_operation
 
 _DISTRIBUTION_AGGREGATIONS = ("sum", "mean", "p50", "p95")
 
@@ -145,7 +147,9 @@ class ModelUsageMeasurer:
 
     def measure(self, trajectory: Trajectory) -> MeasurementResult:
         calls = [
-            step for step in trajectory.steps if step.operation in MODEL_OPERATIONS
+            step
+            for step in trajectory.steps
+            if step_operation(step) in MODEL_OPERATIONS
         ]
         if not calls:
             return MeasurementResult(
@@ -237,7 +241,7 @@ class ModelUsageMeasurer:
                 f"{usage_reported_calls} reported token usage."
             ),
             step_ids=tuple(
-                call.step_id
+                step_id(call)
                 for call in calls
                 if token_count(call, OUTPUT_TOKEN_ATTRIBUTES) is not None
             ),

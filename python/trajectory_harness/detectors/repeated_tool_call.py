@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from trajectory_harness._tool_calls import tool_calls
 from trajectory_harness.detect import DetectionResult, DetectorSpec, Finding
 from trajectory_harness.measure import Measurements
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import step_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +39,7 @@ class RepeatedToolCallDetector:
         duplicate_steps = []
         for call in calls:
             if call.signature in seen:
-                duplicate_steps.append(call.step.step_id)
+                duplicate_steps.append(step_id(call.step))
             else:
                 seen.add(call.signature)
 

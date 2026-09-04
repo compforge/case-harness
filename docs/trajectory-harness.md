@@ -26,8 +26,8 @@ Harness 主要回答“哪里有问题、证据是什么、程度和趋势如何
 ```text
 RecordingSource
   -> Recording                         原始 record / trace，中间产物
-  -> TrajectoryLoader
-  -> Trajectory Observation            带 recording / case / run 来源身份的过程事实
+  -> TrajectoryLoader / Adapter
+  -> ATIF v1.7 Trajectory               业界标准的过程事实
        + TrajectoryAnnotation          人工、外部系统或模型提供的监督信息
   -> Trajectory Unit                   以 Case + Trajectory 为数据来源
   -> TrajectoryDataset                 可复用、版本化的 Unit facts
@@ -43,11 +43,12 @@ RecordingSource
   -> internal JSON / verdict.json / report.html
 ```
 
-`Trajectory` 是 trajectory_harness 的 Observation，也是贯穿全链路的主记录；`trajectory_id` 是
-Unit key 和 Worksheet 行键。它必须保留从 Recording、Case 和 Run 回溯所需的来源 identity，
-并在 `generation` provenance map 中记录实际产生行为的 agent revision、instruction/skill、
-tool contract、model、loop 与 orchestration 版本。这个 map 是 Trajectory 的来源字段，不是独立
-领域对象；真实值由 Loader 或项目 wrapper 填写，Harness 不从 Dataset 或 Verifier version 推断。
+ATIF `Trajectory` 是 trajectory_harness 的 Observation，也是贯穿全链路的主记录；Harness 要求
+ATIF v1.7 可选的 `trajectory_id` 在进入 Dataset 时存在，并将其作为 Unit key 和 Worksheet 行键。
+agent name、version、model 与 tool definitions 使用 ATIF 标准字段；Recording URI 以及
+instruction/skill、tool contract、loop、orchestration 等尚无标准字段的 provenance，只能进入
+ATIF namespaced `extra`。真实值由 Loader 或项目 wrapper 填写，Harness 不从 Dataset 或 Verifier
+version 推断，也不为它们另建一套 Trajectory schema。
 Dataset Builder 负责把 Case seed、人工 label、reference 和
 LLM 生成的监督信息对齐到 Unit，形成可反复分析的 TrajectoryDataset。每组实际选择的 Detector、
 Verifier、Measurer 与可选 Policy 分别产生自己的 AnalysisRun / Worksheet；报告只对 Worksheet 做筛选、分组、聚合和展示，不重新
@@ -66,10 +67,10 @@ loop，也可以包含由多个 agent loop 和确定性操作共同组成的 pip
 3. loop mechanism：上下文压缩、停止条件、轮次或时间预算等运行策略。
 
 Trajectory 是这些 loop 配置及其编排共同作用后的运行证据，不要求 Loader 反推出某个行为究竟由哪一段
-配置单独造成。通用模型只有一种 Trajectory，不区分 root / child 类型；本次 Dataset 选择的执行边界
-就是一行的 Trajectory。多个 loop 通过 `Step.parent_step_id` 组成执行层级；`operation / name / attributes`
-标识 agent、workflow、LLM 和 tool 等操作。具体业务可以据此选择某个 Step 子树或整条 Trajectory
-进行评估，无需让通用 Harness 理解 Review 1、Review 2 等领域阶段。
+配置单独造成。本次 Dataset 选择的 ATIF 文档就是一行 Trajectory；多个 loop 按 ATIF v1.7 使用
+`subagent_trajectories` 与 `SubagentTrajectoryRef` 表达。OTel span parent 等来源拓扑可以保存在
+namespaced `extra` 供专门分析使用，但不成为另一套通用 Step tree。具体业务可以选择某段 step 或
+subagent trajectory 进行评估，无需让通用 Harness 理解 Review 1、Review 2 等领域阶段。
 
 Trajectory 是规范化执行事实，Measurements 是从 Trajectory 确定性派生的数据；二者共同作为
 Detector 与 Verifier 的输入。Detector 负责数据挖掘和发现并沉淀 Finding，Verifier 负责针对明确
@@ -84,8 +85,9 @@ Failure，也不能由 Harness 单独推导出应修改 prompt、tool、loop mec
 低成本属性的 `RecordingRef`，`fetch(ref)` 才读取完整原始文本。公共 Query 只提供时间、精确属性
 和数量上限；仓库、租户等领域过滤可由具体 Source 扩展。
 
-Source 不理解 ATIF、OTLP 等格式，不构造 `Trajectory`，也不拥有人工标签。格式解析属于
-`TrajectoryLoader`；forge comment 等监督信号属于 `TrajectoryAnnotation`，由业务 Dataset builder
+Source 不理解 ATIF、OTLP 等格式，不构造 `Trajectory`，也不拥有人工标签。原生 ATIF 由
+`ATIFJsonLoader` 校验；OTLP、session 等由对应 Adapter 转为同一 ATIF 契约。forge comment 等监督
+信号属于 `TrajectoryAnnotation`，由业务 Dataset builder
 通过 `trajectory_id` 与主记录连接。一个 Annotation 可以关联一条或多条 Trajectory，也可以暂时没有
 匹配结果，从而保留“监督信息已存在，但原始记录拉取或解析失败”的事实。Loader 同时提供文件 `load`
 与内存文本 `loads`，因此远端 API、CLI 导出或本地 session Source 不需要先创建临时文件。
@@ -112,17 +114,18 @@ Verifier 或 Dataset 提供。Detector 也可以结合这些领域输入发现�
 
 ### 2.1 Trajectory 与 Step
 
-`Trajectory` 是一次 agent/workflow 执行的有序步骤集合。`Step` 保留操作身份、父子关系、
-顺序、耗时、状态及 OTel GenAI `role + parts` message。单个 agent loop 或 pipeline 中的一个
-agent 节点都表示为 Step 子树；通用模型不额外定义 Stage。只有 Loader 知道来源格式；Verifier
-不读取 ATIF、OTLP 或框架私有字段。
+`Trajectory` 与 `Step` 直接使用官方 `atif` v1.7 Pydantic models。Step 按标准表达
+`system / user / agent` 消息、reasoning、tool calls、observations、LLM metrics 与 copied context；
+Harness 不复制这些字段，也不定义平行格式。Detector 与 Verifier 直接读取 ATIF；只有 Loader / Adapter
+读取 OTLP、session 或框架私有字段。顺序使用标准 `step_id`，多 agent 使用标准 subagent 结构。
 
 轨迹不是 trace tree 的别名。trace_harness 保留物理遥测事实并分析错误传播与拓扑；
 trajectory_harness 只保留 agent 决策和评估需要的语义步骤。
 
 ### 2.2 Failure 与 ExecutionResult
 
-轨迹本身不保证成功。一个操作失败记录为：
+轨迹本身不保证成功。ATIF 尚未规定统一失败 taxonomy；来源提供这类事实时，Adapter 把它放入
+`extra.case_harness`，Harness 可以读取为：
 
 ```python
 Failure(
@@ -425,7 +428,7 @@ measurement.value.sum{target=review1,category=cost,measurer_id=model_usage,measu
 `TrajectoryHarness` 把 Dataset 和 AnalysisRun 规范化保存到 `runs/<scope>/<run-id>/`。文件拆分
 是为了复用和避免重复大体积轨迹，不改变“一行一个 trajectory_id”的 Worksheet grain：
 
-- `dataset.json`：Worksheet 的固定 seed，包含 Trajectory、TrajectoryAnnotation、RecordingQuery
+- `dataset.json`：Worksheet 的固定 seed，原样包含合法 ATIF Trajectory，并附带 TrajectoryAnnotation、RecordingQuery
   与构建健康。
 - `run.json`：本次 TrajectoryAnalysisRun，DetectionResult/Finding、Verification 与 Measurement 通过 trajectory id 引用 Dataset，
   不重复存轨迹。
@@ -469,7 +472,8 @@ HTML 模板。这个“模型产物先落盘、报告可独立重建”的做法
 
 ## 6. 外部语义
 
-OTel GenAI semantic conventions 提供 operation、message 和 `error.type` 的外部词汇；
-OpenInference/LangSmith 等实现也普遍把 LLM、Tool、Agent 操作类型与错误类型分开记录。
-本项目据此使用薄 IR，但不依赖某个 OTel SDK，也不把仍在演进的外部生成类型直接作为内部
-模型。
+[ATIF v1.7](https://github.com/harbor-framework/harbor/blob/main/rfcs/0001-trajectory-format.md)
+是唯一 Trajectory 数据契约，Python 实现直接依赖官方 `atif` 包。OTel GenAI semantic conventions
+提供 operation、message、metrics 和 `error.type` 等遥测词汇；`OTelJsonLoader` 负责把它们映射到
+ATIF 标准字段，无法无损映射的来源事实保留在 namespaced `extra`。Harness 只拥有 Dataset/Run、
+Measurements、Detector、Verifier 和报告流程，不拥有另一个 Trajectory IR。

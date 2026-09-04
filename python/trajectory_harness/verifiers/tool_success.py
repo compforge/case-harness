@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
+
+from trajectory_harness._tool_calls import has_tool_execution
+from trajectory_harness.model import (
+    step_failure,
+    step_id,
+    step_status,
+)
 from trajectory_harness.measure import Measurements
 from trajectory_harness.verify import VerificationResult, VerifierSpec
 
@@ -28,7 +35,7 @@ class ToolSuccessVerifier:
         reference: Trajectory | None = None,
     ) -> VerificationResult:
         del measurements, reference
-        calls = [step for step in trajectory.steps if step.operation == "execute_tool"]
+        calls = [step for step in trajectory.steps if has_tool_execution(step)]
         if not calls:
             return VerificationResult(
                 verifier_id=self.spec.verifier_id,
@@ -36,7 +43,9 @@ class ToolSuccessVerifier:
                 explanation="Trajectory contains no executed tool calls.",
             )
 
-        failed = [step for step in calls if step.failure or step.status == "error"]
+        failed = [
+            step for step in calls if step_failure(step) or step_status(step) == "error"
+        ]
         success_rate = round((len(calls) - len(failed)) / len(calls), 3)
         return VerificationResult(
             verifier_id=self.spec.verifier_id,
@@ -46,5 +55,5 @@ class ToolSuccessVerifier:
             explanation=(
                 f"{len(calls) - len(failed)} of {len(calls)} tool calls succeeded."
             ),
-            step_ids=tuple(step.step_id for step in failed),
+            step_ids=tuple(step_id(step) for step in failed),
         )

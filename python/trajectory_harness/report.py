@@ -24,6 +24,13 @@ from trajectory_harness.metrics import (
     TrajectoryAnalysisRun,
     aggregate_metrics,
 )
+from trajectory_harness.model import (
+    require_trajectory_id,
+    step_failure,
+    trajectory_execution,
+    trajectory_recording_id,
+    trajectory_source,
+)
 from trajectory_harness.report_comparison import ParetoSpec, pareto_section
 from trajectory_harness.report_detection import (
     detection_evidence_section,
@@ -425,28 +432,32 @@ def _execution_section(
 def _failure_rows(run: _RunView) -> list[list[str]]:
     rows = []
     trajectories = {
-        item.trajectory.trajectory_id: item.trajectory
+        require_trajectory_id(item.trajectory): item.trajectory
         for item in (*run.detections, *run.verifications, *run.measurements)
     }
     for trajectory in trajectories.values():
         for step in trajectory.steps:
-            if step.failure:
+            failure = step_failure(step)
+            if failure:
+                trajectory_id = require_trajectory_id(trajectory)
                 rows.append(
                     [
-                        trajectory.trajectory_id,
-                        run.run.target_for(trajectory.trajectory_id) or "—",
+                        trajectory_id,
+                        run.run.target_for(trajectory_id) or "—",
                         f"step:{step.step_id}",
-                        step.failure.key,
-                        step.failure.code or "—",
-                        step.failure.message or "—",
+                        failure.key,
+                        failure.code or "—",
+                        failure.message or "—",
                     ]
                 )
-        if trajectory.execution and trajectory.execution.failure:
-            failure = trajectory.execution.failure
+        execution = trajectory_execution(trajectory)
+        if execution and execution.failure:
+            failure = execution.failure
+            trajectory_id = require_trajectory_id(trajectory)
             rows.append(
                 [
-                    trajectory.trajectory_id,
-                    run.run.target_for(trajectory.trajectory_id) or "—",
+                    trajectory_id,
+                    run.run.target_for(trajectory_id) or "—",
                     "execution",
                     failure.key,
                     failure.code or "—",
@@ -558,9 +569,9 @@ def _verification_evidence_section(runs: Sequence[_RunView]) -> Section:
                 rows.append(
                     [
                         run.label,
-                        item.trajectory.trajectory_id,
-                        item.trajectory.recording_id or "—",
-                        item.trajectory.source or "—",
+                        require_trajectory_id(item.trajectory),
+                        trajectory_recording_id(item.trajectory) or "—",
+                        trajectory_source(item.trajectory) or "—",
                         item.target or "—",
                         item.category,
                         result.verifier_id,
@@ -611,9 +622,9 @@ def _measurement_evidence_section(runs: Sequence[_RunView]) -> Section:
                     rows.append(
                         [
                             run.label,
-                            item.trajectory.trajectory_id,
-                            item.trajectory.recording_id or "—",
-                            item.trajectory.source or "—",
+                            require_trajectory_id(item.trajectory),
+                            trajectory_recording_id(item.trajectory) or "—",
+                            trajectory_source(item.trajectory) or "—",
                             item.target or "—",
                             item.category,
                             result.measurer_id,

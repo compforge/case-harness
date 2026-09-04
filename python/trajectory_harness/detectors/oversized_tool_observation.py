@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from trajectory_harness._tool_calls import tool_output_bytes
+from atif import Trajectory
+
+from trajectory_harness._tool_calls import has_tool_execution, tool_output_bytes
 from trajectory_harness.detect import DetectionResult, DetectorSpec, Finding
 from trajectory_harness.measure import Measurements
-from trajectory_harness.model import Trajectory
+from trajectory_harness.model import (
+    step_id,
+    step_output_messages,
+)
 
 MAX_TOOL_OUTPUT_BYTES = 64 * 1024
 
@@ -33,7 +38,8 @@ class OversizedToolObservationDetector:
         reported = tuple(
             step
             for step in trajectory.steps
-            if step.operation == "execute_tool" and step.output_messages
+            if has_tool_execution(step)
+            and (step.observation is not None or step_output_messages(step))
         )
         if not reported:
             return DetectionResult(
@@ -66,7 +72,7 @@ class OversizedToolObservationDetector:
                     code="oversized_tool_observation",
                     severity="warning",
                     summary=summary,
-                    step_ids=tuple(step.step_id for step, _ in oversized),
+                    step_ids=tuple(step_id(step) for step, _ in oversized),
                     hypotheses=(
                         "The tool may need field, range, or time-window filters.",
                         "The result contract may need pagination or lazy loading.",

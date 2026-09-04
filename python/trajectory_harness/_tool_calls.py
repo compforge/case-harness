@@ -1,12 +1,20 @@
-"""Internal canonical view of tool calls embedded in trajectory steps."""
+"""Analysis view of tool calls embedded in ATIF steps."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
-from trajectory_harness.model import Step
+from atif import Step
+
+from trajectory_harness.model import (
+    step_failure,
+    step_input_messages,
+    step_operation,
+    step_output_messages,
+    step_status,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,13 +44,16 @@ class ToolRetryTransition:
 
     @property
     def recovered(self) -> bool:
-        return self.retry.step.failure is None and self.retry.step.status != "error"
+        return (
+            step_failure(self.retry.step) is None
+            and step_status(self.retry.step) != "error"
+        )
 
 
-def tool_calls(steps: tuple[Step, ...]) -> tuple[ToolCall, ...]:
+def tool_calls(steps: Sequence[Step]) -> tuple[ToolCall, ...]:
     """Return executed calls when available, otherwise model-requested calls."""
 
-    executed = tuple(step for step in steps if step.operation == "execute_tool")
+    executed = tuple(step for step in steps if step_operation(step) == "execute_tool")
     if executed:
         return tuple(
             call
@@ -58,13 +69,21 @@ def tool_names(step: Step) -> tuple[str, ...]:
     return tuple(call.name for call in _calls_in_step(step, prefer_input=True))
 
 
-def tool_retry_transitions(steps: tuple[Step, ...]) -> tuple[ToolRetryTransition, ...]:
+def has_tool_execution(step: Step) -> bool:
+    """Whether ATIF records an executed call on this step."""
+
+    return step_operation(step) == "execute_tool" or bool(
+        step.tool_calls and step.observation
+    )
+
+
+def tool_retry_transitions(steps: Sequence[Step]) -> tuple[ToolRetryTransition, ...]:
     """Pair each failed tool call with the next call to the same tool, if any."""
 
     calls = tool_calls(steps)
     transitions = []
     for index, failed in enumerate(calls):
-        if failed.step.failure is None and failed.step.status != "error":
+        if step_failure(failed.step) is None and step_status(failed.step) != "error":
             continue
         retry = next(
             (
@@ -84,7 +103,11 @@ def tool_output_bytes(step: Step) -> int:
     """Return the stable UTF-8 JSON size of one step's reported tool output."""
 
     payload = json.dumps(
-        list(step.output_messages),
+        (
+            step.observation.model_dump(mode="json", exclude_none=True)
+            if step.observation
+            else list(step_output_messages(step))
+        ),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -93,7 +116,12 @@ def tool_output_bytes(step: Step) -> int:
 
 
 def _calls_in_step(step: Step, *, prefer_input: bool) -> tuple[ToolCall, ...]:
-    messages = step.input_messages if prefer_input else step.output_messages
+    if step.tool_calls:
+        return tuple(
+            ToolCall(step=step, name=call.function_name, arguments=call.arguments)
+            for call in step.tool_calls
+        )
+    messages = step_input_messages(step) if prefer_input else step_output_messages(step)
     calls = []
     for message in messages:
         for part in message.get("parts", []):

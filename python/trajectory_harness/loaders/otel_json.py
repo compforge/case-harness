@@ -4,10 +4,29 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from trajectory_harness.model import Failure, FailureKind, Step, Trajectory
+from atif import (
+    Agent,
+    Metrics,
+    Observation,
+    ObservationResult,
+    Step,
+    ToolCall,
+    Trajectory,
+)
+
+from trajectory_harness.model import (
+    Failure,
+    FailureKind,
+    make_atif_step,
+    make_atif_trajectory,
+    require_trajectory_id,
+    step_attributes,
+    step_start_ms,
+)
 
 _INPUT_MESSAGES = "gen_ai.input.messages"
 _OUTPUT_MESSAGES = "gen_ai.output.messages"
@@ -43,8 +62,8 @@ class OTelJsonLoader:
 
         spans = self._spans(value)
         by_trace: dict[str, list[Step]] = defaultdict(list)
-        for raw, resource, scope in spans:
-            step = self._step(raw, resource, scope)
+        for index, (raw, resource, scope) in enumerate(spans, start=1):
+            step = self._step(raw, resource, scope, step_id=index)
             if step is not None:
                 by_trace[str(raw.get("traceId") or raw.get("trace_id") or "")].append(
                     step
@@ -52,16 +71,21 @@ class OTelJsonLoader:
 
         trajectories = []
         for trace_id, steps in by_trace.items():
-            steps.sort(key=lambda step: (step.start_ms, step.step_id))
+            steps.sort(key=lambda step: (step_start_ms(step), step.step_id))
+            steps = [
+                step.model_copy(update={"step_id": index})
+                for index, step in enumerate(steps, start=1)
+            ]
             trajectories.append(
-                Trajectory(
+                make_atif_trajectory(
                     trajectory_id=trace_id,
-                    steps=tuple(steps),
+                    agent=_agent(steps),
+                    steps=steps,
                     source=source,
                     metadata={"format": "otel-genai"},
                 )
             )
-        trajectories.sort(key=lambda trajectory: trajectory.trajectory_id)
+        trajectories.sort(key=require_trajectory_id)
         return trajectories
 
     def _spans(
@@ -102,6 +126,8 @@ class OTelJsonLoader:
         raw: dict[str, Any],
         resource: dict[str, Any],
         scope: dict[str, Any],
+        *,
+        step_id: int,
     ) -> Step | None:
         attrs = _attributes(raw.get("attributes", []))
         _promote_message_events(raw, attrs)
@@ -128,6 +154,12 @@ class OTelJsonLoader:
             attrs.setdefault("otel.scope.name", scope["name"])
         if scope.get("version"):
             attrs.setdefault("otel.scope.version", scope["version"])
+        span_id = str(raw.get("spanId") or raw.get("span_id") or "")
+        parent_span_id = str(raw.get("parentSpanId") or raw.get("parent_span_id") or "")
+        if span_id:
+            attrs.setdefault("otel.span_id", span_id)
+        if parent_span_id:
+            attrs.setdefault("otel.parent_span_id", parent_span_id)
 
         start_ns = int(
             raw.get("startTimeUnixNano") or raw.get("start_time_unix_nano") or 0
@@ -136,15 +168,22 @@ class OTelJsonLoader:
             raw.get("endTimeUnixNano") or raw.get("end_time_unix_nano") or start_ns
         )
         status = _status(raw, attrs)
-        return Step(
-            step_id=str(raw.get("spanId") or raw.get("span_id") or ""),
-            parent_step_id=(
-                str(raw.get("parentSpanId") or raw.get("parent_span_id"))
-                if raw.get("parentSpanId") or raw.get("parent_span_id")
-                else None
-            ),
+        tool_calls = _atif_tool_calls(input_messages, attrs)
+        observation = _atif_observation(output_messages, attrs)
+        model_operation = operation in {
+            "inference",
+            "chat",
+            "generate_content",
+            "text_completion",
+            "embeddings",
+        }
+        return make_atif_step(
+            step_id=step_id,
+            parent_step_id=(parent_span_id or None),
             operation=operation,
             name=_step_name(raw, attrs, operation),
+            message=_step_message(output_messages, operation, attrs),
+            timestamp=_timestamp(start_ns),
             start_ms=start_ns / 1_000_000,
             duration_ms=max(0, end_ns - start_ns) / 1_000_000,
             status=status,
@@ -152,6 +191,22 @@ class OTelJsonLoader:
             input_messages=input_messages,
             output_messages=output_messages,
             attributes=attrs,
+            model_name=(
+                str(
+                    attrs.get("gen_ai.response.model")
+                    or attrs.get("gen_ai.request.model")
+                )
+                if model_operation
+                and (
+                    attrs.get("gen_ai.response.model")
+                    or attrs.get("gen_ai.request.model")
+                )
+                else None
+            ),
+            tool_calls=tool_calls or None,
+            observation=observation,
+            metrics=_metrics(attrs) if model_operation else None,
+            llm_call_count=1 if model_operation else 0,
         )
 
 
@@ -302,6 +357,161 @@ def _json_or_value(value: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return value
+
+
+def _agent(steps: list[Step]) -> Agent:
+    attributes = [step_attributes(step) for step in steps]
+    name = next(
+        (
+            str(value)
+            for attrs in attributes
+            for value in (attrs.get("gen_ai.agent.name"), attrs.get("service.name"))
+            if value
+        ),
+        "unknown",
+    )
+    version = next(
+        (
+            str(attrs["service.version"])
+            for attrs in attributes
+            if attrs.get("service.version")
+        ),
+        "unknown",
+    )
+    model_name = next((step.model_name for step in steps if step.model_name), None)
+    return Agent(name=name, version=version, model_name=model_name)
+
+
+def _timestamp(start_ns: int) -> str | None:
+    if not start_ns:
+        return None
+    return datetime.fromtimestamp(start_ns / 1_000_000_000, tz=timezone.utc).isoformat()
+
+
+def _step_message(
+    output_messages: tuple[dict[str, Any], ...],
+    operation: str,
+    attrs: dict[str, Any],
+) -> str:
+    chunks = []
+    for message in output_messages:
+        for part in message.get("parts") or []:
+            if not isinstance(part, dict) or part.get("type") != "text":
+                continue
+            content = part.get("content")
+            if content:
+                chunks.append(str(content))
+    if chunks:
+        return "\n".join(chunks)
+    if operation == "execute_tool" and attrs.get(_TOOL_NAME):
+        return f"Execute {attrs[_TOOL_NAME]}"
+    return _step_name({}, attrs, operation)
+
+
+def _atif_tool_calls(
+    input_messages: tuple[dict[str, Any], ...], attrs: dict[str, Any]
+) -> list[ToolCall]:
+    result = []
+    for message in input_messages:
+        for part in message.get("parts") or []:
+            if not isinstance(part, dict) or part.get("type") != "tool_call":
+                continue
+            raw_arguments = part.get("arguments")
+            arguments = raw_arguments if isinstance(raw_arguments, dict) else {}
+            extra = (
+                {"otel.arguments": raw_arguments}
+                if raw_arguments is not None and not isinstance(raw_arguments, dict)
+                else None
+            )
+            result.append(
+                ToolCall(
+                    tool_call_id=str(part.get("id") or ""),
+                    function_name=str(part.get("name") or ""),
+                    arguments=arguments,
+                    extra=extra,
+                )
+            )
+    if not result and attrs.get(_TOOL_NAME):
+        raw_arguments = _json_or_value(attrs.get(_TOOL_ARGUMENTS))
+        result.append(
+            ToolCall(
+                tool_call_id=str(attrs.get(_TOOL_ID) or ""),
+                function_name=str(attrs[_TOOL_NAME]),
+                arguments=raw_arguments if isinstance(raw_arguments, dict) else {},
+                extra=(
+                    {"otel.arguments": raw_arguments}
+                    if raw_arguments is not None and not isinstance(raw_arguments, dict)
+                    else None
+                ),
+            )
+        )
+    return result
+
+
+def _atif_observation(
+    output_messages: tuple[dict[str, Any], ...], attrs: dict[str, Any]
+) -> Observation | None:
+    results = []
+    for message in output_messages:
+        for part in message.get("parts") or []:
+            if not isinstance(part, dict) or part.get("type") != "tool_call_response":
+                continue
+            content = part.get("response")
+            if content is not None and not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False, sort_keys=True)
+            results.append(
+                ObservationResult(
+                    source_call_id=(
+                        str(part["id"]) if part.get("id") is not None else None
+                    ),
+                    content=content,
+                )
+            )
+    if not results and _TOOL_RESULT in attrs:
+        content = _json_or_value(attrs[_TOOL_RESULT])
+        if not isinstance(content, str):
+            content = json.dumps(content, ensure_ascii=False, sort_keys=True)
+        results.append(
+            ObservationResult(
+                source_call_id=(
+                    str(attrs[_TOOL_ID]) if attrs.get(_TOOL_ID) is not None else None
+                ),
+                content=content,
+            )
+        )
+    return Observation(results=results) if results else None
+
+
+def _metrics(attrs: dict[str, Any]) -> Metrics | None:
+    prompt = _token(attrs, "gen_ai.usage.input_tokens", "gen_ai.usage.prompt_tokens")
+    completion = _token(
+        attrs, "gen_ai.usage.output_tokens", "gen_ai.usage.completion_tokens"
+    )
+    cached = _token(
+        attrs,
+        "gen_ai.usage.cached_input_tokens",
+        "gen_ai.usage.cache_read.input_tokens",
+        "gen_ai.usage.cache_read_tokens",
+    )
+    if prompt is None and completion is None and cached is None:
+        return None
+    return Metrics(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        cached_tokens=cached,
+    )
+
+
+def _token(attrs: dict[str, Any], *names: str) -> int | None:
+    for name in names:
+        value = attrs.get(name)
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed >= 0:
+            return parsed
+    return None
 
 
 def _step_name(raw: dict[str, Any], attrs: dict[str, Any], operation: str) -> str:

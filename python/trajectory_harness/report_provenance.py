@@ -8,6 +8,7 @@ from typing import Sequence
 
 from harness_common.report_kit import Section, Table
 from trajectory_harness.metrics import TrajectoryAnalysisRun
+from trajectory_harness.model import require_trajectory_id, trajectory_generation
 
 
 def generation_provenance_section(
@@ -17,7 +18,7 @@ def generation_provenance_section(
     for run in runs:
         grouped = defaultdict(list)
         for trajectory in _run_trajectories(run).values():
-            generation = trajectory.generation
+            generation = trajectory_generation(trajectory)
             key = (
                 json.dumps(generation, ensure_ascii=False, sort_keys=True)
                 if generation
@@ -26,7 +27,7 @@ def generation_provenance_section(
             grouped[key].append(trajectory)
         for generation_key, trajectories in grouped.items():
             del generation_key
-            generation = trajectories[0].generation
+            generation = trajectory_generation(trajectories[0])
             rows.append(
                 [
                     run.run_id,
@@ -69,7 +70,7 @@ def generation_provenance_section(
 
 def _run_trajectories(run: TrajectoryAnalysisRun) -> dict:
     return {
-        item.trajectory.trajectory_id: item.trajectory
+        require_trajectory_id(item.trajectory): item.trajectory
         for item in (*run.detections, *run.verifications, *run.measurements)
     }
 

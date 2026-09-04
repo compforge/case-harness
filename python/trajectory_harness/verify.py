@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from trajectory_harness.model import AnalysisCategory, RuleType, Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import AnalysisCategory, RuleType
 from trajectory_harness.measure import Measurements
 
 VerifierKind = Literal["common", "domain"]

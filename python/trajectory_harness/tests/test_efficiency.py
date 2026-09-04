@@ -10,12 +10,16 @@ from trajectory_harness import (
     ParetoSpec,
     PostCompactRefetchDetector,
     RetryLoopDetector,
-    Step,
     ToolUsageMeasurer,
-    Trajectory,
     TrajectoryAnalysisRun,
     measure,
     render_report_html,
+)
+from trajectory_harness.model import (
+    make_atif_step as Step,
+    make_atif_trajectory as Trajectory,
+    trajectory_from_dict,
+    trajectory_to_dict,
 )
 
 
@@ -86,7 +90,7 @@ def test_generation_provenance_roundtrips_and_is_reported():
         },
     )
 
-    assert Trajectory.from_dict(trajectory.to_dict()) == trajectory
+    assert trajectory_from_dict(trajectory_to_dict(trajectory)) == trajectory
 
     html = render_report_html(
         [
@@ -140,7 +144,7 @@ def test_tool_usage_measures_failure_result_coverage_and_concurrency():
     assert result.measurements["average_result_bytes_per_call"] > 0
     assert result.measurements["peak_result_bytes_per_call"] > 0
     assert result.measurements["max_concurrent_tool_calls"] == 2
-    assert result.step_ids == ("read-1", "read-2")
+    assert result.step_ids == ("1", "2")
 
 
 def test_context_usage_measures_growth_and_compact_reduction():
@@ -203,7 +207,7 @@ def test_retry_loop_keeps_failed_and_recovered_attempts_visible():
 
     assert result.status == "analyzed"
     assert result.findings[0].code == "retry_loop"
-    assert result.findings[0].step_ids == ("failed", "recovered")
+    assert result.findings[0].step_ids == ("1", "2")
     assert "later recovered" in result.findings[0].summary
 
 
@@ -239,7 +243,7 @@ def test_post_compact_refetch_detects_exact_call_across_boundary():
 
     assert result.status == "analyzed"
     assert result.findings[0].code == "post_compact_refetch"
-    assert result.findings[0].step_ids == ("before", "after")
+    assert result.findings[0].step_ids == ("1", "3")
 
 
 def _metric(

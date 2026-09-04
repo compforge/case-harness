@@ -5,7 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from trajectory_harness.model import Trajectory
+from atif import Trajectory
+
+from trajectory_harness.model import (
+    require_trajectory_id,
+    trajectory_from_dict,
+    trajectory_recording_id,
+    trajectory_to_dict,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,10 +72,10 @@ class TrajectoryDataset:
 
         trajectories: dict[str, str] = {}
         for trajectory in self.trajectories:
-            trajectory_id = trajectory.trajectory_id
+            trajectory_id = require_trajectory_id(trajectory)
             if trajectory_id in trajectories:
                 raise ValueError(f"duplicate trajectory_id {trajectory_id!r}")
-            trajectories[trajectory_id] = trajectory.recording_id
+            trajectories[trajectory_id] = trajectory_recording_id(trajectory)
 
         annotation_ids: set[str] = set()
         for annotation in self.annotations:
@@ -93,13 +100,13 @@ class TrajectoryDataset:
 
     @property
     def trajectory_by_id(self) -> dict[str, Trajectory]:
-        return {item.trajectory_id: item for item in self.trajectories}
+        return {require_trajectory_id(item): item for item in self.trajectories}
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "dataset_id": self.dataset_id,
             "version": self.version,
-            "trajectories": [item.to_dict() for item in self.trajectories],
+            "trajectories": [trajectory_to_dict(item) for item in self.trajectories],
             "annotations": [item.to_dict() for item in self.annotations],
             "metadata": dict(self.metadata),
         }
@@ -110,7 +117,7 @@ class TrajectoryDataset:
             dataset_id=str(value["dataset_id"]),
             version=str(value.get("version") or ""),
             trajectories=tuple(
-                Trajectory.from_dict(item) for item in value.get("trajectories", ())
+                trajectory_from_dict(item) for item in value.get("trajectories", ())
             ),
             annotations=tuple(
                 TrajectoryAnnotation.from_dict(item)
